@@ -1,11 +1,71 @@
-<!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8">
-  <title>{{ titulo }}</title>
-</head>
-<body>
-  <h1>{{ titulo }}</h1>
-  <p>O ambiente está funcionando.</p>
-</body>
-</html>
+{% extends "base.html" %}
+{% block titulo %}Início | Monitoramento{% endblock %}
+{% block conteudo %}
+<section class="hero">
+  <div class="hero-copy">
+    <span class="eyebrow"><span class="status-dot"></span> Monitoramento visual</span>
+    <h1>Mais controle sobre sua <span>presença digital.</span></h1>
+    <p class="hero-description">
+      Organize imagens oficiais e compare arquivos suspeitos em um só lugar,
+      com um fluxo simples e direto.
+    </p>
+    <div class="hero-actions">
+      <a class="button button-primary" href="/comparar">Comparar uma imagem <span aria-hidden="true">↗</span></a>
+      <a class="button button-secondary" href="/catalogo">Abrir catálogo</a>
+    </div>
+  </div>
+
+  <aside class="hero-panel" aria-label="Etapas do monitoramento">
+    <div class="panel-topline">
+      <span class="panel-label">SEU ESPAÇO DE TRABALHO</span>
+      <span class="panel-indicator">● ATIVO</span>
+    </div>
+    <div class="scan-visual" aria-hidden="true">
+      <div class="scan-frame">
+        <span class="scan-corner corner-top-left"></span>
+        <span class="scan-corner corner-top-right"></span>
+        <span class="scan-corner corner-bottom-left"></span>
+        <span class="scan-corner corner-bottom-right"></span>
+        <span class="scan-orbit orbit-one"></span>
+        <span class="scan-orbit orbit-two"></span>
+        <span class="scan-core"></span>
+        <span class="scan-line"></span>
+      </div>
+    </div>
+    <div class="panel-caption">
+      <div>
+        <strong>Fluxo de análise</strong>
+        <p>Seu próximo passo começa aqui.</p>
+      </div>
+      <span class="panel-arrow" aria-hidden="true">↗</span>
+    </div>
+  </aside>
+</section>
+
+<section class="workflows" aria-labelledby="workflows-title">
+  <div class="section-heading">
+    <div>
+      <span class="eyebrow">COMECE POR AQUI</span>
+      <h2 id="workflows-title">O que você quer fazer?</h2>
+    </div>
+    <p>Acesse rapidamente as ferramentas do seu espaço.</p>
+  </div>
+
+  <div class="workflow-grid">
+    <a class="workflow-card" href="/catalogo">
+      <span class="card-icon" aria-hidden="true">01</span>
+      <span class="card-link" aria-hidden="true">↗</span>
+      <h3>Catálogo oficial</h3>
+      <p>Cadastre criadoras e mantenha as imagens oficiais organizadas para consulta.</p>
+      <span class="card-action">Gerenciar catálogo <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="workflow-card" href="/comparar">
+      <span class="card-icon" aria-hidden="true">02</span>
+      <span class="card-link" aria-hidden="true">↗</span>
+      <h3>Comparar imagem</h3>
+      <p>Envie uma imagem para comparar com os arquivos cadastrados no catálogo.</p>
+      <span class="card-action">Iniciar comparação <span aria-hidden="true">→</span></span>
+    </a>
+  </div>
+</section>
+{% endblock %}
