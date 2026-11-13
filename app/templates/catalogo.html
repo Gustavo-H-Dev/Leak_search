@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block titulo %}Catálogo{% endblock %}
+{% block conteudo %}
+<h1>Catálogo oficial</h1>
+{% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
+
+<h2>Nova criadora</h2>
+<form method="post" action="/criadoras">
+  <input name="nome" placeholder="Nome da criadora" required>
+  <button type="submit">Adicionar</button>
+</form>
+
+<h2>Nova foto oficial</h2>
+{% if criadoras %}
+<form method="post" action="/conteudos" enctype="multipart/form-data">
+  <select name="criadora_id" required>
+    {% for c in criadoras %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
+  </select>
+  <input type="file" name="arquivo" accept="image/*" required>
+  <button type="submit">Enviar</button>
+</form>
+{% else %}
+<p>Cadastre uma criadora primeiro.</p>
+{% endif %}
+
+<h2>Conteúdos cadastrados ({{ conteudos|length }})</h2>
+<table>
+  <tr><th>Prévia</th><th>Criadora</th><th>Arquivo original</th><th>Cadastro</th></tr>
+  {% for c in conteudos %}
+  <tr>
+    <td><img class="mini" src="/arquivos/{{ c.arquivo }}" alt=""></td>
+    <td>{{ c.criadora }}</td>
+    <td>{{ c.nome_original }}</td>
+    <td>{{ c.criado_em }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

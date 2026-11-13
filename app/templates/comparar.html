@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block titulo %}Comparar{% endblock %}
+{% block conteudo %}
+<h1>Comparar uma imagem suspeita</h1>
+<form method="post" action="/comparar" enctype="multipart/form-data">
+  <input type="file" name="arquivo" accept="image/*" required>
+  <button type="submit">Comparar</button>
+</form>
+
+{% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
+
+{% if resultados is not none %}
+  <h2>Resultado{% if nome_arquivo %} para {{ nome_arquivo }}{% endif %}</h2>
+  {% if resultados %}
+  <p>Distância 0 = idêntica; quanto maior, mais diferente (máximo 64).</p>
+  <table>
+    <tr><th>Oficial mais parecido</th><th>Criadora</th><th>Distância</th><th>Classificação</th></tr>
+    {% for r in resultados %}
+    <tr>
+      <td><img class="mini" src="/arquivos/{{ r.arquivo }}" alt=""></td>
+      <td>{{ r.criadora }}</td>
+      <td>{{ r.distancia }}</td>
+      <td>{{ r.classificacao }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>O catálogo está vazio.</p>
+  {% endif %}
+{% endif %}
+{% endblock %}
