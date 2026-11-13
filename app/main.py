@@ -3,13 +3,16 @@ import uuid
 from pathlib import Path
 from urllib.parse import quote
 
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import GoogleAuthError
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from app import db
-from app.core import imagens
+from app.core import busca_web, imagens
 
 PASTA_OFICIAIS = Path("media/oficiais")
 EXTENSOES_PERMITIDAS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -127,3 +130,88 @@ async def comparar(request: Request, arquivo: UploadFile = File(...)):
         "comparar.html",
         {"resultados": resultados, "erro": "", "nome_arquivo": arquivo.filename},
     )
+
+
+@app.get("/buscar-web", response_class=HTMLResponse)
+def buscar_web_formulario(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "buscar_web.html",
+        {
+            "erro": "",
+            "paginas": [],
+            "imagens": [],
+            "pesquisa_realizada": False,
+            "conteudos": db.listar_conteudos(),
+            "conteudo_selecionado": None,
+        },
+    )
+
+
+@app.post("/buscar-web", response_class=HTMLResponse)
+async def buscar_web_na_internet(
+    request: Request,
+    conteudo_id: int = Form(...),
+    consentimento: str = Form(""),
+):
+    contexto = {
+        "erro": "",
+        "paginas": [],
+        "imagens": [],
+        "pesquisa_realizada": False,
+        "conteudos": db.listar_conteudos(),
+        "conteudo_selecionado": conteudo_id,
+    }
+    if consentimento != "on":
+        contexto["erro"] = (
+            "Confirme o envio da imagem ao Google Cloud Vision para iniciar a busca."
+        )
+        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+
+    conteudo = db.obter_conteudo(conteudo_id)
+    if conteudo is None:
+        contexto["erro"] = "Conteúdo não encontrado no catálogo."
+        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+
+    nome_arquivo = conteudo["arquivo"]
+    if Path(nome_arquivo).name != nome_arquivo:
+        contexto["erro"] = "O caminho da imagem cadastrada é inválido."
+        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+    caminho_arquivo = PASTA_OFICIAIS / nome_arquivo
+
+    try:
+        if caminho_arquivo.stat().st_size > TAMANHO_MAXIMO:
+            raise ValueError("A imagem cadastrada é maior que 20 MB.")
+        dados = caminho_arquivo.read_bytes()
+        imagens.calcular_phash(dados)
+    except OSError:
+        logger.exception("Não foi possível ler a imagem do conteúdo %s", conteudo_id)
+        contexto["erro"] = "Não foi possível ler a imagem selecionada no catálogo."
+        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+    except ValueError as erro:
+        contexto["erro"] = str(erro)
+        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+
+    try:
+        contexto["paginas"], contexto["imagens"] = await run_in_threadpool(
+            busca_web.buscar_na_web, dados
+        )
+    except GoogleAuthError:
+        logger.exception("Credenciais do Google Cloud Vision indisponíveis ou inválidas")
+        contexto["erro"] = (
+            "A busca não está configurada. O servidor precisa de credenciais "
+            "do Google Cloud com acesso ao Vision API."
+        )
+    except GoogleAPIError:
+        logger.exception("Falha na consulta ao Google Cloud Vision")
+        contexto["erro"] = (
+            "O Google Cloud Vision não concluiu a busca. Confira a API, as "
+            "permissões e o faturamento do projeto."
+        )
+    except busca_web.ErroBuscaWeb:
+        logger.exception("O Google Cloud Vision retornou um erro na busca")
+        contexto["erro"] = "O Google Cloud Vision retornou um erro ao buscar a imagem."
+    else:
+        contexto["pesquisa_realizada"] = True
+
+    return templates.TemplateResponse(request, "buscar_web.html", contexto)

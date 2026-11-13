@@ -87,6 +87,14 @@ def listar_conteudos():
         ).fetchall()
 
 
+def obter_conteudo(conteudo_id):
+    with conexao() as conn:
+        return conn.execute(
+            "SELECT id, arquivo, nome_original FROM conteudos WHERE id = ?",
+            (conteudo_id,),
+        ).fetchone()
+
+
 def excluir_conteudo(conteudo_id):
     with conexao() as conn:
         conteudo = conn.execute(
