@@ -87,6 +87,19 @@ def listar_conteudos():
         ).fetchall()
 
 
+def excluir_conteudo(conteudo_id):
+    with conexao() as conn:
+        conteudo = conn.execute(
+            "SELECT arquivo FROM conteudos WHERE id = ?", (conteudo_id,)
+        ).fetchone()
+        if conteudo is None:
+            return None
+
+        conn.execute("DELETE FROM hashes WHERE conteudo_id = ?", (conteudo_id,))
+        conn.execute("DELETE FROM conteudos WHERE id = ?", (conteudo_id,))
+        return conteudo["arquivo"]
+
+
 def listar_hashes():
     with conexao() as conn:
         return conn.execute(

@@ -274,7 +274,9 @@
     .card-action { margin-top: auto; color: var(--pink-light); font-size: .82rem; font-weight: 650; }
     .card-action span { margin-left: .3rem; }
 
-    .erro { padding: .75rem 1rem; border: 1px solid #6c364a; border-radius: 9px; color: #ffb4c8; background: #321b25; }
+    .erro, .sucesso { padding: .75rem 1rem; border: 1px solid; border-radius: 9px; }
+    .erro { border-color: #6c364a; color: #ffb4c8; background: #321b25; }
+    .sucesso { border-color: #3d6652; color: #a9e3be; background: #192a21; }
     table { width: 100%; border-collapse: collapse; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
     td, th { padding: .75rem; border-bottom: 1px solid var(--border); text-align: left; }
     th { color: var(--pink-light); font-size: .78rem; font-weight: 650; }
@@ -282,6 +284,8 @@
     tr:last-child td { border-bottom: 0; }
     img.mini { height: 60px; border-radius: 6px; }
     form { margin: 1rem 0; }
+    .table-actions { white-space: nowrap; }
+    .table-actions form { margin: 0; }
     input, select, button {
       min-height: 40px;
       margin: .2rem .35rem .2rem 0;
@@ -305,6 +309,8 @@
     }
     button { border-color: transparent; color: #21131a; background: var(--pink); font-weight: 650; cursor: pointer; }
     button:hover { background: var(--pink-light); }
+    button.button-danger { border-color: #754052; color: #ffd9e8; background: #422331; }
+    button.button-danger:hover { border-color: #a74b70; background: #5a2c40; }
     :focus-visible { outline: 2px solid var(--pink-light); outline-offset: 3px; }
 
     @media (max-width: 700px) {

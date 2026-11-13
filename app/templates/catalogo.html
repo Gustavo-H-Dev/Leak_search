@@ -3,6 +3,7 @@
 {% block conteudo %}
 <h1>Catálogo oficial</h1>
 {% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
+{% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
 <h2>Nova criadora</h2>
 <form method="post" action="/criadoras">
@@ -24,15 +25,24 @@
 {% endif %}
 
 <h2>Conteúdos cadastrados ({{ conteudos|length }})</h2>
+{% if conteudos %}
 <table>
-  <tr><th>Prévia</th><th>Criadora</th><th>Arquivo original</th><th>Cadastro</th></tr>
+  <tr><th>Prévia</th><th>Criadora</th><th>Arquivo original</th><th>Cadastro</th><th>Ação</th></tr>
   {% for c in conteudos %}
   <tr>
     <td><img class="mini" src="/arquivos/{{ c.arquivo }}" alt=""></td>
     <td>{{ c.criadora }}</td>
     <td>{{ c.nome_original }}</td>
     <td>{{ c.criado_em }}</td>
+    <td class="table-actions">
+      <form method="post" action="/conteudos/{{ c.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este conteúdo? Esta ação não pode ser desfeita.');">
+        <button class="button-danger" type="submit">Excluir</button>
+      </form>
+    </td>
   </tr>
   {% endfor %}
 </table>
+{% else %}
+<p>Nenhum conteúdo cadastrado.</p>
+{% endif %}
 {% endblock %}

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -13,6 +14,7 @@ from app.core import imagens
 PASTA_OFICIAIS = Path("media/oficiais")
 EXTENSOES_PERMITIDAS = {".jpg", ".jpeg", ".png", ".webp"}
 TAMANHO_MAXIMO = 20 * 1024 * 1024  # 20 MB
+logger = logging.getLogger(__name__)
 
 PASTA_OFICIAIS.mkdir(parents=True, exist_ok=True)
 db.iniciar_banco()
@@ -46,11 +48,12 @@ def saude():
 
 
 @app.get("/catalogo", response_class=HTMLResponse)
-def catalogo(request: Request, erro: str = ""):
+def catalogo(request: Request, erro: str = "", mensagem: str = ""):
     contexto = {
         "criadoras": db.listar_criadoras(),
         "conteudos": db.listar_conteudos(),
         "erro": erro,
+        "mensagem": mensagem,
     }
     return templates.TemplateResponse(request, "catalogo.html", contexto)
 
@@ -78,6 +81,28 @@ async def novo_conteudo(criadora_id: int = Form(...), arquivo: UploadFile = File
     (PASTA_OFICIAIS / nome_arquivo).write_bytes(dados)
     db.adicionar_conteudo(criadora_id, "foto", nome_arquivo, arquivo.filename, [phash])
     return RedirectResponse("/catalogo", status_code=303)
+
+
+@app.post("/conteudos/{conteudo_id}/excluir")
+def excluir_conteudo(conteudo_id: int):
+    nome_arquivo = db.excluir_conteudo(conteudo_id)
+    if nome_arquivo is None:
+        return _voltar_com_erro("Conteúdo não encontrado.")
+
+    try:
+        (PASTA_OFICIAIS / nome_arquivo).unlink(missing_ok=True)
+    except OSError:
+        logger.exception(
+            "Conteúdo %s removido do banco, mas o arquivo %s não pôde ser excluído",
+            conteudo_id,
+            nome_arquivo,
+        )
+        return _voltar_com_erro(
+            "Conteúdo removido do banco, mas o arquivo não pôde ser excluído."
+        )
+
+    mensagem = quote("Conteúdo excluído com sucesso.")
+    return RedirectResponse("/catalogo?mensagem=" + mensagem, status_code=303)
 
 
 @app.get("/comparar", response_class=HTMLResponse)
