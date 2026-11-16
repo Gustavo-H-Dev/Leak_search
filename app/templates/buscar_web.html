@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% block titulo %}Buscar na web{% endblock %}
+{% block titulo %}Busca Google{% endblock %}
 {% block conteudo %}
 <section class="search-page">
-  <span class="eyebrow">BUSCA EXTERNA</span>
-  <h1>Buscar imagens na web</h1>
+  <span class="eyebrow">GOOGLE CLOUD VISION</span>
+  <h1>Busca Google na web</h1>
   <p class="search-intro">
     Compare uma imagem do seu catálogo com páginas públicas indexadas pelo
-    Google Cloud Vision. Os resultados podem indicar onde há imagens iguais
+    Google Cloud Vision. Esta página usa somente o Web Detection do Google Cloud;
+    os resultados podem indicar onde há imagens iguais
     ou semelhantes, mas não garantem que todas as publicações serão encontradas
     nem confirmam quem publicou.
   </p>
@@ -14,7 +15,7 @@
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
 
   {% if conteudos %}
-  <form class="search-form" method="post" action="/buscar-web">
+  <form class="search-form" method="post" action="/buscar-google">
     <label class="field-label" for="conteudo_id">Imagem do catálogo</label>
     <select id="conteudo_id" name="conteudo_id" required>
       <option value="">Selecione uma imagem</option>
@@ -27,7 +28,7 @@
 
     <p class="privacy-note">
       A imagem selecionada não será salva novamente pelo aplicativo, mas será
-      enviada ao Google Cloud Vision. A busca consome a cota do projeto e pode
+      enviada ao Google Cloud Vision. A busca consome a cota do Google Cloud e pode
       gerar cobrança. Consulte as
       <a href="https://cloud.google.com/vision/docs/data-usage" target="_blank" rel="noopener noreferrer">informações de uso de dados</a>
       e os <a href="https://cloud.google.com/vision/pricing" target="_blank" rel="noopener noreferrer">preços da API</a>.

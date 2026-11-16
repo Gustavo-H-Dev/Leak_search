@@ -299,6 +299,27 @@
     .search-result-list li { display: grid; gap: .3rem; padding: .9rem 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
     .search-result-list a { width: fit-content; font-weight: 650; overflow-wrap: anywhere; }
     .search-result-list span { color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
+    .api-status { padding: .75rem 1rem; border: 1px solid var(--border); border-radius: 9px; font-size: .85rem; }
+    .api-status-ready { border-color: #3d6652; color: #a9e3be; background: #192a21; }
+    .api-status-missing { border-color: #765d34; color: #f0d7a4; background: #2e281b; }
+    .api-status code { color: var(--pink-light); }
+    .serpapi-sections { display: grid; gap: 1rem; margin-top: 2rem; }
+    .serpapi-card { padding: 1.25rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .serpapi-card .eyebrow { font-size: .65rem; }
+    .serpapi-card h2 { margin: .55rem 0; }
+    .serpapi-card h2 a { color: var(--text); text-decoration: none; }
+    .serpapi-card h2 a:hover { color: var(--pink-light); }
+    .serpapi-card > p { font-size: .86rem; }
+    .serpapi-card .search-form { margin-bottom: 0; padding: 1rem; border-color: #39333e; background: #151319; }
+    .instagram-profile { margin: 1rem 0 1.5rem; padding: 1.1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+    .instagram-profile h3 { margin-bottom: .35rem; }
+    .instagram-profile h3 a { text-decoration: none; }
+    .instagram-profile h3 a:hover { color: var(--pink-light); }
+    .instagram-profile > p { margin-bottom: .75rem; }
+    .profile-badge { margin-left: .5rem; padding: .2rem .45rem; border-radius: 999px; color: var(--pink-light); background: rgb(240 120 173 / 12%); font-size: .68rem; letter-spacing: 0; vertical-align: middle; }
+    .profile-stats { display: flex; flex-wrap: wrap; gap: .6rem 1.2rem; color: var(--muted); font-size: .84rem; }
+    .profile-stats strong { color: var(--text); }
+    .profile-bio { margin: .8rem 0 0; white-space: pre-line; }
 
     .erro, .sucesso { padding: .75rem 1rem; border: 1px solid; border-radius: 9px; }
     .erro { border-color: #6c364a; color: #ffb4c8; background: #321b25; }
@@ -381,7 +402,9 @@
         <a href="/">Início</a>
         <a href="/catalogo">Catálogo</a>
         <a href="/comparar">Comparar</a>
-        <a class="nav-highlight" href="/buscar-web" aria-label="Buscar imagens na web">Buscar</a>
+        <a href="/buscar-google">Google</a>
+        <a class="nav-highlight" href="/buscar-serpapi">SerpApi</a>
+        <a href="/buscar-instagram">Instagram</a>
       </nav>
     </div>
   </header>

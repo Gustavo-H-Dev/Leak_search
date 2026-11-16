@@ -10,7 +10,7 @@ from PIL import Image
 from starlette.requests import Request
 
 from app.core import busca_web
-from app.main import app, buscar_web_na_internet
+from app.main import app, buscar_google_na_web
 
 
 class BuscarNaWebTest(unittest.TestCase):
@@ -94,7 +94,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
             patch("app.main.db.listar_conteudos", return_value=[]),
             patch("app.main.busca_web.buscar_na_web") as buscar,
         ):
-            resposta = await buscar_web_na_internet(self.criar_request(), 1, "")
+            resposta = await buscar_google_na_web(self.criar_request(), 1, "")
 
         self.assertIn("Confirme o envio", resposta.body.decode())
         buscar.assert_not_called()
@@ -124,7 +124,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
                     ),
                 ) as buscar,
             ):
-                resposta = await buscar_web_na_internet(
+                resposta = await buscar_google_na_web(
                     self.criar_request(), 1, "on"
                 )
 

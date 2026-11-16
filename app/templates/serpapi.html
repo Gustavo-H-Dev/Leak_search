@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block titulo %}Testar APIs SerpApi{% endblock %}
+{% block conteudo %}
+<section class="search-page">
+  <span class="eyebrow">GOOGLE VIA SERPAPI</span>
+  <h1>Testar as APIs da SerpApi</h1>
+  <p class="search-intro">
+    Cada formulário chama somente a API selecionada. Assim você pode testar um
+    mecanismo por vez e acompanhar o consumo no painel da SerpApi. Esta página
+    não usa as credenciais do Google Cloud Vision.
+  </p>
+
+  {% if api_key_configurada %}
+  <p class="api-status api-status-ready">Chave SerpApi configurada no servidor.</p>
+  {% else %}
+  <p class="api-status api-status-missing">
+    Chave não configurada. Defina <code>SERPAPI_API_KEY</code> no ambiente do
+    Docker para habilitar as consultas. A chave nunca deve ser colocada neste
+    formulário ou no código do navegador.
+  </p>
+  {% endif %}
+
+  <p class="privacy-note">
+    Cada busca envia a consulta ou a imagem à SerpApi. A Google Lens API exige
+    o envio da imagem para a SerpApi; a documentação limita esse upload a
+    500 KB. A Reverse Image API precisa de uma URL de imagem pública. Confira
+    os <a href="https://serpapi.com/pricing" target="_blank" rel="noopener noreferrer">limites e preços</a>
+    e as <a href="https://serpapi.com/terms" target="_blank" rel="noopener noreferrer">condições da SerpApi</a>
+    antes de testar com imagens sensíveis.
+  </p>
+
+  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+
+  <div class="serpapi-sections">
+    <section class="serpapi-card" id="google-images">
+      <span class="eyebrow">01 · BUSCA POR TEXTO</span>
+      <h2><a href="https://serpapi.com/google-images-api" target="_blank" rel="noopener noreferrer">Google Images API</a></h2>
+      <p>Pesquisa imagens usando termos, como no Google Images. Não é busca reversa pela foto.</p>
+      <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="api" value="google_images">
+        <label class="field-label" for="images-query">Termos da busca</label>
+        <input id="images-query" name="q" value="{{ query if api_ativa == 'google_images' else '' }}" placeholder="Ex.: nome da criadora" required>
+        <label class="consent-control">
+          <input type="checkbox" name="consentimento" value="on" required>
+          <span>Autorizo o envio desta consulta à SerpApi.</span>
+        </label>
+        <button type="submit">Testar Google Images</button>
+      </form>
+    </section>
+
+    <section class="serpapi-card" id="google-images-light">
+      <span class="eyebrow">02 · BUSCA LEVE POR TEXTO</span>
+      <h2><a href="https://serpapi.com/google-images-light-api" target="_blank" rel="noopener noreferrer">Google Images Light API</a></h2>
+      <p>Busca imagens por texto em uma resposta simplificada. Também não é busca reversa pela foto.</p>
+      <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="api" value="google_images_light">
+        <label class="field-label" for="images-light-query">Termos da busca</label>
+        <input id="images-light-query" name="q" value="{{ query if api_ativa == 'google_images_light' else '' }}" placeholder="Ex.: nome da criadora" required>
+        <label class="consent-control">
+          <input type="checkbox" name="consentimento" value="on" required>
+          <span>Autorizo o envio desta consulta à SerpApi.</span>
+        </label>
+        <button type="submit">Testar Images Light</button>
+      </form>
+    </section>
+
+    <section class="serpapi-card" id="google-lens">
+      <span class="eyebrow">03 · BUSCA VISUAL</span>
+      <h2><a href="https://serpapi.com/google-lens-api" target="_blank" rel="noopener noreferrer">Google Lens API</a></h2>
+      <p>Compara visualmente uma imagem do Catálogo com resultados encontrados pelo Lens.</p>
+      {% if conteudos %}
+      <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="api" value="google_lens">
+        <label class="field-label" for="lens-content">Imagem do Catálogo</label>
+        <select id="lens-content" name="conteudo_id" required>
+          <option value="">Selecione uma imagem</option>
+          {% for conteudo in conteudos %}
+          <option value="{{ conteudo.id }}" {% if api_ativa == 'google_lens' and conteudo_selecionado == conteudo.id %}selected{% endif %}>
+            {{ conteudo.criadora }} — {{ conteudo.nome_original }}
+          </option>
+          {% endfor %}
+        </select>
+        <label class="consent-control">
+          <input type="checkbox" name="consentimento" value="on" required>
+          <span>Autorizo o envio desta imagem à SerpApi para esta busca.</span>
+        </label>
+        <button type="submit">Testar Google Lens</button>
+      </form>
+      {% else %}
+      <p>Cadastre uma imagem no <a href="/catalogo">Catálogo</a> para testar esta API.</p>
+      {% endif %}
+    </section>
+
+    <section class="serpapi-card" id="google-reverse-image">
+      <span class="eyebrow">04 · BUSCA REVERSA</span>
+      <h2><a href="https://serpapi.com/google-reverse-image" target="_blank" rel="noopener noreferrer">Google Reverse Image API</a></h2>
+      <p>Pesquisa uma imagem a partir de uma URL que a SerpApi consiga acessar publicamente.</p>
+      <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="api" value="google_reverse_image">
+        <label class="field-label" for="reverse-image-url">URL pública da imagem</label>
+        <input id="reverse-image-url" type="url" name="image_url" value="{{ url_imagem if api_ativa == 'google_reverse_image' else '' }}" placeholder="https://exemplo.com/imagem.jpg" required>
+        <label class="consent-control">
+          <input type="checkbox" name="consentimento" value="on" required>
+          <span>Autorizo a SerpApi a consultar esta URL para realizar a busca reversa.</span>
+        </label>
+        <button type="submit">Testar Reverse Image</button>
+      </form>
+    </section>
+
+    <section class="serpapi-card" id="google-images-related-content">
+      <span class="eyebrow">05 · RESULTADOS RELACIONADOS</span>
+      <h2><a href="https://serpapi.com/google-images-related-content-api" target="_blank" rel="noopener noreferrer">Google Images Related Content API</a></h2>
+      <p>
+        Busca sugestões relacionadas a um resultado da Google Images. Primeiro
+        execute uma busca na seção Google Images; depois escolha abaixo um dos
+        resultados que tenha conteúdo relacionado.
+      </p>
+      {% if related_options %}
+      <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="api" value="google_images_related_content">
+        <input type="hidden" name="q" value="{{ query }}">
+        <label class="field-label" for="related-content-id">Resultado da Google Images</label>
+        <select id="related-content-id" name="related_content_id" required>
+          {% for option in related_options %}
+          <option value="{{ option.id }}">{{ option.title }}</option>
+          {% endfor %}
+        </select>
+        <label class="consent-control">
+          <input type="checkbox" name="consentimento" value="on" required>
+          <span>Autorizo o envio desta consulta à SerpApi.</span>
+        </label>
+        <button type="submit">Testar Related Content</button>
+      </form>
+      {% else %}
+      <p>Execute Google Images para carregar opções de conteúdo relacionado.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if pesquisa_realizada %}
+  <section class="search-results" aria-live="polite">
+    <h2>Resultados: {{ nomes_apis[api_ativa] }}</h2>
+    {% if resultados %}
+    <ul class="search-result-list">
+      {% for resultado in resultados %}
+      <li>
+        <a href="{{ resultado.link }}" target="_blank" rel="noopener noreferrer">{{ resultado.titulo }}</a>
+        {% if resultado.origem %}<span>{{ resultado.origem }}</span>{% endif %}
+        <span>{{ resultado.link }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>A API respondeu, mas não retornou resultados reconhecidos para exibição.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</section>
+{% endblock %}
