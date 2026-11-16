@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}Redefinir senha{% endblock %}
+{% block conteudo %}
+<section class="auth-card">
+  <span class="eyebrow">NOVA SENHA</span>
+  <h1>Redefinir senha</h1>
+  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+  {% if token %}
+  <form method="post" action="/redefinir-senha">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label class="field-label" for="reset-password">Nova senha (mínimo 12 caracteres)</label>
+    <input id="reset-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <label class="field-label" for="reset-confirm">Confirme a nova senha</label>
+    <input id="reset-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <button type="submit">Salvar nova senha</button>
+  </form>
+  {% else %}
+  <p>O link está ausente ou expirou. Solicite uma nova redefinição.</p>
+  <p><a href="/esqueci-senha">Solicitar novo link</a></p>
+  {% endif %}
+</section>
+{% endblock %}

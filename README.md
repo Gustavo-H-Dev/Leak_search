@@ -22,9 +22,43 @@ Para habilitar a busca:
 Os resultados são páginas e imagens públicas que o serviço conseguiu indexar;
 não garantem cobertura total nem identificam com certeza quem publicou.
 
-**Antes de disponibilizar o site publicamente**, implemente autenticação e limite
-de uso para impedir que visitantes não autorizados consumam a cota e gerem
-cobranças no projeto Google Cloud.
+As páginas internas exigem login. Mesmo assim, configure limites de uso antes de
+disponibilizar o site publicamente para controlar custos de APIs externas.
+
+## Contas, login e e-mail
+
+Copie `.env.example` para `.env` na raiz do projeto e preencha as configurações
+localmente. Não compartilhe nem versione o arquivo `.env`.
+
+```bash
+cp .env.example .env
+```
+
+- `ADMIN_USERNAME` define o login inicial do administrador (padrão
+  `Gustavo.souza`).
+- Defina `ADMIN_EMAIL` e `ADMIN_INITIAL_PASSWORD` para criar a conta de admin no
+  primeiro início do aplicativo. Use a senha desejada somente no `.env`; senhas
+  são armazenadas no banco como hashes Argon2. A conta existente não é
+  sobrescrita em inicializações posteriores.
+- Configure `SMTP_USER` e `SMTP_PASSWORD` com uma senha de app do Gmail, além
+  de `SMTP_FROM` se o remetente precisar ser diferente. Nunca coloque a senha
+  SMTP no código ou no chat.
+- `APP_BASE_URL` determina o domínio usado nos links de confirmação e
+  recuperação. Para uso somente no computador local, mantenha
+  `http://localhost:8000`. Em rede local ou produção, configure o endereço que
+  os usuários realmente conseguem acessar.
+- Em produção, use HTTPS e defina `COOKIE_SECURE=true`.
+
+O cadastro exige confirmação de e-mail. A tela de login também permite
+recuperar a senha por e-mail. A página inicial permanece pública; catálogo,
+comparações, buscas, arquivos e demais rotas exigem sessão autenticada. Cada
+formulário de alteração envia proteção CSRF.
+
+Para iniciar ou atualizar o serviço:
+
+```bash
+docker compose up --build -d
+```
 
 ## Testes com SerpApi
 
@@ -59,9 +93,9 @@ O upload de imagem para o Google Lens usa o endpoint de imagem da SerpApi antes
 da consulta Lens; o identificador enviado expira conforme a
 [documentação do upload](https://serpapi.com/image-api).
 
-O site ainda não possui login nem limite mensal local. Não configure a chave
-enquanto o site estiver acessível publicamente sem proteção: visitantes podem
-usar a cota da sua conta.
+Não há limite mensal de consultas por usuário. A autenticação impede acesso
+anônimo, mas qualquer usuário cadastrado pode consumir as APIs; proteja também
+a chave e monitore os custos.
 
 ## Testes com APIs do Instagram
 

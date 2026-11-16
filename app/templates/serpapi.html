@@ -37,6 +37,7 @@
       <h2><a href="https://serpapi.com/google-images-api" target="_blank" rel="noopener noreferrer">Google Images API</a></h2>
       <p>Pesquisa imagens usando termos, como no Google Images. Não é busca reversa pela foto.</p>
       <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="google_images">
         <label class="field-label" for="images-query">Termos da busca</label>
         <input id="images-query" name="q" value="{{ query if api_ativa == 'google_images' else '' }}" placeholder="Ex.: nome da criadora" required>
@@ -53,6 +54,7 @@
       <h2><a href="https://serpapi.com/google-images-light-api" target="_blank" rel="noopener noreferrer">Google Images Light API</a></h2>
       <p>Busca imagens por texto em uma resposta simplificada. Também não é busca reversa pela foto.</p>
       <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="google_images_light">
         <label class="field-label" for="images-light-query">Termos da busca</label>
         <input id="images-light-query" name="q" value="{{ query if api_ativa == 'google_images_light' else '' }}" placeholder="Ex.: nome da criadora" required>
@@ -70,6 +72,7 @@
       <p>Compara visualmente uma imagem do Catálogo com resultados encontrados pelo Lens.</p>
       {% if conteudos %}
       <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="google_lens">
         <label class="field-label" for="lens-content">Imagem do Catálogo</label>
         <select id="lens-content" name="conteudo_id" required>
@@ -96,6 +99,7 @@
       <h2><a href="https://serpapi.com/google-reverse-image" target="_blank" rel="noopener noreferrer">Google Reverse Image API</a></h2>
       <p>Pesquisa uma imagem a partir de uma URL que a SerpApi consiga acessar publicamente.</p>
       <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="google_reverse_image">
         <label class="field-label" for="reverse-image-url">URL pública da imagem</label>
         <input id="reverse-image-url" type="url" name="image_url" value="{{ url_imagem if api_ativa == 'google_reverse_image' else '' }}" placeholder="https://exemplo.com/imagem.jpg" required>
@@ -117,6 +121,7 @@
       </p>
       {% if related_options %}
       <form class="search-form" method="post" action="/buscar-serpapi">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="google_images_related_content">
         <input type="hidden" name="q" value="{{ query }}">
         <label class="field-label" for="related-content-id">Resultado da Google Images</label>

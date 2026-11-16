@@ -3,6 +3,7 @@
 {% block conteudo %}
 <h1>Comparar uma imagem suspeita</h1>
 <form method="post" action="/comparar" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="file" name="arquivo" accept="image/*" required>
   <button type="submit">Comparar</button>
 </form>

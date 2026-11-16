@@ -1,19 +1,25 @@
 import logging
 import os
+import re
+import secrets
+import sqlite3
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from app import db
-from app.core import busca_web, imagens, serpapi
+from app.core import autenticacao, busca_web, imagens, serpapi
+from app.core.middleware_auth import AutenticacaoMiddleware
 
 PASTA_OFICIAIS = Path("media/oficiais")
 EXTENSOES_PERMITIDAS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -24,8 +30,456 @@ PASTA_OFICIAIS.mkdir(parents=True, exist_ok=True)
 db.iniciar_banco()
 
 app = FastAPI(title="Monitoramento de Vazamentos")
-templates = Jinja2Templates(directory="app/templates")
+session_secret = db.obter_segredo_sessao()
+app.add_middleware(AutenticacaoMiddleware)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=session_secret,
+    session_cookie="leak_search_session",
+    max_age=14 * 24 * 60 * 60,
+    same_site="lax",
+    https_only=os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes"},
+)
+
+
+def _contexto_template(request: Request):
+    session = request.scope.get("session", {})
+    return {
+        "csrf_token": session.get("csrf_token", ""),
+        "current_user": getattr(request.state, "user", None),
+    }
+
+
+templates = Jinja2Templates(
+    directory="app/templates",
+    context_processors=[_contexto_template],
+)
 app.mount("/arquivos", StaticFiles(directory=PASTA_OFICIAIS), name="arquivos")
+
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Gustavo.souza").strip()
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip()
+ADMIN_INITIAL_PASSWORD = os.getenv("ADMIN_INITIAL_PASSWORD", "")
+if ADMIN_INITIAL_PASSWORD:
+    email_admin = autenticacao.validar_email(ADMIN_EMAIL)
+    db.criar_admin_se_ausente(
+        ADMIN_USERNAME,
+        email_admin,
+        autenticacao.hash_senha(ADMIN_INITIAL_PASSWORD),
+    )
+elif not db.obter_usuario_por_login(ADMIN_USERNAME):
+    logger.warning(
+        "Conta admin ainda não criada. Configure ADMIN_EMAIL e ADMIN_INITIAL_PASSWORD."
+    )
+
+
+async def validar_csrf(request: Request):
+    formulario = await request.form()
+    enviado = formulario.get("csrf_token")
+    esperado = request.session.get("csrf_token", "")
+    if not isinstance(enviado, str) or not secrets.compare_digest(enviado, esperado):
+        raise HTTPException(status_code=403, detail="Token CSRF inválido.")
+
+
+def _csrf():
+    return [Depends(validar_csrf)]
+
+
+def _proximo_caminho(valor: str) -> str:
+    if valor.startswith("/") and not valor.startswith("//") and not re.search(r"[\r\n]", valor):
+        return valor
+    return "/"
+
+
+def _nova_sessao(request: Request, user_id: int):
+    token = secrets.token_urlsafe(32)
+    expira = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+    db.criar_sessao(autenticacao.hash_token(token), user_id, expira)
+    request.session.clear()
+    request.session["auth_session"] = token
+    request.session["csrf_token"] = secrets.token_urlsafe(32)
+
+
+def _url_aplicacao(path: str, **parametros: str) -> str:
+    base_url = os.getenv("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+    return f"{base_url}{path}?{urlencode(parametros)}"
+
+
+def _criar_token_email(user_id: int, finalidade: str, validade: timedelta):
+    token, token_hash, expira = autenticacao.gerar_token(validade)
+    db.salvar_token_auth(token_hash, user_id, finalidade, expira)
+    return token
+
+
+async def _enviar_email_token(
+    user_id: int,
+    email: str,
+    username: str,
+    finalidade: str,
+):
+    if finalidade == "confirmar_email":
+        token = _criar_token_email(
+            user_id, finalidade, timedelta(hours=24)
+        )
+        link = _url_aplicacao("/confirmar-email", token=token)
+        assunto = "Confirme seu e-mail"
+        corpo = (
+            f"Olá, {username}.\n\n"
+            "Para confirmar seu endereço de e-mail, abra este link:\n"
+            f"{link}\n\nO link expira em 24 horas."
+        )
+    else:
+        token = _criar_token_email(user_id, finalidade, timedelta(hours=1))
+        link = _url_aplicacao("/redefinir-senha", token=token)
+        assunto = "Redefinição de senha"
+        corpo = (
+            f"Olá, {username}.\n\n"
+            "Para definir uma nova senha, abra este link:\n"
+            f"{link}\n\nO link expira em 1 hora. "
+            "Se você não solicitou isso, ignore esta mensagem."
+        )
+    await run_in_threadpool(autenticacao.enviar_email, email, assunto, corpo)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_formulario(
+    request: Request,
+    next: str = "/",
+    erro: str = "",
+    mensagem: str = "",
+):
+    if request.state.user:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "erro": erro,
+            "next": _proximo_caminho(next),
+            "mensagem": (
+                "Senha redefinida. Entre com sua nova senha."
+                if mensagem == "senha_alterada"
+                else ""
+            ),
+        },
+    )
+
+
+@app.post("/login", response_class=HTMLResponse, dependencies=_csrf())
+async def login(
+    request: Request,
+    username: str = Form(...),
+    senha: str = Form(...),
+    next: str = Form("/"),
+):
+    usuario = db.obter_usuario_por_login(username.strip())
+    if not usuario or not autenticacao.verificar_senha(usuario["password_hash"], senha):
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "erro": "Usuário ou senha incorretos.",
+                "mensagem": "",
+                "next": _proximo_caminho(next),
+            },
+            status_code=400,
+        )
+    if not usuario["email_verified"]:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "erro": "Confirme seu e-mail antes de entrar.",
+                "mensagem": "",
+                "next": _proximo_caminho(next),
+            },
+            status_code=403,
+        )
+    if autenticacao.password_hasher.check_needs_rehash(usuario["password_hash"]):
+        db.atualizar_senha(
+            usuario["id"], autenticacao.hash_senha(senha)
+        )
+    _nova_sessao(request, usuario["id"])
+    return RedirectResponse(_proximo_caminho(next), status_code=303)
+
+
+@app.get("/cadastro", response_class=HTMLResponse)
+def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "cadastro.html",
+        {"erro": erro, "mensagem": mensagem},
+    )
+
+
+@app.post("/cadastro", response_class=HTMLResponse, dependencies=_csrf())
+async def cadastrar(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(...),
+    senha: str = Form(...),
+    confirmar_senha: str = Form(...),
+):
+    try:
+        username = autenticacao.validar_usuario(username)
+        email = autenticacao.validar_email(email)
+        autenticacao.validar_senha(senha)
+        if senha != confirmar_senha:
+            raise ValueError("As senhas não coincidem.")
+        if username.casefold() == ADMIN_USERNAME.casefold():
+            raise ValueError("Esse nome de usuário está reservado.")
+        if not autenticacao.email_configurado():
+            raise ValueError("O envio de e-mail ainda não está configurado.")
+        user_id = db.criar_usuario(
+            username,
+            email,
+            autenticacao.hash_senha(senha),
+        )
+    except ValueError as erro:
+        return templates.TemplateResponse(
+            request,
+            "cadastro.html",
+            {"erro": str(erro), "mensagem": ""},
+            status_code=400,
+        )
+    except sqlite3.IntegrityError:
+        return templates.TemplateResponse(
+            request,
+            "cadastro.html",
+            {
+                "erro": "Esse nome de usuário ou e-mail já está cadastrado.",
+                "mensagem": "",
+            },
+            status_code=400,
+        )
+
+    try:
+        await _enviar_email_token(
+            user_id,
+            email,
+            username,
+            "confirmar_email",
+        )
+    except autenticacao.ErroEmail:
+        logger.exception("Falha ao enviar confirmação de e-mail para novo cadastro")
+        return templates.TemplateResponse(
+            request,
+            "cadastro.html",
+            {
+                "erro": (
+                    "A conta foi criada, mas não foi possível enviar o e-mail. "
+                    "Use a opção de reenviar confirmação."
+                ),
+                "mensagem": "",
+            },
+            status_code=503,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "cadastro.html",
+        {
+            "erro": "",
+            "mensagem": "Cadastro recebido. Enviamos um link para confirmar seu e-mail.",
+        },
+    )
+
+
+@app.get("/confirmar-email", response_class=HTMLResponse)
+def confirmar_email_formulario(request: Request, token: str = "", erro: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "confirmar_email.html",
+        {"token": token, "erro": erro, "confirmado": False},
+    )
+
+
+@app.post(
+    "/confirmar-email",
+    response_class=HTMLResponse,
+    dependencies=_csrf(),
+)
+def confirmar_email(request: Request, token: str = Form(...)):
+    user_id = db.consumir_token_auth(
+        autenticacao.hash_token(token),
+        "confirmar_email",
+    )
+    if user_id is None:
+        return templates.TemplateResponse(
+            request,
+            "confirmar_email.html",
+            {
+                "token": "",
+                "erro": "O link é inválido ou expirou. Solicite outro e-mail.",
+                "confirmado": False,
+            },
+            status_code=400,
+        )
+    db.confirmar_email(user_id)
+    return templates.TemplateResponse(
+        request,
+        "confirmar_email.html",
+        {"token": "", "erro": "", "confirmado": True},
+    )
+
+
+@app.post("/reenviar-confirmacao", response_class=HTMLResponse, dependencies=_csrf())
+async def reenviar_confirmacao(request: Request, email: str = Form(...)):
+    mensagem = "Se houver uma conta pendente para esse endereço, enviaremos um novo link."
+    usuario = db.obter_usuario_por_email(email.strip())
+    if usuario and not usuario["email_verified"] and autenticacao.email_configurado():
+        try:
+            await _enviar_email_token(
+                usuario["id"],
+                usuario["email"],
+                usuario["username"],
+                "confirmar_email",
+            )
+        except autenticacao.ErroEmail:
+            logger.exception("Falha ao reenviar confirmação de e-mail")
+    return templates.TemplateResponse(
+        request,
+        "cadastro.html",
+        {"erro": "", "mensagem": mensagem},
+    )
+
+
+@app.get("/esqueci-senha", response_class=HTMLResponse)
+def esqueci_senha_formulario(request: Request, mensagem: str = "", erro: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "esqueci_senha.html",
+        {"erro": erro, "mensagem": mensagem},
+    )
+
+
+@app.post("/esqueci-senha", response_class=HTMLResponse, dependencies=_csrf())
+async def solicitar_redefinicao(request: Request, email: str = Form(...)):
+    usuario = db.obter_usuario_por_email(email.strip())
+    if usuario and usuario["email_verified"] and autenticacao.email_configurado():
+        try:
+            await _enviar_email_token(
+                usuario["id"],
+                usuario["email"],
+                usuario["username"],
+                "redefinir_senha",
+            )
+        except autenticacao.ErroEmail:
+            logger.exception("Falha ao enviar link de redefinição de senha")
+    return templates.TemplateResponse(
+        request,
+        "esqueci_senha.html",
+        {
+            "erro": "",
+            "mensagem": (
+                "Se houver uma conta confirmada para esse endereço, "
+                "enviamos instruções para redefinir a senha."
+            ),
+        },
+    )
+
+
+@app.get("/redefinir-senha", response_class=HTMLResponse)
+def redefinir_senha_formulario(
+    request: Request,
+    token: str = "",
+    erro: str = "",
+):
+    return templates.TemplateResponse(
+        request,
+        "redefinir_senha.html",
+        {"token": token, "erro": erro},
+    )
+
+
+@app.post("/redefinir-senha", response_class=HTMLResponse, dependencies=_csrf())
+def redefinir_senha(
+    request: Request,
+    token: str = Form(...),
+    senha: str = Form(...),
+    confirmar_senha: str = Form(...),
+):
+    try:
+        autenticacao.validar_senha(senha)
+        if senha != confirmar_senha:
+            raise ValueError("As senhas não coincidem.")
+    except ValueError as erro:
+        return templates.TemplateResponse(
+            request,
+            "redefinir_senha.html",
+            {"token": token, "erro": str(erro)},
+            status_code=400,
+        )
+    user_id = db.consumir_token_auth(
+        autenticacao.hash_token(token),
+        "redefinir_senha",
+    )
+    if user_id is None:
+        return templates.TemplateResponse(
+            request,
+            "redefinir_senha.html",
+            {
+                "token": "",
+                "erro": "O link é inválido ou expirou. Solicite uma nova redefinição.",
+            },
+            status_code=400,
+        )
+    db.atualizar_senha(user_id, autenticacao.hash_senha(senha))
+    db.revogar_sessoes_usuario(user_id)
+    return RedirectResponse("/login?mensagem=senha_alterada", status_code=303)
+
+
+@app.get("/alterar-senha", response_class=HTMLResponse)
+def alterar_senha_formulario(request: Request, erro: str = "", mensagem: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "alterar_senha.html",
+        {"erro": erro, "mensagem": mensagem},
+    )
+
+
+@app.post("/alterar-senha", response_class=HTMLResponse, dependencies=_csrf())
+def alterar_senha(
+    request: Request,
+    senha_atual: str = Form(...),
+    senha: str = Form(...),
+    confirmar_senha: str = Form(...),
+):
+    usuario = db.obter_usuario_por_login(request.state.user["username"])
+    if not usuario or not autenticacao.verificar_senha(
+        usuario["password_hash"], senha_atual
+    ):
+        return templates.TemplateResponse(
+            request,
+            "alterar_senha.html",
+            {"erro": "A senha atual está incorreta.", "mensagem": ""},
+            status_code=400,
+        )
+    try:
+        autenticacao.validar_senha(senha)
+        if senha != confirmar_senha:
+            raise ValueError("As senhas não coincidem.")
+    except ValueError as erro:
+        return templates.TemplateResponse(
+            request,
+            "alterar_senha.html",
+            {"erro": str(erro), "mensagem": ""},
+            status_code=400,
+        )
+    user_id = request.state.user["id"]
+    db.atualizar_senha(user_id, autenticacao.hash_senha(senha))
+    db.revogar_sessoes_usuario(user_id)
+    _nova_sessao(request, user_id)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/logout", dependencies=_csrf())
+def logout(request: Request):
+    token = request.session.get("auth_session")
+    if isinstance(token, str):
+        db.revogar_sessao(autenticacao.hash_token(token))
+    request.session.clear()
+    request.session["csrf_token"] = secrets.token_urlsafe(32)
+    return RedirectResponse("/", status_code=303)
 
 
 async def _ler_imagem(arquivo: UploadFile) -> bytes:
@@ -62,7 +516,7 @@ def catalogo(request: Request, erro: str = "", mensagem: str = ""):
     return templates.TemplateResponse(request, "catalogo.html", contexto)
 
 
-@app.post("/criadoras")
+@app.post("/criadoras", dependencies=_csrf())
 def nova_criadora(nome: str = Form(...)):
     nome = nome.strip()
     if nome:
@@ -70,7 +524,7 @@ def nova_criadora(nome: str = Form(...)):
     return RedirectResponse("/catalogo", status_code=303)
 
 
-@app.post("/conteudos")
+@app.post("/conteudos", dependencies=_csrf())
 async def novo_conteudo(criadora_id: int = Form(...), arquivo: UploadFile = File(...)):
     extensao = Path(arquivo.filename or "").suffix.lower()
     if extensao not in EXTENSOES_PERMITIDAS:
@@ -87,7 +541,7 @@ async def novo_conteudo(criadora_id: int = Form(...), arquivo: UploadFile = File
     return RedirectResponse("/catalogo", status_code=303)
 
 
-@app.post("/conteudos/{conteudo_id}/excluir")
+@app.post("/conteudos/{conteudo_id}/excluir", dependencies=_csrf())
 def excluir_conteudo(conteudo_id: int):
     nome_arquivo = db.excluir_conteudo(conteudo_id)
     if nome_arquivo is None:
@@ -116,7 +570,7 @@ def comparar_formulario(request: Request):
     )
 
 
-@app.post("/comparar", response_class=HTMLResponse)
+@app.post("/comparar", response_class=HTMLResponse, dependencies=_csrf())
 async def comparar(request: Request, arquivo: UploadFile = File(...)):
     try:
         dados = await _ler_imagem(arquivo)
@@ -154,8 +608,8 @@ def buscar_google_formulario(request: Request):
     )
 
 
-@app.post("/buscar-web", response_class=HTMLResponse)
-@app.post("/buscar-google", response_class=HTMLResponse)
+@app.post("/buscar-web", response_class=HTMLResponse, dependencies=_csrf())
+@app.post("/buscar-google", response_class=HTMLResponse, dependencies=_csrf())
 async def buscar_google_na_web(
     request: Request,
     conteudo_id: int = Form(...),
@@ -264,7 +718,7 @@ def buscar_serpapi_formulario(request: Request):
     return _contexto_serpapi(request)
 
 
-@app.post("/buscar-serpapi", response_class=HTMLResponse)
+@app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_csrf())
 async def buscar_serpapi(
     request: Request,
     api: str = Form(...),
@@ -404,7 +858,7 @@ def buscar_instagram_formulario(request: Request):
     return _contexto_instagram(request)
 
 
-@app.post("/buscar-instagram", response_class=HTMLResponse)
+@app.post("/buscar-instagram", response_class=HTMLResponse, dependencies=_csrf())
 async def buscar_instagram(
     request: Request,
     api: str = Form(...),

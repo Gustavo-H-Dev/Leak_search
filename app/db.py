@@ -1,5 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 CAMINHO_DB = Path("data/catalogo.db")
@@ -44,8 +45,201 @@ def iniciar_banco():
                 posicao INTEGER NOT NULL DEFAULT 0,
                 phash TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                password_hash TEXT NOT NULL,
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                role TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                purpose TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                name TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
+
+
+def _agora_utc():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def criar_admin_se_ausente(username, email, password_hash):
+    with conexao() as conn:
+        existente = conn.execute(
+            "SELECT id, role FROM users WHERE username = ? COLLATE NOCASE",
+            (username,),
+        ).fetchone()
+        if existente:
+            if existente["role"] != "admin":
+                raise ValueError(
+                    "O login de administrador já está ocupado por uma conta não-admin."
+                )
+            return False
+        conn.execute(
+            """
+            INSERT INTO users (username, email, password_hash, email_verified, role)
+            VALUES (?, ?, ?, 1, 'admin')
+            """,
+            (username, email, password_hash),
+        )
+        return True
+
+
+def criar_usuario(username, email, password_hash):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO users (username, email, password_hash)
+            VALUES (?, ?, ?)
+            """,
+            (username, email, password_hash),
+        )
+        return cur.lastrowid
+
+
+def obter_usuario_por_login(login):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, username, email, password_hash, email_verified, role
+            FROM users WHERE username = ? COLLATE NOCASE
+               OR email = ? COLLATE NOCASE
+            LIMIT 1
+            """,
+            (login, login),
+        ).fetchone()
+
+
+def obter_usuario_por_email(email):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, username, email, password_hash, email_verified, role
+            FROM users WHERE email = ? COLLATE NOCASE
+            """,
+            (email,),
+        ).fetchone()
+
+
+def obter_usuario_por_id(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            "SELECT id, username, email, role FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+
+
+def atualizar_senha(user_id, password_hash):
+    with conexao() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (password_hash, user_id),
+        )
+
+
+def confirmar_email(user_id):
+    with conexao() as conn:
+        conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+
+
+def salvar_token_auth(token_hash, user_id, purpose, expires_at):
+    with conexao() as conn:
+        conn.execute(
+            "DELETE FROM auth_tokens WHERE user_id = ? AND purpose = ?",
+            (user_id, purpose),
+        )
+        conn.execute(
+            """
+            INSERT INTO auth_tokens (token_hash, user_id, purpose, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (token_hash, user_id, purpose, expires_at),
+        )
+
+
+def consumir_token_auth(token_hash, purpose):
+    agora = _agora_utc()
+    with conexao() as conn:
+        token = conn.execute(
+            """
+            SELECT user_id, expires_at FROM auth_tokens
+            WHERE token_hash = ? AND purpose = ?
+            """,
+            (token_hash, purpose),
+        ).fetchone()
+        if token is None:
+            return None
+        conn.execute("DELETE FROM auth_tokens WHERE token_hash = ?", (token_hash,))
+        if token["expires_at"] <= agora:
+            return None
+        return token["user_id"]
+
+
+def criar_sessao(token_hash, user_id, expires_at):
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_sessions (token_hash, user_id, expires_at)
+            VALUES (?, ?, ?)
+            """,
+            (token_hash, user_id, expires_at),
+        )
+
+
+def obter_usuario_da_sessao(token_hash):
+    agora = _agora_utc()
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT u.id, u.username, u.email, u.role
+            FROM auth_sessions s JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ? AND s.expires_at > ?
+            """,
+            (token_hash, agora),
+        ).fetchone()
+
+
+def revogar_sessao(token_hash):
+    with conexao() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,))
+
+
+def revogar_sessoes_usuario(user_id):
+    with conexao() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE user_id = ?", (user_id,))
+
+
+def obter_segredo_sessao():
+    import secrets
+
+    with conexao() as conn:
+        configurado = conn.execute(
+            "SELECT value FROM app_settings WHERE name = 'session_secret'"
+        ).fetchone()
+        if configurado:
+            return configurado["value"]
+        segredo = secrets.token_urlsafe(48)
+        conn.execute(
+            "INSERT INTO app_settings (name, value) VALUES ('session_secret', ?)",
+            (segredo,),
+        )
+        return segredo
 
 
 def criar_criadora(nome):

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titulo %}Confirmar e-mail{% endblock %}
+{% block conteudo %}
+<section class="auth-card">
+  <span class="eyebrow">CONFIRMAÇÃO DE E-MAIL</span>
+  <h1>Confirme seu e-mail</h1>
+  {% if confirmado %}
+  <p class="sucesso">E-mail confirmado. Sua conta está ativa e você já pode entrar.</p>
+  {% else %}
+  <p>Use o link enviado para seu endereço de e-mail para ativar a conta.</p>
+  {% endif %}
+  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+  {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
+  {% if token %}
+  <form method="post" action="/confirmar-email">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button type="submit">Confirmar e-mail</button>
+  </form>
+  {% endif %}
+  <p><a href="/login">Ir para entrar</a></p>
+</section>
+{% endblock %}

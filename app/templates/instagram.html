@@ -34,6 +34,7 @@
       <h2><a href="https://serpapi.com/instagram-profile-api" target="_blank" rel="noopener noreferrer">Instagram Profile API</a></h2>
       <p>Busca informações e publicações disponíveis para um perfil pelo nome de usuário.</p>
       <form class="search-form" method="post" action="/buscar-instagram">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="instagram_profile">
         <label class="field-label" for="instagram-username">Nome de usuário</label>
         <input id="instagram-username" name="username" value="{{ username if api_ativa == 'instagram_profile' else '' }}" placeholder="Ex.: exemplo ou @exemplo" maxlength="31" required>
@@ -50,6 +51,7 @@
       <h2><a href="https://serpapi.com/instagram-popular-api" target="_blank" rel="noopener noreferrer">Instagram Popular API</a></h2>
       <p>Pesquisa posts populares relacionados a uma palavra-chave. Não consulta uma imagem nem garante listar todas as publicações.</p>
       <form class="search-form" method="post" action="/buscar-instagram">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="api" value="instagram_popular">
         <label class="field-label" for="instagram-keyword">Palavra-chave</label>
         <input id="instagram-keyword" name="keyword" value="{{ keyword if api_ativa == 'instagram_popular' else '' }}" placeholder="Ex.: nome, marca ou assunto" maxlength="200" required>

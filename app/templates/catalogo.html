@@ -7,6 +7,7 @@
 
 <h2>Nova criadora</h2>
 <form method="post" action="/criadoras">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input name="nome" placeholder="Nome da criadora" required>
   <button type="submit">Adicionar</button>
 </form>
@@ -14,6 +15,7 @@
 <h2>Nova foto oficial</h2>
 {% if criadoras %}
 <form method="post" action="/conteudos" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <select name="criadora_id" required>
     {% for c in criadoras %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
   </select>
@@ -36,6 +38,7 @@
     <td>{{ c.criado_em }}</td>
     <td class="table-actions">
       <form method="post" action="/conteudos/{{ c.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este conteúdo? Esta ação não pode ser desfeita.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="button-danger" type="submit">Excluir</button>
       </form>
     </td>

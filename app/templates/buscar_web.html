@@ -16,6 +16,7 @@
 
   {% if conteudos %}
   <form class="search-form" method="post" action="/buscar-google">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="field-label" for="conteudo_id">Imagem do catálogo</label>
     <select id="conteudo_id" name="conteudo_id" required>
       <option value="">Selecione uma imagem</option>

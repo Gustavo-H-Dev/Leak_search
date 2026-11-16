@@ -94,6 +94,9 @@
     }
 
     .main-nav a.nav-highlight:hover { background: rgb(240 120 173 / 16%); }
+    .nav-user { padding: .62rem .45rem; color: var(--muted); font-size: .82rem; }
+    .nav-logout { margin: 0; }
+    .nav-logout button { min-height: 34px; margin: 0; padding: .45rem .7rem; }
 
     .page-content {
       width: min(1120px, calc(100% - 3rem));
@@ -277,6 +280,25 @@
     .card-action span { margin-left: .3rem; }
 
     .search-page { max-width: 820px; margin: 0 auto; }
+    .auth-card {
+      width: min(100%, 520px);
+      margin: 0 auto;
+      padding: clamp(1.25rem, 5vw, 2rem);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: linear-gradient(145deg, rgb(255 255 255 / 2%), transparent 65%), var(--surface);
+      box-shadow: 0 24px 70px rgb(0 0 0 / 18%);
+    }
+    .auth-card > .eyebrow { margin-bottom: .8rem; }
+    .auth-card h1 { margin-bottom: .8rem; font-size: clamp(2rem, 6vw, 2.8rem); }
+    .auth-card form { display: grid; gap: .55rem; margin: 1.4rem 0; }
+    .auth-card .field-label { margin: .4rem 0 0; font-size: .88rem; }
+    .auth-card input { width: 100%; margin: 0; }
+    .auth-card button { justify-self: start; margin-top: .5rem; }
+    .auth-card p { font-size: .9rem; }
+    .auth-card p a { color: var(--pink-light); }
+    .resend-details { margin-top: 1.5rem; color: var(--muted); font-size: .9rem; }
+    .resend-details summary { cursor: pointer; }
     .search-page h1 { margin: .8rem 0 1rem; }
     .search-intro { max-width: 740px; }
     .search-form {
@@ -367,6 +389,8 @@
       .brand-mark { width: 31px; height: 31px; }
       .main-nav { gap: 0; }
       .main-nav a { padding: .55rem .58rem; font-size: .78rem; }
+      .nav-user { padding-inline: .35rem; font-size: .75rem; }
+      .nav-logout button { padding-inline: .55rem; font-size: .75rem; }
       .page-content { padding-top: 2.5rem; }
       .hero { grid-template-columns: 1fr; gap: 2rem; padding-bottom: 2.8rem; }
       .hero-panel { max-width: 440px; width: 100%; }
@@ -399,12 +423,24 @@
         <span class="brand-name">Monitoramento</span>
       </a>
       <nav class="main-nav" aria-label="Navegação principal">
-        <a href="/">Início</a>
-        <a href="/catalogo">Catálogo</a>
-        <a href="/comparar">Comparar</a>
-        <a href="/buscar-google">Google</a>
-        <a class="nav-highlight" href="/buscar-serpapi">SerpApi</a>
-        <a href="/buscar-instagram">Instagram</a>
+        {% if current_user %}
+          <a href="/">Início</a>
+          <a href="/catalogo">Catálogo</a>
+          <a href="/comparar">Comparar</a>
+          <a href="/buscar-google">Google</a>
+          <a href="/buscar-serpapi">SerpApi</a>
+          <a href="/buscar-instagram">Instagram</a>
+          <a href="/alterar-senha">Senha</a>
+          <span class="nav-user">{{ current_user.username }}</span>
+          <form class="nav-logout" method="post" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">Sair</button>
+          </form>
+        {% else %}
+          <a href="/">Início</a>
+          <a href="/login">Entrar</a>
+          <a class="nav-highlight" href="/cadastro">Cadastrar</a>
+        {% endif %}
       </nav>
     </div>
   </header>

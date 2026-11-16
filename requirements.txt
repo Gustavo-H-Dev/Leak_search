@@ -6,3 +6,6 @@ pillow
 imagehash
 google-cloud-vision
 httpx
+argon2-cffi
+email-validator
+itsdangerous

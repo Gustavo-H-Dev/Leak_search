@@ -5,6 +5,17 @@ services:
       - "8000:8000"
     environment:
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-Gustavo.souza}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - ./app:/code/app
       - ./media:/code/media
