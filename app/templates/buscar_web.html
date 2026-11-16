@@ -55,6 +55,7 @@
       {% for pagina in paginas %}
       <li>
         <a href="{{ pagina.url }}" target="_blank" rel="noopener noreferrer">{{ pagina.titulo }}</a>
+        {% if pagina.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ pagina.criadoras_oficiais|join(", ") }}</span>{% endif %}
         <span>{{ pagina.url }}</span>
       </li>
       {% endfor %}
@@ -69,6 +70,7 @@
       {% for imagem in imagens %}
       <li>
         <a href="{{ imagem.url }}" target="_blank" rel="noopener noreferrer">{{ imagem.tipo }}</a>
+        {% if imagem.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ imagem.criadoras_oficiais|join(", ") }}</span>{% endif %}
         <span>{{ imagem.url }}</span>
       </li>
       {% endfor %}

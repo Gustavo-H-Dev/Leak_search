@@ -5,6 +5,70 @@
 {% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
 {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
+<section class="official-sites">
+  <h2>Páginas oficiais por criadora</h2>
+  <p>
+    Cadastre cada URL para a criadora correspondente. A identificação considera
+    a página exata, não o domínio inteiro; outras páginas do mesmo site não
+    serão marcadas automaticamente como oficiais.
+  </p>
+  {% if criadoras %}
+  <form method="post" action="/sites-oficiais">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field-label" for="site-creator">Criadora</label>
+    <select id="site-creator" name="criadora_id" required>
+      {% for criadora in criadoras %}
+      <option value="{{ criadora.id }}">{{ criadora.nome }}</option>
+      {% endfor %}
+    </select>
+    <label class="field-label" for="site-name">Nome da página</label>
+    <input id="site-name" name="nome" maxlength="80" placeholder="Ex.: Perfil oficial" required>
+    <label class="field-label" for="site-url">URL exata da página</label>
+    <input id="site-url" name="url" type="url" placeholder="https://exemplo.com/perfil/ana" required>
+    <button type="submit">Cadastrar página oficial</button>
+  </form>
+  {% else %}
+  <p>Cadastre uma criadora antes de adicionar páginas oficiais.</p>
+  {% endif %}
+  {% if sites_oficiais %}
+  <div class="official-page-list">
+    {% for site in sites_oficiais %}
+    <article class="official-page-item">
+      {% if not site.criadora_id %}
+      <p class="api-status api-status-missing">
+        Registro anterior sem criadora vinculada. Associe-o e confira a URL exata;
+        ele não será reconhecido como oficial antes disso.
+      </p>
+      {% endif %}
+      <form class="official-page-edit" method="post" action="/sites-oficiais/{{ site.id }}/editar">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="field-label" for="site-creator-{{ site.id }}">Criadora</label>
+        <select id="site-creator-{{ site.id }}" name="criadora_id" required>
+          <option value="">Selecione</option>
+          {% for criadora in criadoras %}
+          <option value="{{ criadora.id }}" {% if site.criadora_id == criadora.id %}selected{% endif %}>
+            {{ criadora.nome }}
+          </option>
+          {% endfor %}
+        </select>
+        <label class="field-label" for="site-name-{{ site.id }}">Nome da página</label>
+        <input id="site-name-{{ site.id }}" name="nome" value="{{ site.nome }}" maxlength="80" required>
+        <label class="field-label" for="site-url-{{ site.id }}">URL exata</label>
+        <input id="site-url-{{ site.id }}" name="url" type="url" value="{{ site.url }}" required>
+        <button type="submit">Salvar</button>
+      </form>
+      <form method="post" action="/sites-oficiais/{{ site.id }}/excluir" onsubmit="return confirm('Remover esta página oficial do catálogo?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button-danger" type="submit">Remover página</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>Nenhuma página oficial cadastrada.</p>
+  {% endif %}
+</section>
+
 <h2>Nova criadora</h2>
 <form method="post" action="/criadoras">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

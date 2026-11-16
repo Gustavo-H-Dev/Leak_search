@@ -8,7 +8,7 @@ from PIL import Image
 from starlette.requests import Request
 
 from app.core import serpapi
-from app.main import app, buscar_instagram, buscar_serpapi
+from app.main import app, buscar_instagram, buscar_serpapi, status_serpapi
 
 
 class SerpApiTest(unittest.TestCase):
@@ -42,6 +42,48 @@ class SerpApiTest(unittest.TestCase):
                 "q": "teste",
             },
         )
+
+    def test_account_api_le_saldo_sem_expor_dados_privados(self):
+        resposta = httpx.Response(
+            200,
+            json={
+                "api_key": "chave-secreta",
+                "account_email": "privado@example.com",
+                "account_status": "Active",
+                "plan_name": "Free",
+                "searches_per_month": 250,
+                "plan_searches_left": 200,
+                "extra_credits": 0,
+                "total_searches_left": 200,
+                "this_month_usage": 50,
+                "plan_renewal_date": "2026-12-01",
+            },
+            request=httpx.Request("GET", serpapi.ACCOUNT_API_URL),
+        )
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-secreta"}),
+            patch("app.core.serpapi.httpx.get", return_value=resposta) as get,
+        ):
+            conta = serpapi.obter_status_conta()
+
+        self.assertEqual(conta["this_month_usage"], 50)
+        self.assertEqual(conta["plan_searches_left"], 200)
+        self.assertNotIn("api_key", conta)
+        self.assertNotIn("account_email", conta)
+        get.assert_called_once_with(
+            serpapi.ACCOUNT_API_URL,
+            params={"api_key": "chave-secreta"},
+            timeout=serpapi.TIMEOUT,
+        )
+
+    def test_account_api_sem_chave_nao_faz_requisicao(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("app.core.serpapi.httpx.get") as get,
+        ):
+            with self.assertRaises(serpapi.SerpApiNaoConfigurada):
+                serpapi.obter_status_conta()
+        get.assert_not_called()
 
     def test_normaliza_resultados_e_descarta_links_nao_web(self):
         dados = {
@@ -190,6 +232,16 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
             patch("app.main.db.listar_conteudos", return_value=[]),
+            patch(
+                "app.main.db.listar_sites_oficiais",
+                return_value=[
+                    {
+                        "criadora_id": 1,
+                        "criadora": "Ana",
+                        "url": "https://example.com/image",
+                    }
+                ],
+            ),
             patch("app.main.serpapi.pesquisar", return_value=resposta) as pesquisar,
         ):
             resultado = await buscar_serpapi(
@@ -208,6 +260,26 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         corpo = resultado.body.decode()
         self.assertIn("Resultado", corpo)
         self.assertIn("related-123", corpo)
+        self.assertIn("Página oficial cadastrada para: Ana", corpo)
+
+    async def test_consulta_de_saldo_nao_dispara_busca_paga(self):
+        conta = {
+            "plan_name": "Free",
+            "searches_per_month": 250,
+            "plan_searches_left": 200,
+            "total_searches_left": 200,
+            "this_month_usage": 50,
+        }
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.serpapi.obter_status_conta", return_value=conta) as status,
+            patch("app.main.serpapi.pesquisar") as pesquisar,
+        ):
+            resultado = await status_serpapi(self.criar_request("/status-serpapi"))
+
+        self.assertEqual(resultado.status_code, 200)
+        status.assert_called_once_with()
+        pesquisar.assert_not_called()
 
     async def test_instagram_profile_envia_apenas_profile_id(self):
         resposta = {

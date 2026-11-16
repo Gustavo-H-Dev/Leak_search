@@ -8,6 +8,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 API_URL = "https://serpapi.com/search.json"
 UPLOAD_URL = "https://serpapi.com/image"
+ACCOUNT_API_URL = "https://serpapi.com/account.json"
 TAMANHO_MAXIMO_UPLOAD = 500 * 1024
 TIMEOUT = 30
 
@@ -97,6 +98,31 @@ def pesquisar(engine: str, **parametros: str) -> dict:
     except httpx.RequestError as erro:
         raise ErroSerpApi("Não foi possível conectar à SerpApi.") from erro
     return _validar_resposta(resposta)
+
+
+def obter_status_conta() -> dict:
+    chave = _api_key()
+    try:
+        resposta = httpx.get(
+            ACCOUNT_API_URL,
+            params={"api_key": chave},
+            timeout=TIMEOUT,
+        )
+    except httpx.RequestError as erro:
+        raise ErroSerpApi("Não foi possível consultar a conta SerpApi.") from erro
+
+    dados = _validar_resposta(resposta)
+    campos = (
+        "account_status",
+        "plan_name",
+        "searches_per_month",
+        "plan_searches_left",
+        "extra_credits",
+        "total_searches_left",
+        "this_month_usage",
+        "plan_renewal_date",
+    )
+    return {campo: dados[campo] for campo in campos if campo in dados}
 
 
 def pesquisar_imagem(conteudo: bytes) -> dict:

@@ -97,6 +97,21 @@ Não há limite mensal de consultas por usuário. A autenticação impede acesso
 anônimo, mas qualquer usuário cadastrado pode consumir as APIs; proteja também
 a chave e monitore os custos.
 
+Na página SerpApi, o botão **Consultar saldo** busca o uso do mês, a cota e as
+consultas restantes pela
+[Account API](https://serpapi.com/account-api). Essa é uma chamada HTTP separada
+da busca, mas a SerpApi informa que a Account API é gratuita e não consome a
+cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; sem
+uma conta e chave SerpApi, não há saldo que o site possa consultar.
+
+No Catálogo, cadastre cada URL de página oficial e associe-a à criadora
+correspondente. As buscas do Google Vision, SerpApi e Instagram só marcam a URL
+da página cadastrada (sem considerar outras páginas do mesmo domínio). O
+resultado continua visível para revisão e a marcação identifica para qual
+criadora a página foi registrada. Endereços globais cadastrados em versões
+anteriores são preservados como pendentes, sem serem considerados oficiais,
+até que sejam associados a uma criadora e revisados.
+
 ## Testes com APIs do Instagram
 
 A página `/buscar-instagram` usa a mesma `SERPAPI_API_KEY` e mantém as duas

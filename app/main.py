@@ -18,7 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from app import db
-from app.core import autenticacao, busca_web, imagens, serpapi
+from app.core import autenticacao, busca_web, imagens, serpapi, sites_oficiais
 from app.core.middleware_auth import AutenticacaoMiddleware
 
 PASTA_OFICIAIS = Path("media/oficiais")
@@ -510,10 +510,76 @@ def catalogo(request: Request, erro: str = "", mensagem: str = ""):
     contexto = {
         "criadoras": db.listar_criadoras(),
         "conteudos": db.listar_conteudos(),
+        "sites_oficiais": db.listar_sites_oficiais(),
         "erro": erro,
         "mensagem": mensagem,
     }
     return templates.TemplateResponse(request, "catalogo.html", contexto)
+
+
+@app.post("/sites-oficiais", dependencies=_csrf())
+def novo_site_oficial(
+    criadora_id: int = Form(...),
+    nome: str = Form(...),
+    url: str = Form(...),
+):
+    nome = nome.strip()
+    if not nome or len(nome) > 80:
+        return _voltar_com_erro("O nome do site deve ter entre 1 e 80 caracteres.")
+    try:
+        url = sites_oficiais.normalizar_url_pagina(url)
+    except ValueError as erro:
+        return _voltar_com_erro(str(erro))
+    try:
+        db.adicionar_site_oficial(criadora_id, nome, url)
+    except sqlite3.IntegrityError:
+        return _voltar_com_erro(
+            "Essa URL já está cadastrada para a criadora selecionada."
+        )
+    return RedirectResponse(
+        "/catalogo?mensagem=" + quote("Página oficial cadastrada."),
+        status_code=303,
+    )
+
+
+@app.post("/sites-oficiais/{site_id}/editar", dependencies=_csrf())
+def editar_site_oficial(
+    site_id: int,
+    criadora_id: int = Form(...),
+    nome: str = Form(...),
+    url: str = Form(...),
+):
+    nome = nome.strip()
+    if not nome or len(nome) > 80:
+        return _voltar_com_erro("O nome da página deve ter entre 1 e 80 caracteres.")
+    try:
+        url = sites_oficiais.normalizar_url_pagina(url)
+    except ValueError as erro:
+        return _voltar_com_erro(str(erro))
+    try:
+        atualizado = db.atualizar_site_oficial(
+            site_id, criadora_id, nome, url
+        )
+    except sqlite3.IntegrityError:
+        return _voltar_com_erro(
+            "Essa URL já está cadastrada para a criadora selecionada."
+        )
+    if not atualizado:
+        return _voltar_com_erro("Página oficial não encontrada.")
+    return RedirectResponse(
+        "/catalogo?mensagem=" + quote("Página oficial atualizada."),
+        status_code=303,
+    )
+
+
+@app.post("/sites-oficiais/{site_id}/excluir", dependencies=_csrf())
+def excluir_site_oficial(site_id: int):
+    if not db.excluir_site_oficial(site_id):
+        return _voltar_com_erro("Página oficial não encontrada.")
+    return RedirectResponse(
+        "/catalogo?mensagem=" + quote("Página oficial removida."),
+        status_code=303,
+    )
 
 
 @app.post("/criadoras", dependencies=_csrf())
@@ -675,6 +741,17 @@ async def buscar_google_na_web(
     else:
         contexto["pesquisa_realizada"] = True
 
+    sites_cadastrados = db.listar_sites_oficiais()
+    contexto["paginas"] = sites_oficiais.marcar_resultados(
+        contexto["paginas"],
+        sites_cadastrados,
+        criadora_id=conteudo["criadora_id"],
+    )
+    contexto["imagens"] = sites_oficiais.marcar_resultados(
+        contexto["imagens"],
+        sites_cadastrados,
+        criadora_id=conteudo["criadora_id"],
+    )
     return templates.TemplateResponse(request, "buscar_web.html", contexto)
 
 
@@ -704,6 +781,8 @@ def _contexto_serpapi(request: Request, **valores):
         "url_imagem": "",
         "related_content_id": "",
         "api_key_configurada": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
+        "status_conta": None,
+        "status_conta_atualizado": False,
         "pesquisa_realizada": False,
         "related_options": [],
         "nomes_apis": SERPAPI_ENGINE_NAMES,
@@ -716,6 +795,37 @@ def _contexto_serpapi(request: Request, **valores):
 @app.get("/buscar-serpapi", response_class=HTMLResponse)
 def buscar_serpapi_formulario(request: Request):
     return _contexto_serpapi(request)
+
+
+@app.post(
+    "/status-serpapi",
+    response_class=HTMLResponse,
+    dependencies=_csrf(),
+)
+async def status_serpapi(request: Request):
+    if not os.getenv("SERPAPI_API_KEY", "").strip():
+        return _contexto_serpapi(
+            request,
+            erro="Configure SERPAPI_API_KEY para consultar o uso da conta.",
+        )
+    try:
+        status_conta = await run_in_threadpool(serpapi.obter_status_conta)
+    except serpapi.SerpApiNaoConfigurada as erro:
+        return _contexto_serpapi(request, erro=str(erro))
+    except serpapi.ErroSerpApi:
+        logger.exception("Falha ao consultar o uso da conta SerpApi")
+        return _contexto_serpapi(
+            request,
+            erro=(
+                "Não foi possível consultar a conta SerpApi. "
+                "Confira se a chave está correta e tente novamente."
+            ),
+        )
+    return _contexto_serpapi(
+        request,
+        status_conta=status_conta,
+        status_conta_atualizado=True,
+    )
 
 
 @app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_csrf())
@@ -744,6 +854,7 @@ async def buscar_serpapi(
             **contexto,
         )
 
+    criadora_id = None
     try:
         if api in {"google_images", "google_images_light"}:
             if not contexto["query"]:
@@ -755,6 +866,7 @@ async def buscar_serpapi(
             conteudo = db.obter_conteudo(conteudo_id)
             if conteudo is None:
                 raise ValueError("Selecione uma imagem existente no catálogo.")
+            criadora_id = conteudo["criadora_id"]
             nome_arquivo = conteudo["arquivo"]
             if Path(nome_arquivo).name != nome_arquivo:
                 raise ValueError("O caminho da imagem cadastrada é inválido.")
@@ -805,6 +917,11 @@ async def buscar_serpapi(
         )
 
     resultados = serpapi.normalizar_resultados(dados, api)
+    resultados = sites_oficiais.marcar_resultados(
+        resultados,
+        db.listar_sites_oficiais(),
+        criadora_id=criadora_id,
+    )
     related_options = []
     if api == "google_images":
         ids_vistos = set()
@@ -907,6 +1024,12 @@ async def buscar_instagram(
         logger.exception("Falha na consulta SerpApi Instagram (%s)", api)
         return _contexto_instagram(request, erro=str(erro), **contexto)
 
+    sites_cadastrados = db.listar_sites_oficiais()
+    posts = sites_oficiais.marcar_resultados(posts, sites_cadastrados)
+    if perfil.get("link"):
+        perfil = sites_oficiais.marcar_resultados(
+            [perfil], sites_cadastrados
+        )[0]
     return _contexto_instagram(
         request,
         pesquisa_realizada=True,

@@ -105,6 +105,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
         dados_imagem = conteudo.getvalue()
         registro = {
             "id": 1,
+            "criadora_id": 7,
             "arquivo": "catalogo.png",
             "nome_original": "catalogo.png",
         }
@@ -123,6 +124,16 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
                         [],
                     ),
                 ) as buscar,
+                patch(
+                    "app.main.db.listar_sites_oficiais",
+                    return_value=[
+                        {
+                            "criadora_id": 7,
+                            "criadora": "Ana",
+                            "url": "https://example.com/post",
+                        }
+                    ],
+                ),
             ):
                 resposta = await buscar_google_na_web(
                     self.criar_request(), 1, "on"
@@ -130,6 +141,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
 
         buscar.assert_called_once_with(dados_imagem)
         self.assertIn("Página pública", resposta.body.decode())
+        self.assertIn("Página oficial cadastrada para: Ana", resposta.body.decode())
 
 
 if __name__ == "__main__":

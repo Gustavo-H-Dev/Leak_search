@@ -75,6 +75,7 @@
         {% if perfil.link %}</a>{% endif %}
         {% if perfil.verificado %}<span class="profile-badge">Verificado</span>{% endif %}
       </h3>
+      {% if perfil.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ perfil.criadoras_oficiais|join(", ") }}</span>{% endif %}
       {% if perfil.username %}<p>@{{ perfil.username }}</p>{% endif %}
       <div class="profile-stats">
         <span><strong>{{ perfil.seguidores }}</strong> seguidores</span>
@@ -91,6 +92,7 @@
       {% for post in posts %}
       <li>
         <a href="{{ post.link }}" target="_blank" rel="noopener noreferrer">{{ post.titulo }}</a>
+        {% if post.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ post.criadoras_oficiais|join(", ") }}</span>{% endif %}
         {% if post.usuario %}
           {% if post.link_perfil %}
           <span>Por <a href="{{ post.link_perfil }}" target="_blank" rel="noopener noreferrer">@{{ post.usuario }}</a></span>

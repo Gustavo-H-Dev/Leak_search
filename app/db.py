@@ -45,6 +45,13 @@ def iniciar_banco():
                 posicao INTEGER NOT NULL DEFAULT 0,
                 phash TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sites_oficiais (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                criadora_id INTEGER REFERENCES criadoras(id),
+                nome TEXT NOT NULL,
+                url TEXT NOT NULL,
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -71,6 +78,53 @@ def iniciar_banco():
                 name TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            """
+        )
+    _migrar_sites_oficiais()
+
+
+def _migrar_sites_oficiais():
+    with conexao() as conn:
+        colunas = {
+            coluna["name"]
+            for coluna in conn.execute("PRAGMA table_info(sites_oficiais)")
+        }
+        if "dominio" in colunas:
+            conn.execute(
+                "ALTER TABLE sites_oficiais RENAME TO sites_oficiais_antigos"
+            )
+            conn.execute(
+                """
+                CREATE TABLE sites_oficiais (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    criadora_id INTEGER REFERENCES criadoras(id),
+                    nome TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            antigos = conn.execute(
+                "SELECT id, nome, dominio, criado_em FROM sites_oficiais_antigos"
+            ).fetchall()
+            for site in antigos:
+                conn.execute(
+                    """
+                    INSERT INTO sites_oficiais (id, nome, url, criado_em)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        site["id"],
+                        site["nome"],
+                        f"https://{site['dominio']}/",
+                        site["criado_em"],
+                    ),
+                )
+            conn.execute("DROP TABLE sites_oficiais_antigos")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS sites_oficiais_criadora_url
+            ON sites_oficiais (criadora_id, url)
             """
         )
 
@@ -252,6 +306,50 @@ def listar_criadoras():
         return conn.execute("SELECT id, nome FROM criadoras ORDER BY nome").fetchall()
 
 
+def adicionar_site_oficial(criadora_id, nome, url):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO sites_oficiais (criadora_id, nome, url)
+            VALUES (?, ?, ?)
+            """,
+            (criadora_id, nome, url),
+        )
+        return cur.lastrowid
+
+
+def listar_sites_oficiais():
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT s.id, s.criadora_id, c.nome AS criadora,
+                   s.nome, s.url, s.criado_em
+            FROM sites_oficiais s
+            LEFT JOIN criadoras c ON c.id = s.criadora_id
+            ORDER BY c.nome, s.url
+            """
+        ).fetchall()
+
+
+def atualizar_site_oficial(site_id, criadora_id, nome, url):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE sites_oficiais
+            SET criadora_id = ?, nome = ?, url = ?
+            WHERE id = ?
+            """,
+            (criadora_id, nome, url, site_id),
+        )
+        return cur.rowcount > 0
+
+
+def excluir_site_oficial(site_id):
+    with conexao() as conn:
+        cur = conn.execute("DELETE FROM sites_oficiais WHERE id = ?", (site_id,))
+        return cur.rowcount > 0
+
+
 def adicionar_conteudo(criadora_id, tipo, arquivo, nome_original, phashes):
     with conexao() as conn:
         cur = conn.execute(
@@ -284,7 +382,10 @@ def listar_conteudos():
 def obter_conteudo(conteudo_id):
     with conexao() as conn:
         return conn.execute(
-            "SELECT id, arquivo, nome_original FROM conteudos WHERE id = ?",
+            """
+            SELECT id, criadora_id, arquivo, nome_original
+            FROM conteudos WHERE id = ?
+            """,
             (conteudo_id,),
         ).fetchone()
 

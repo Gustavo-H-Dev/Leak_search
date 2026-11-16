@@ -20,6 +20,68 @@
   </p>
   {% endif %}
 
+  <section class="account-usage" aria-labelledby="account-usage-title">
+    <div class="account-usage-heading">
+      <div>
+        <span class="eyebrow">CONTROLE DE CONSUMO</span>
+        <h2 id="account-usage-title">Uso da conta SerpApi</h2>
+      </div>
+      {% if api_key_configurada %}
+      <form method="post" action="/status-serpapi">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">{% if status_conta %}Atualizar saldo{% else %}Consultar saldo{% endif %}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if status_conta %}
+      {% if status_conta.searches_per_month is defined and status_conta.this_month_usage is defined %}
+      <p class="account-usage-summary">
+        Neste mês: <strong>{{ "{:,}".format(status_conta.this_month_usage|int) }}</strong>
+        de <strong>{{ "{:,}".format(status_conta.searches_per_month|int) }}</strong> consultas usadas.
+        {% if status_conta.plan_searches_left is defined and status_conta.plan_searches_left is not none %}
+        Restam <strong>{{ "{:,}".format(status_conta.plan_searches_left|int) }}</strong> no plano.
+        {% endif %}
+      </p>
+      <progress
+        class="usage-progress"
+        value="{{ [status_conta.this_month_usage|int, status_conta.searches_per_month|int]|min }}"
+        max="{{ [status_conta.searches_per_month|int, 1]|max }}"
+        aria-label="Consultas usadas neste mês"
+      ></progress>
+      {% else %}
+      <p class="account-usage-summary">
+        {% if status_conta.total_searches_left is defined %}
+        Saldo restante: <strong>{{ "{:,}".format(status_conta.total_searches_left|int) }}</strong> consultas.
+        {% else %}
+        A conta não informou o limite mensal de consultas.
+        {% endif %}
+        {% if status_conta.extra_credits is defined %}
+        Créditos extras: <strong>{{ "{:,}".format(status_conta.extra_credits|int) }}</strong>.
+        {% endif %}
+      </p>
+      {% endif %}
+      <dl class="account-usage-details">
+        {% if status_conta.plan_name is defined and status_conta.plan_name %}
+        <div><dt>Plano</dt><dd>{{ status_conta.plan_name }}</dd></div>
+        {% endif %}
+        {% if status_conta.total_searches_left is defined %}
+        <div><dt>Total restante</dt><dd>{{ "{:,}".format(status_conta.total_searches_left|int) }}</dd></div>
+        {% endif %}
+        {% if status_conta.plan_renewal_date is defined and status_conta.plan_renewal_date %}
+        <div><dt>Renovação</dt><dd>{{ status_conta.plan_renewal_date }}</dd></div>
+        {% endif %}
+        {% if status_conta.account_status is defined and status_conta.account_status %}
+        <div><dt>Situação</dt><dd>{{ status_conta.account_status }}</dd></div>
+        {% endif %}
+      </dl>
+      <p class="account-usage-note">Consulta de saldo feita pela Account API; ela não consome consultas do seu plano.</p>
+    {% elif api_key_configurada %}
+      <p class="account-usage-summary">Clique em “Consultar saldo” para ver o limite e o consumo atual. Essa consulta é gratuita e não usa buscas do seu plano.</p>
+    {% else %}
+      <p class="account-usage-summary">Quando você criar sua conta na SerpApi e configurar a chave no servidor, poderá consultar aqui o consumo e o saldo. Ainda não fazemos nenhuma chamada à API.</p>
+    {% endif %}
+  </section>
+
   <p class="privacy-note">
     Cada busca envia a consulta ou a imagem à SerpApi. A Google Lens API exige
     o envio da imagem para a SerpApi; a documentação limita esse upload a
@@ -150,6 +212,7 @@
       {% for resultado in resultados %}
       <li>
         <a href="{{ resultado.link }}" target="_blank" rel="noopener noreferrer">{{ resultado.titulo }}</a>
+        {% if resultado.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ resultado.criadoras_oficiais|join(", ") }}</span>{% endif %}
         {% if resultado.origem %}<span>{{ resultado.origem }}</span>{% endif %}
         <span>{{ resultado.link }}</span>
       </li>
