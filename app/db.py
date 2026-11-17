@@ -446,6 +446,9 @@ def criar_criadora(nome):
             conn.execute(
                 "INSERT OR IGNORE INTO criadoras (nome) VALUES (?)", (nome,)
             )
+        return conn.execute(
+            "SELECT id FROM criadoras WHERE nome = ?", (nome,)
+        ).fetchone()["id"]
 
 
 def listar_criadoras():
@@ -518,8 +521,8 @@ def listar_conteudos():
     with conexao() as conn:
         return conn.execute(
             """
-            SELECT c.id, c.tipo, c.arquivo, c.nome_original, c.criado_em,
-                   cr.nome AS criadora
+            SELECT c.id, c.criadora_id, c.tipo, c.arquivo, c.nome_original,
+                   c.criado_em, cr.nome AS criadora
             FROM conteudos c
             JOIN criadoras cr ON cr.id = c.criadora_id
             ORDER BY c.id DESC

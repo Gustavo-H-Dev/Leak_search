@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,11 +9,11 @@ from starlette.requests import Request
 
 from app import db
 from app.core import sites_oficiais
-from app.main import app, catalogo
+from app.main import app, catalogo, nova_criadora
 
 
 class PaginasOficiaisTest(unittest.TestCase):
-    def test_catalogo_renderiza_cadastro_de_paginas_por_criadora(self):
+    def test_catalogo_exibe_criadora_com_sites_e_fotos_nos_registros_pais(self):
         request = Request(
             {
                 "type": "http",
@@ -31,7 +32,6 @@ class PaginasOficiaisTest(unittest.TestCase):
         )
         with (
             patch("app.main.db.listar_criadoras", return_value=[{"id": 1, "nome": "Ana"}]),
-            patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
                 "app.main.db.listar_sites_oficiais",
                 return_value=[
@@ -44,13 +44,54 @@ class PaginasOficiaisTest(unittest.TestCase):
                     }
                 ],
             ),
+            patch(
+                "app.main.db.listar_conteudos",
+                return_value=[
+                    {
+                        "id": 2,
+                        "criadora_id": 1,
+                        "arquivo": "ana.png",
+                        "nome_original": "ana-original.png",
+                        "criado_em": "2025-01-01",
+                    }
+                ],
+            ),
         ):
             resposta = catalogo(request)
 
         corpo = resposta.body.decode()
-        self.assertIn("Páginas oficiais por criadora", corpo)
+        self.assertIn("Nova criadora", corpo)
+        self.assertIn('name="site_url"', corpo)
+        self.assertIn('name="arquivo"', corpo)
+        self.assertIn("<h3>Ana</h3>", corpo)
         self.assertIn('name="criadora_id"', corpo)
         self.assertIn("https://exemplo.com/perfil/ana", corpo)
+        self.assertIn("ana-original.png", corpo)
+
+    def test_cadastro_de_criadora_inclui_site_opcional_quando_informado(self):
+        with (
+            patch("app.main.db.criar_criadora", return_value=7) as criar,
+            patch("app.main.db.adicionar_site_oficial") as adicionar_site,
+        ):
+            resposta = asyncio.run(
+                nova_criadora(" Ana ", "Site oficial", "exemplo.com/ana", None)
+            )
+
+        criar.assert_called_once_with("Ana")
+        adicionar_site.assert_called_once_with(
+            7, "Site oficial", "https://exemplo.com/ana"
+        )
+        self.assertEqual(resposta.status_code, 303)
+
+    def test_cadastro_de_criadora_nao_exige_site(self):
+        with (
+            patch("app.main.db.criar_criadora", return_value=7),
+            patch("app.main.db.adicionar_site_oficial") as adicionar_site,
+        ):
+            resposta = asyncio.run(nova_criadora("Ana", "Site oficial", "", None))
+
+        adicionar_site.assert_not_called()
+        self.assertEqual(resposta.status_code, 303)
 
     def test_normaliza_url_da_pagina_sem_ampliar_para_o_dominio(self):
         self.assertEqual(
@@ -115,17 +156,22 @@ class PaginasOficiaisTest(unittest.TestCase):
             caminho_db = Path(diretorio) / "catalogo.db"
             with patch.object(db, "CAMINHO_DB", caminho_db):
                 db.iniciar_banco()
-                db.criar_criadora("Ana")
+                criadora_id = db.criar_criadora("Ana")
                 db.criar_criadora("Bia")
                 criadoras = {c["nome"]: c["id"] for c in db.listar_criadoras()}
+                self.assertEqual(criadora_id, criadoras["Ana"])
                 pagina_id = db.adicionar_site_oficial(
                     criadoras["Ana"], "Perfil", "https://exemplo.com/ana"
+                )
+                db.adicionar_conteudo(
+                    criadoras["Ana"], "foto", "ana.png", "ana-original.png", []
                 )
 
                 self.assertEqual(
                     db.listar_sites_oficiais()[0]["criadora"],
                     "Ana",
                 )
+                self.assertEqual(db.listar_conteudos()[0]["criadora_id"], criadora_id)
                 self.assertTrue(
                     db.atualizar_site_oficial(
                         pagina_id,

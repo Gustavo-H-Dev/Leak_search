@@ -506,10 +506,27 @@ def saude():
 
 @app.get("/catalogo", response_class=HTMLResponse)
 def catalogo(request: Request, erro: str = "", mensagem: str = ""):
+    sites_oficiais_cadastrados = db.listar_sites_oficiais()
+    conteudos_cadastrados = db.listar_conteudos()
+    criadoras = []
+    for registro in db.listar_criadoras():
+        criadora = dict(registro)
+        criadora["sites_oficiais"] = [
+            site
+            for site in sites_oficiais_cadastrados
+            if site["criadora_id"] == criadora["id"]
+        ]
+        criadora["conteudos"] = [
+            conteudo
+            for conteudo in conteudos_cadastrados
+            if conteudo["criadora_id"] == criadora["id"]
+        ]
+        criadoras.append(criadora)
     contexto = {
-        "criadoras": db.listar_criadoras(),
-        "conteudos": db.listar_conteudos(),
-        "sites_oficiais": db.listar_sites_oficiais(),
+        "criadoras": criadoras,
+        "sites_sem_criadora": [
+            site for site in sites_oficiais_cadastrados if not site["criadora_id"]
+        ],
         "erro": erro,
         "mensagem": mensagem,
     }
@@ -582,10 +599,55 @@ def excluir_site_oficial(site_id: int):
 
 
 @app.post("/criadoras", dependencies=_csrf())
-def nova_criadora(nome: str = Form(...)):
+async def nova_criadora(
+    nome: str = Form(...),
+    site_nome: str = Form("Site oficial"),
+    site_url: str = Form(""),
+    arquivo: UploadFile | None = File(None),
+):
     nome = nome.strip()
-    if nome:
-        db.criar_criadora(nome)
+    if not nome:
+        return _voltar_com_erro("Informe o nome da criadora.")
+
+    url_oficial = None
+    if site_url.strip():
+        site_nome = site_nome.strip() or "Site oficial"
+        if len(site_nome) > 80:
+            return _voltar_com_erro(
+                "O nome do site deve ter entre 1 e 80 caracteres."
+            )
+        try:
+            url_oficial = sites_oficiais.normalizar_url_pagina(site_url)
+        except ValueError as erro:
+            return _voltar_com_erro(str(erro))
+
+    imagem_nova = None
+    if arquivo and arquivo.filename:
+        extensao = Path(arquivo.filename).suffix.lower()
+        if extensao not in EXTENSOES_PERMITIDAS:
+            return _voltar_com_erro("Formato não suportado. Use JPG, PNG ou WEBP.")
+        try:
+            dados = await _ler_imagem(arquivo)
+            phash = imagens.calcular_phash(dados)
+        except ValueError as erro:
+            return _voltar_com_erro(str(erro))
+        imagem_nova = (dados, phash, extensao, arquivo.filename)
+
+    criadora_id = db.criar_criadora(nome)
+    if url_oficial:
+        try:
+            db.adicionar_site_oficial(criadora_id, site_nome, url_oficial)
+        except db.INTEGRITY_ERRORS:
+            return _voltar_com_erro(
+                "Essa URL já está cadastrada para a criadora selecionada."
+            )
+    if imagem_nova:
+        dados, phash, extensao, nome_original = imagem_nova
+        nome_arquivo = f"{uuid.uuid4().hex}{extensao}"
+        (PASTA_OFICIAIS / nome_arquivo).write_bytes(dados)
+        db.adicionar_conteudo(
+            criadora_id, "foto", nome_arquivo, nome_original, [phash]
+        )
     return RedirectResponse("/catalogo", status_code=303)
 
 

@@ -1,115 +1,140 @@
 {% extends "base.html" %}
 {% block titulo %}Catálogo{% endblock %}
 {% block conteudo %}
-<h1>Catálogo oficial</h1>
+<h1>Catálogo de criadoras</h1>
 {% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
 {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
-<section class="official-sites">
-  <h2>Páginas oficiais por criadora</h2>
-  <p>
-    Cadastre cada URL para a criadora correspondente. A identificação considera
-    a página exata, não o domínio inteiro; outras páginas do mesmo site não
-    serão marcadas automaticamente como oficiais.
-  </p>
-  {% if criadoras %}
-  <form method="post" action="/sites-oficiais">
+<section class="creator-create">
+  <h2>Nova criadora</h2>
+  <p>O nome é obrigatório. Foto e site oficial são opcionais e podem ser adicionados depois.</p>
+  <form method="post" action="/criadoras" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="field-label" for="site-creator">Criadora</label>
-    <select id="site-creator" name="criadora_id" required>
-      {% for criadora in criadoras %}
-      <option value="{{ criadora.id }}">{{ criadora.nome }}</option>
-      {% endfor %}
-    </select>
-    <label class="field-label" for="site-name">Nome da página</label>
-    <input id="site-name" name="nome" maxlength="80" placeholder="Ex.: Perfil oficial" required>
-    <label class="field-label" for="site-url">URL exata da página</label>
-    <input id="site-url" name="url" type="url" placeholder="https://exemplo.com/perfil/ana" required>
-    <button type="submit">Cadastrar página oficial</button>
+    <label class="field-label" for="creator-name">Nome da criadora</label>
+    <input id="creator-name" name="nome" placeholder="Nome da criadora" required>
+    <label class="field-label" for="creator-site-name">Nome do site oficial (opcional)</label>
+    <input id="creator-site-name" name="site_nome" maxlength="80" placeholder="Site oficial">
+    <label class="field-label" for="creator-site-url">URL do site oficial (opcional)</label>
+    <input id="creator-site-url" name="site_url" type="url" placeholder="https://exemplo.com/perfil">
+    <label class="field-label" for="creator-photo">Foto (opcional)</label>
+    <input id="creator-photo" type="file" name="arquivo" accept="image/*">
+    <button type="submit">Cadastrar criadora</button>
   </form>
-  {% else %}
-  <p>Cadastre uma criadora antes de adicionar páginas oficiais.</p>
-  {% endif %}
-  {% if sites_oficiais %}
-  <div class="official-page-list">
-    {% for site in sites_oficiais %}
-    <article class="official-page-item">
-      {% if not site.criadora_id %}
-      <p class="api-status api-status-missing">
-        Registro anterior sem criadora vinculada. Associe-o e confira a URL exata;
-        ele não será reconhecido como oficial antes disso.
-      </p>
+</section>
+
+<section class="creators-list">
+  <h2>Criadoras cadastradas ({{ criadoras|length }})</h2>
+  {% if criadoras %}
+  {% for criadora in criadoras %}
+  <article class="creator-card">
+    <h3>{{ criadora.nome }}</h3>
+
+    <section class="creator-children">
+      <h4>Site oficial</h4>
+      {% if criadora.sites_oficiais %}
+      <div class="official-page-list">
+        {% for site in criadora.sites_oficiais %}
+        <article class="official-page-item">
+          <form class="official-page-edit" method="post" action="/sites-oficiais/{{ site.id }}/editar">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="field-label" for="site-creator-{{ site.id }}">Criadora</label>
+            <select id="site-creator-{{ site.id }}" name="criadora_id" required>
+              {% for outra in criadoras %}
+              <option value="{{ outra.id }}" {% if site.criadora_id == outra.id %}selected{% endif %}>
+                {{ outra.nome }}
+              </option>
+              {% endfor %}
+            </select>
+            <label class="field-label" for="site-name-{{ site.id }}">Nome da página</label>
+            <input id="site-name-{{ site.id }}" name="nome" value="{{ site.nome }}" maxlength="80" required>
+            <label class="field-label" for="site-url-{{ site.id }}">URL exata</label>
+            <input id="site-url-{{ site.id }}" name="url" type="url" value="{{ site.url }}" required>
+            <button type="submit">Salvar</button>
+          </form>
+          <form method="post" action="/sites-oficiais/{{ site.id }}/excluir" onsubmit="return confirm('Remover esta página oficial do catálogo?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button-danger" type="submit">Remover página</button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p>Nenhum site oficial cadastrado.</p>
       {% endif %}
-      <form class="official-page-edit" method="post" action="/sites-oficiais/{{ site.id }}/editar">
+      <form class="creator-child-form" method="post" action="/sites-oficiais">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="field-label" for="site-creator-{{ site.id }}">Criadora</label>
-        <select id="site-creator-{{ site.id }}" name="criadora_id" required>
-          <option value="">Selecione</option>
-          {% for criadora in criadoras %}
-          <option value="{{ criadora.id }}" {% if site.criadora_id == criadora.id %}selected{% endif %}>
-            {{ criadora.nome }}
-          </option>
-          {% endfor %}
-        </select>
-        <label class="field-label" for="site-name-{{ site.id }}">Nome da página</label>
-        <input id="site-name-{{ site.id }}" name="nome" value="{{ site.nome }}" maxlength="80" required>
-        <label class="field-label" for="site-url-{{ site.id }}">URL exata</label>
-        <input id="site-url-{{ site.id }}" name="url" type="url" value="{{ site.url }}" required>
-        <button type="submit">Salvar</button>
+        <input type="hidden" name="criadora_id" value="{{ criadora.id }}">
+        <label class="field-label" for="new-site-name-{{ criadora.id }}">Adicionar site</label>
+        <input id="new-site-name-{{ criadora.id }}" name="nome" maxlength="80" value="Site oficial" required>
+        <label class="field-label" for="new-site-url-{{ criadora.id }}">URL</label>
+        <input id="new-site-url-{{ criadora.id }}" name="url" type="url" placeholder="https://exemplo.com/perfil" required>
+        <button type="submit">Adicionar site</button>
       </form>
-      <form method="post" action="/sites-oficiais/{{ site.id }}/excluir" onsubmit="return confirm('Remover esta página oficial do catálogo?');">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button-danger" type="submit">Remover página</button>
+    </section>
+
+    <section class="creator-children">
+      <h4>Cadastros e fotos ({{ criadora.conteudos|length }})</h4>
+      {% if criadora.conteudos %}
+      <ul class="creator-content-list">
+        {% for conteudo in criadora.conteudos %}
+        <li>
+          <img class="mini" src="/arquivos/{{ conteudo.arquivo }}" alt="Foto de {{ criadora.nome }}">
+          <span>{{ conteudo.nome_original or "Foto cadastrada" }} · {{ conteudo.criado_em }}</span>
+          <form method="post" action="/conteudos/{{ conteudo.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este conteúdo? Esta ação não pode ser desfeita.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button-danger" type="submit">Excluir</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>Nenhuma foto cadastrada.</p>
+      {% endif %}
+      <form class="creator-child-form" method="post" action="/conteudos" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="criadora_id" value="{{ criadora.id }}">
+        <label class="field-label" for="new-photo-{{ criadora.id }}">Adicionar foto (opcional)</label>
+        <input id="new-photo-{{ criadora.id }}" type="file" name="arquivo" accept="image/*" required>
+        <button type="submit">Enviar foto</button>
       </form>
-    </article>
-    {% endfor %}
-  </div>
+    </section>
+  </article>
+  {% endfor %}
   {% else %}
-  <p>Nenhuma página oficial cadastrada.</p>
+  <p>Nenhuma criadora cadastrada.</p>
   {% endif %}
 </section>
 
-<h2>Nova criadora</h2>
-<form method="post" action="/criadoras">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <input name="nome" placeholder="Nome da criadora" required>
-  <button type="submit">Adicionar</button>
-</form>
-
-<h2>Nova foto oficial</h2>
-{% if criadoras %}
-<form method="post" action="/conteudos" enctype="multipart/form-data">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <select name="criadora_id" required>
-    {% for c in criadoras %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
-  </select>
-  <input type="file" name="arquivo" accept="image/*" required>
-  <button type="submit">Enviar</button>
-</form>
-{% else %}
-<p>Cadastre uma criadora primeiro.</p>
-{% endif %}
-
-<h2>Conteúdos cadastrados ({{ conteudos|length }})</h2>
-{% if conteudos %}
-<table>
-  <tr><th>Prévia</th><th>Criadora</th><th>Arquivo original</th><th>Cadastro</th><th>Ação</th></tr>
-  {% for c in conteudos %}
-  <tr>
-    <td><img class="mini" src="/arquivos/{{ c.arquivo }}" alt=""></td>
-    <td>{{ c.criadora }}</td>
-    <td>{{ c.nome_original }}</td>
-    <td>{{ c.criado_em }}</td>
-    <td class="table-actions">
-      <form method="post" action="/conteudos/{{ c.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este conteúdo? Esta ação não pode ser desfeita.');">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button-danger" type="submit">Excluir</button>
-      </form>
-    </td>
-  </tr>
+{% if sites_sem_criadora %}
+<section class="official-sites">
+  <h2>Sites sem criadora vinculada</h2>
+  <p>Associe os registros antigos a uma criadora para incluí-los no catálogo.</p>
+  {% for site in sites_sem_criadora %}
+  <article class="official-page-item">
+    <p class="api-status api-status-missing">
+      Registro anterior sem criadora vinculada. Confira a URL antes de associá-lo.
+    </p>
+    {% if criadoras %}
+    <form class="official-page-edit" method="post" action="/sites-oficiais/{{ site.id }}/editar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="field-label" for="legacy-site-creator-{{ site.id }}">Criadora</label>
+      <select id="legacy-site-creator-{{ site.id }}" name="criadora_id" required>
+        <option value="">Selecione</option>
+        {% for criadora in criadoras %}
+        <option value="{{ criadora.id }}">{{ criadora.nome }}</option>
+        {% endfor %}
+      </select>
+      <label class="field-label" for="legacy-site-name-{{ site.id }}">Nome da página</label>
+      <input id="legacy-site-name-{{ site.id }}" name="nome" value="{{ site.nome }}" maxlength="80" required>
+      <label class="field-label" for="legacy-site-url-{{ site.id }}">URL exata</label>
+      <input id="legacy-site-url-{{ site.id }}" name="url" type="url" value="{{ site.url }}" required>
+      <button type="submit">Associar à criadora</button>
+    </form>
+    {% else %}
+    <p>Cadastre uma criadora antes de associar este site.</p>
+    {% endif %}
+  </article>
   {% endfor %}
-</table>
-{% else %}
-<p>Nenhum conteúdo cadastrado.</p>
+</section>
 {% endif %}
 {% endblock %}

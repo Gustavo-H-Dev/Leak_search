@@ -137,13 +137,15 @@ da busca, mas a SerpApi informa que a Account API é gratuita e não consome a
 cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; sem
 uma conta e chave SerpApi, não há saldo que o site possa consultar.
 
-No Catálogo, cadastre cada URL de página oficial e associe-a à criadora
-correspondente. As buscas do Google Vision, SerpApi e Instagram só marcam a URL
-da página cadastrada (sem considerar outras páginas do mesmo domínio). O
-resultado continua visível para revisão e a marcação identifica para qual
-criadora a página foi registrada. Endereços globais cadastrados em versões
-anteriores são preservados como pendentes, sem serem considerados oficiais,
-até que sejam associados a uma criadora e revisados.
+No Catálogo, a criadora é o cadastro principal. Foto e site oficial são
+opcionais; sites e fotos já cadastrados ficam agrupados dentro do registro da
+criadora e também podem ser adicionados depois. As buscas do Google Vision,
+SerpApi e Instagram só marcam a URL exata da página cadastrada (sem considerar
+outras páginas do mesmo domínio). O resultado continua visível para revisão e
+a marcação identifica para qual criadora a página foi registrada. Endereços
+globais cadastrados em versões anteriores são preservados como pendentes, sem
+serem considerados oficiais, até que sejam associados a uma criadora e
+revisados.
 
 ## Testes com APIs do Instagram
 
