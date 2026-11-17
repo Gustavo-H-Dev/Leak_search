@@ -2,7 +2,6 @@ import logging
 import os
 import re
 import secrets
-import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,7 +20,7 @@ from app import db
 from app.core import autenticacao, busca_web, imagens, serpapi, sites_oficiais
 from app.core.middleware_auth import AutenticacaoMiddleware
 
-PASTA_OFICIAIS = Path("media/oficiais")
+PASTA_OFICIAIS = Path(os.getenv("MEDIA_DIR", "media/oficiais"))
 EXTENSOES_PERMITIDAS = {".jpg", ".jpeg", ".png", ".webp"}
 TAMANHO_MAXIMO = 20 * 1024 * 1024  # 20 MB
 logger = logging.getLogger(__name__)
@@ -241,7 +240,7 @@ async def cadastrar(
             {"erro": str(erro), "mensagem": ""},
             status_code=400,
         )
-    except sqlite3.IntegrityError:
+    except db.INTEGRITY_ERRORS:
         return templates.TemplateResponse(
             request,
             "cadastro.html",
@@ -532,7 +531,7 @@ def novo_site_oficial(
         return _voltar_com_erro(str(erro))
     try:
         db.adicionar_site_oficial(criadora_id, nome, url)
-    except sqlite3.IntegrityError:
+    except db.INTEGRITY_ERRORS:
         return _voltar_com_erro(
             "Essa URL já está cadastrada para a criadora selecionada."
         )
@@ -560,7 +559,7 @@ def editar_site_oficial(
         atualizado = db.atualizar_site_oficial(
             site_id, criadora_id, nome, url
         )
-    except sqlite3.IntegrityError:
+    except db.INTEGRITY_ERRORS:
         return _voltar_com_erro(
             "Essa URL já está cadastrada para a criadora selecionada."
         )

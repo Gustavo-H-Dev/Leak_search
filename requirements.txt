@@ -9,3 +9,4 @@ httpx
 argon2-cffi
 email-validator
 itsdangerous
+psycopg[binary]

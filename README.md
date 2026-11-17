@@ -60,6 +60,39 @@ Para iniciar ou atualizar o serviço:
 docker compose up --build -d
 ```
 
+## Render e PostgreSQL
+
+O aplicativo continua usando SQLite local quando `DATABASE_URL` está vazia.
+Para o Render, crie um PostgreSQL e configure `DATABASE_URL` nas variáveis do
+serviço Web com a URL interna fornecida pelo Render. O app cria/atualiza as
+tabelas ao iniciar. Não use a URL externa do banco entre serviços hospedados no
+Render.
+
+Para levar os dados locais ao banco PostgreSQL:
+
+1. Faça backup de `data/catalogo.db` e de `media/oficiais`.
+2. Crie o PostgreSQL no Render e use a URL do banco em `DATABASE_URL` no
+   terminal local, sem colocá-la no repositório ou enviá-la pelo chat.
+3. Na raiz do projeto, execute
+   `python -m scripts.migrar_sqlite_para_postgres`. Por padrão, o script lê
+   `data/catalogo.db`; use `SQLITE_PATH` para outro caminho. O destino deve
+   estar vazio: a migração se recusa a misturar dados e copia criadoras,
+   conteúdos, hashes, páginas oficiais, usuários, tokens, sessões e
+   configurações.
+4. Configure `MEDIA_DIR` para um disco persistente montado no serviço e copie
+   os arquivos de `media/oficiais` para a mesma pasta nesse disco. O banco
+   guarda referências aos nomes desses arquivos; o PostgreSQL não armazena as
+   imagens.
+5. Configure as demais variáveis do serviço, incluindo `APP_BASE_URL` com a
+   URL pública HTTPS e `COOKIE_SECURE=true`, e valide o site antes de alterar
+   seu endereço de uso.
+
+O armazenamento local efêmero do serviço Web não é adequado para imagens que
+precisam sobreviver a uma implantação ou reinicialização. O disco persistente
+do Render pode exigir um plano pago e deve ser configurado separadamente do
+PostgreSQL. Consulte a [documentação de discos persistentes do Render](https://render.com/docs/disks)
+e a [documentação de PostgreSQL do Render](https://render.com/docs/postgresql).
+
 ## Testes com SerpApi
 
 A página `/buscar-serpapi` separa cinco mecanismos e faz somente a chamada

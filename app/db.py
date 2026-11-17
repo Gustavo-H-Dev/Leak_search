@@ -1,13 +1,49 @@
+import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import psycopg
+
 CAMINHO_DB = Path("data/catalogo.db")
+INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
+
+
+class _PostgresConnection:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def execute(self, query, parametros=()):
+        query = re.sub(r"\?", "%s", query)
+        return self._connection.execute(query, parametros)
+
+
+def _url_postgresql() -> str | None:
+    url = os.getenv("DATABASE_URL", "").strip()
+    if not url:
+        return None
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    return url
+
+
+def usando_postgresql() -> bool:
+    return _url_postgresql() is not None
 
 
 @contextmanager
 def conexao():
+    url_postgresql = _url_postgresql()
+    if url_postgresql:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        with psycopg.connect(url_postgresql, row_factory=dict_row) as connection:
+            yield _PostgresConnection(connection)
+        return
+
     CAMINHO_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(CAMINHO_DB)
     conn.row_factory = sqlite3.Row
@@ -23,6 +59,11 @@ def conexao():
 
 
 def iniciar_banco():
+    if usando_postgresql():
+        _iniciar_banco_postgresql()
+        _migrar_sites_oficiais()
+        return
+
     with conexao() as conn:
         conn.executescript(
             """
@@ -83,27 +124,124 @@ def iniciar_banco():
     _migrar_sites_oficiais()
 
 
+def _iniciar_banco_postgresql():
+    comandos = (
+        """
+        CREATE TABLE IF NOT EXISTS criadoras (
+            id BIGSERIAL PRIMARY KEY,
+            nome TEXT NOT NULL UNIQUE,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS conteudos (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT NOT NULL REFERENCES criadoras(id),
+            tipo TEXT NOT NULL,
+            arquivo TEXT NOT NULL,
+            nome_original TEXT,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hashes (
+            id BIGSERIAL PRIMARY KEY,
+            conteudo_id BIGINT NOT NULL REFERENCES conteudos(id),
+            posicao INTEGER NOT NULL DEFAULT 0,
+            phash TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sites_oficiais (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT REFERENCES criadoras(id),
+            nome TEXT NOT NULL,
+            url TEXT NOT NULL,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id BIGSERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            email TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            email_verified INTEGER NOT NULL DEFAULT 0,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            purpose TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            name TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower
+        ON users (lower(username))
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower
+        ON users (lower(email))
+        """,
+    )
+    with conexao() as conn:
+        for comando in comandos:
+            conn.execute(comando)
+
+
 def _migrar_sites_oficiais():
     with conexao() as conn:
-        colunas = {
-            coluna["name"]
-            for coluna in conn.execute("PRAGMA table_info(sites_oficiais)")
-        }
+        if usando_postgresql():
+            colunas = {
+                coluna["column_name"]
+                for coluna in conn.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'sites_oficiais'
+                    """
+                ).fetchall()
+            }
+        else:
+            colunas = {
+                coluna["name"]
+                for coluna in conn.execute("PRAGMA table_info(sites_oficiais)")
+            }
         if "dominio" in colunas:
             conn.execute(
                 "ALTER TABLE sites_oficiais RENAME TO sites_oficiais_antigos"
             )
-            conn.execute(
-                """
+            tipo_id = "BIGSERIAL" if usando_postgresql() else "INTEGER"
+            tipo_ref = "BIGINT" if usando_postgresql() else "INTEGER"
+            conn.execute(f"""
                 CREATE TABLE sites_oficiais (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    criadora_id INTEGER REFERENCES criadoras(id),
+                    id {tipo_id} PRIMARY KEY,
+                    criadora_id {tipo_ref} REFERENCES criadoras(id),
                     nome TEXT NOT NULL,
                     url TEXT NOT NULL,
                     criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
             antigos = conn.execute(
                 "SELECT id, nome, dominio, criado_em FROM sites_oficiais_antigos"
             ).fetchall()
@@ -136,7 +274,7 @@ def _agora_utc():
 def criar_admin_se_ausente(username, email, password_hash):
     with conexao() as conn:
         existente = conn.execute(
-            "SELECT id, role FROM users WHERE username = ? COLLATE NOCASE",
+            "SELECT id, role FROM users WHERE lower(username) = lower(?)",
             (username,),
         ).fetchone()
         if existente:
@@ -161,10 +299,11 @@ def criar_usuario(username, email, password_hash):
             """
             INSERT INTO users (username, email, password_hash)
             VALUES (?, ?, ?)
+            RETURNING id
             """,
             (username, email, password_hash),
         )
-        return cur.lastrowid
+        return cur.fetchone()["id"]
 
 
 def obter_usuario_por_login(login):
@@ -172,8 +311,8 @@ def obter_usuario_por_login(login):
         return conn.execute(
             """
             SELECT id, username, email, password_hash, email_verified, role
-            FROM users WHERE username = ? COLLATE NOCASE
-               OR email = ? COLLATE NOCASE
+            FROM users WHERE lower(username) = lower(?)
+               OR lower(email) = lower(?)
             LIMIT 1
             """,
             (login, login),
@@ -185,7 +324,7 @@ def obter_usuario_por_email(email):
         return conn.execute(
             """
             SELECT id, username, email, password_hash, email_verified, role
-            FROM users WHERE email = ? COLLATE NOCASE
+            FROM users WHERE lower(email) = lower(?)
             """,
             (email,),
         ).fetchone()
@@ -298,7 +437,15 @@ def obter_segredo_sessao():
 
 def criar_criadora(nome):
     with conexao() as conn:
-        conn.execute("INSERT OR IGNORE INTO criadoras (nome) VALUES (?)", (nome,))
+        if usando_postgresql():
+            conn.execute(
+                "INSERT INTO criadoras (nome) VALUES (?) ON CONFLICT DO NOTHING",
+                (nome,),
+            )
+        else:
+            conn.execute(
+                "INSERT OR IGNORE INTO criadoras (nome) VALUES (?)", (nome,)
+            )
 
 
 def listar_criadoras():
@@ -312,10 +459,11 @@ def adicionar_site_oficial(criadora_id, nome, url):
             """
             INSERT INTO sites_oficiais (criadora_id, nome, url)
             VALUES (?, ?, ?)
+            RETURNING id
             """,
             (criadora_id, nome, url),
         )
-        return cur.lastrowid
+        return cur.fetchone()["id"]
 
 
 def listar_sites_oficiais():
@@ -354,10 +502,10 @@ def adicionar_conteudo(criadora_id, tipo, arquivo, nome_original, phashes):
     with conexao() as conn:
         cur = conn.execute(
             "INSERT INTO conteudos (criadora_id, tipo, arquivo, nome_original) "
-            "VALUES (?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?) RETURNING id",
             (criadora_id, tipo, arquivo, nome_original),
         )
-        conteudo_id = cur.lastrowid
+        conteudo_id = cur.fetchone()["id"]
         for posicao, phash in enumerate(phashes):
             conn.execute(
                 "INSERT INTO hashes (conteudo_id, posicao, phash) VALUES (?, ?, ?)",
