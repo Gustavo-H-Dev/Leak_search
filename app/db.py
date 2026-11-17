@@ -62,6 +62,7 @@ def iniciar_banco():
     if usando_postgresql():
         _iniciar_banco_postgresql()
         _migrar_sites_oficiais()
+        _migrar_usuarios()
         return
 
     with conexao() as conn:
@@ -99,7 +100,7 @@ def iniciar_banco():
                 email TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 password_hash TEXT NOT NULL,
                 email_verified INTEGER NOT NULL DEFAULT 0,
-                role TEXT NOT NULL DEFAULT 'user',
+                role TEXT NOT NULL DEFAULT 'cliente',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS auth_tokens (
@@ -122,6 +123,7 @@ def iniciar_banco():
             """
         )
     _migrar_sites_oficiais()
+    _migrar_usuarios()
 
 
 def _iniciar_banco_postgresql():
@@ -167,7 +169,7 @@ def _iniciar_banco_postgresql():
             email TEXT NOT NULL,
             password_hash TEXT NOT NULL,
             email_verified INTEGER NOT NULL DEFAULT 0,
-            role TEXT NOT NULL DEFAULT 'user',
+            role TEXT NOT NULL DEFAULT 'cliente',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
@@ -267,6 +269,17 @@ def _migrar_sites_oficiais():
         )
 
 
+def _migrar_usuarios():
+    with conexao() as conn:
+        if usando_postgresql():
+            conn.execute(
+                "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'cliente'"
+            )
+        conn.execute(
+            "UPDATE users SET role = 'cliente' WHERE role = 'user'"
+        )
+
+
 def _agora_utc():
     return datetime.now(timezone.utc).isoformat()
 
@@ -297,8 +310,8 @@ def criar_usuario(username, email, password_hash):
     with conexao() as conn:
         cur = conn.execute(
             """
-            INSERT INTO users (username, email, password_hash)
-            VALUES (?, ?, ?)
+            INSERT INTO users (username, email, password_hash, role)
+            VALUES (?, ?, ?, 'cliente')
             RETURNING id
             """,
             (username, email, password_hash),
@@ -336,6 +349,28 @@ def obter_usuario_por_id(user_id):
             "SELECT id, username, email, role FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
+
+
+def listar_usuarios():
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, username, email, email_verified, role, created_at
+            FROM users
+            ORDER BY created_at DESC, id DESC
+            """
+        ).fetchall()
+
+
+def atualizar_perfil_usuario(user_id, role):
+    if role not in {"admin", "cliente"}:
+        raise ValueError("Perfil de usuário inválido.")
+    with conexao() as conn:
+        cur = conn.execute(
+            "UPDATE users SET role = ? WHERE id = ?",
+            (role, user_id),
+        )
+        return cur.rowcount > 0
 
 
 def atualizar_senha(user_id, password_hash):

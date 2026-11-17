@@ -40,6 +40,9 @@ cp .env.example .env
   primeiro início do aplicativo. Use a senha desejada somente no `.env`; senhas
   são armazenadas no banco como hashes Argon2. A conta existente não é
   sobrescrita em inicializações posteriores.
+- O cadastro público cria contas de cliente e registra a data automaticamente
+  no banco. A página `/usuarios` e a alteração de perfis admin/cliente ficam
+  restritas a administradores; localidade não é solicitada nem inferida.
 - Configure `SMTP_USER` e `SMTP_PASSWORD` com uma senha de app do Gmail, além
   de `SMTP_FROM` se o remetente precisar ser diferente. Nunca coloque a senha
   SMTP no código ou no chat.

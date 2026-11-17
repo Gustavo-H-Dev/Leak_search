@@ -83,6 +83,12 @@ def _csrf():
     return [Depends(validar_csrf)]
 
 
+def exigir_admin(request: Request):
+    usuario = request.state.user
+    if not usuario or usuario["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Acesso restrito a administradores.")
+
+
 def _proximo_caminho(valor: str) -> str:
     if valor.startswith("/") and not valor.startswith("//") and not re.search(r"[\r\n]", valor):
         return valor
@@ -502,6 +508,49 @@ def home(request: Request):
 @app.get("/saude")
 def saude():
     return {"status": "ok"}
+
+
+@app.get("/usuarios", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])
+def usuarios(request: Request, erro: str = "", mensagem: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "usuarios.html",
+        {
+            "usuarios": db.listar_usuarios(),
+            "erro": erro,
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.post(
+    "/usuarios/{usuario_id}/perfil",
+    dependencies=[Depends(exigir_admin), *_csrf()],
+)
+def atualizar_perfil_usuario(
+    request: Request,
+    usuario_id: int,
+    role: str = Form(...),
+):
+    if usuario_id == request.state.user["id"]:
+        return RedirectResponse(
+            "/usuarios?erro=" + quote("Não é permitido alterar o próprio perfil."),
+            status_code=303,
+        )
+    if role not in {"admin", "cliente"}:
+        return RedirectResponse(
+            "/usuarios?erro=" + quote("Perfil de usuário inválido."),
+            status_code=303,
+        )
+    if not db.atualizar_perfil_usuario(usuario_id, role):
+        return RedirectResponse(
+            "/usuarios?erro=" + quote("Usuário não encontrado."),
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/usuarios?mensagem=" + quote("Perfil atualizado."),
+        status_code=303,
+    )
 
 
 @app.get("/catalogo", response_class=HTMLResponse)
