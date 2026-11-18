@@ -7,6 +7,8 @@ app/
     base.html        layout comum
     home.html        (alterado)
     catalogo.html    cadastro de criadoras e fotos
+    perfil_busca.html perfil público e fotos privadas de busca
+    serpapi.html     buscas pessoais e revisão dos resultados
     comparar.html    envio da imagem suspeita
 compose.yaml         (alterado)
 requirements.txt     (alterado)

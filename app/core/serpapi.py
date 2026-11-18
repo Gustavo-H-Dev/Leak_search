@@ -171,6 +171,8 @@ def normalizar_resultados(dados: dict, engine: str) -> list[dict[str, str]]:
                 "link": link,
                 "origem": str(item.get("source") or ""),
                 "miniatura": str(item.get("thumbnail") or ""),
+                "resumo": str(item.get("snippet") or item.get("description") or ""),
+                "data_resultado": str(item.get("date") or item.get("date_crawled") or ""),
                 "related_content_id": str(item.get("related_content_id") or ""),
             }
             if resultado["miniatura"] and not validar_url_imagem(resultado["miniatura"]):

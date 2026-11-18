@@ -1,14 +1,28 @@
 from io import BytesIO
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 import httpx
+from fastapi import HTTPException, UploadFile
 from PIL import Image
 from starlette.requests import Request
 
+from app import db
 from app.core import serpapi
-from app.main import app, buscar_instagram, buscar_serpapi, status_serpapi
+from app.main import (
+    app,
+    buscar_instagram,
+    buscar_serpapi,
+    obter_foto_busca,
+    perfil_busca,
+    salvar_perfil_busca,
+    salvar_resultado_vazado,
+    salvar_site_oficial_resultado,
+    status_serpapi,
+)
 
 
 class SerpApiTest(unittest.TestCase):
@@ -215,6 +229,13 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                 "http_version": "1.1",
                 "root_path": "",
                 "app": app,
+                "state": {
+                    "user": {
+                        "id": 1,
+                        "username": "cliente",
+                        "role": "cliente",
+                    }
+                },
             }
         )
 
@@ -231,13 +252,24 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
-            patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
-                "app.main.db.listar_sites_oficiais",
+                "app.main.db.obter_usuario_por_id",
+                return_value={
+                    "id": 1,
+                    "username": "cliente",
+                    "role": "cliente",
+                    "public_name": "BlackDragon",
+                    "public_handle": "user875s",
+                },
+            ),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch(
+                "app.main.db.listar_sites_oficiais_usuario",
                 return_value=[
                     {
-                        "criadora_id": 1,
-                        "criadora": "Ana",
+                        "user_id": 1,
+                        "nome": "Site oficial",
                         "url": "https://example.com/image",
                     }
                 ],
@@ -246,21 +278,256 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         ):
             resultado = await buscar_serpapi(
                 self.criar_request("/buscar-serpapi"),
-                "google_images",
-                "on",
-                "nome pesquisado",
-                0,
-                "",
-                "",
+                api="google_images",
+                consentimento="on",
+                foto_id=0,
+                related_content_id="",
+                target_user_id=1,
+                image_file=None,
             )
 
         pesquisar.assert_called_once_with(
-            "google_images", q="nome pesquisado", gl="br", hl="pt"
+            "google_images", q="BlackDragon @user875s", gl="br", hl="pt"
         )
         corpo = resultado.body.decode()
         self.assertIn("Resultado", corpo)
         self.assertIn("related-123", corpo)
-        self.assertIn("Página oficial cadastrada para: Ana", corpo)
+        self.assertIn("Site oficial cadastrado", corpo)
+        self.assertIn("VAZADO!", corpo)
+        self.assertIn("Não sou eu", corpo)
+
+    async def test_cliente_nao_pode_escolher_outro_usuario_para_busca(self):
+        with self.assertRaises(HTTPException) as erro:
+            await buscar_serpapi(
+                self.criar_request("/buscar-serpapi"),
+                api="google_images",
+                consentimento="on",
+                target_user_id=2,
+            )
+
+        self.assertEqual(erro.exception.status_code, 403)
+
+    async def test_admin_pode_buscar_usuario_selecionado_com_seu_perfil(self):
+        request = self.criar_request("/buscar-serpapi")
+        request.state.user = {"id": 9, "role": "admin"}
+        alvo = {
+            "id": 2,
+            "username": "cliente",
+            "role": "cliente",
+            "public_name": "BlackDragon",
+            "public_handle": "user875s",
+        }
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value=alvo),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.db.listar_usuarios_com_perfil_busca", return_value=[]),
+            patch("app.main.serpapi.pesquisar", return_value={"images_results": []}) as pesquisar,
+        ):
+            await buscar_serpapi(
+                request,
+                api="google_images",
+                consentimento="on",
+                foto_id=0,
+                related_content_id="",
+                target_user_id=2,
+                image_file=None,
+            )
+
+        pesquisar.assert_called_once_with(
+            "google_images", q="BlackDragon @user875s", gl="br", hl="pt"
+        )
+
+    async def test_admin_nao_pode_usar_foto_de_outro_usuario_na_busca_visual(self):
+        request = self.criar_request("/buscar-serpapi")
+        request.state.user = {"id": 9, "role": "admin"}
+        alvo = {
+            "id": 2,
+            "username": "cliente",
+            "role": "cliente",
+            "public_name": "BlackDragon",
+            "public_handle": "user875s",
+        }
+        with (
+            patch("app.main.db.obter_usuario_por_id", return_value=alvo),
+            patch("app.main.serpapi.pesquisar_imagem") as pesquisar_imagem,
+        ):
+            with self.assertRaises(HTTPException) as erro:
+                await buscar_serpapi(
+                    request,
+                    api="google_lens",
+                    consentimento="on",
+                    foto_id=123,
+                    related_content_id="",
+                    target_user_id=2,
+                    image_file=None,
+                )
+
+        self.assertEqual(erro.exception.status_code, 403)
+        pesquisar_imagem.assert_not_called()
+
+    async def test_cliente_nao_pode_marcar_resultado_para_outro_usuario(self):
+        request = self.criar_request("/resultados/vazado")
+        with self.assertRaises(HTTPException) as erro:
+            salvar_resultado_vazado(
+                request,
+                url="https://example.com/leak",
+                titulo="Resultado",
+                api="google_images",
+                target_user_id=2,
+            )
+
+        self.assertEqual(erro.exception.status_code, 403)
+
+    async def test_cliente_pode_salvar_site_oficial_e_relato_vazado_so_para_si(self):
+        with TemporaryDirectory() as diretorio:
+            with patch.object(db, "CAMINHO_DB", Path(diretorio) / "users.db"):
+                db.iniciar_banco()
+                user_id = db.criar_usuario(
+                    "cliente", "cliente@example.com", "hash"
+                )
+                request = self.criar_request("/resultados/vazado")
+                request.state.user = {
+                    "id": user_id,
+                    "username": "cliente",
+                    "role": "cliente",
+                }
+
+                site_response = salvar_site_oficial_resultado(
+                    request,
+                    url="https://example.com/profile/#about",
+                    nome="Perfil público",
+                    target_user_id=0,
+                )
+                report_response = salvar_resultado_vazado(
+                    request,
+                    url="https://example.com/leak",
+                    titulo="Página encontrada",
+                    origem="Example",
+                    resumo="Descrição encontrada no resultado",
+                    miniatura="https://example.com/image.jpg",
+                    data_resultado="Ontem",
+                    api="google_images",
+                    related_content_id="",
+                    target_user_id=0,
+                )
+                duplicate_response = salvar_resultado_vazado(
+                    request,
+                    url="https://example.com/leak",
+                    titulo="Página encontrada",
+                    api="google_images",
+                    origem="",
+                    resumo="",
+                    miniatura="",
+                    data_resultado="",
+                    related_content_id="",
+                    target_user_id=0,
+                )
+
+                self.assertEqual(site_response.status_code, 201)
+                self.assertEqual(
+                    db.listar_sites_oficiais_usuario(user_id)[0]["url"],
+                    "https://example.com/profile",
+                )
+                self.assertEqual(report_response.status_code, 201)
+                self.assertEqual(duplicate_response.status_code, 200)
+                reports = db.listar_sites_vazados(user_id)
+                self.assertEqual(len(reports), 1)
+                self.assertEqual(reports[0]["reported_by"], user_id)
+                self.assertEqual(reports[0]["title"], "Página encontrada")
+                self.assertIn("Ontem", reports[0]["metadata_json"])
+
+    async def test_perfil_e_foto_sao_salvos_e_foto_existente_pode_ser_reusada(self):
+        imagem_png = BytesIO()
+        Image.new("RGB", (20, 20), "#cc5599").save(imagem_png, format="PNG")
+        with TemporaryDirectory() as diretorio:
+            caminho_db = Path(diretorio) / "users.db"
+            pasta_fotos = Path(diretorio) / "fotos"
+            pasta_fotos.mkdir()
+            with (
+                patch.object(db, "CAMINHO_DB", caminho_db),
+                patch("app.main.PASTA_FOTOS_BUSCA", pasta_fotos),
+            ):
+                db.iniciar_banco()
+                user_id = db.criar_usuario("cliente", "cliente@example.com", "hash")
+                request = self.criar_request("/perfil-busca")
+                request.state.user = {
+                    "id": user_id,
+                    "username": "cliente",
+                    "role": "cliente",
+                }
+                perfil_response = salvar_perfil_busca(
+                    request, "BlackDragon", "@user875s"
+                )
+                self.assertEqual(perfil_response.status_code, 303)
+                self.assertEqual(
+                    db.obter_usuario_por_id(user_id)["public_handle"], "user875s"
+                )
+                pagina_perfil = perfil_busca(request)
+                self.assertIn("BlackDragon", pagina_perfil.body.decode())
+                self.assertIn("@user875s", pagina_perfil.body.decode())
+
+                with (
+                    patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+                    patch(
+                        "app.main.serpapi.pesquisar_imagem",
+                        return_value={"visual_matches": []},
+                    ) as pesquisar_imagem,
+                ):
+                    primeira_busca = await buscar_serpapi(
+                        request,
+                        api="google_lens",
+                        consentimento="on",
+                        foto_id=0,
+                        related_content_id="",
+                        image_file=UploadFile(
+                            filename="foto.png",
+                            file=BytesIO(imagem_png.getvalue()),
+                        ),
+                        target_user_id=user_id,
+                    )
+
+                self.assertIn("Resultados: Google Lens API", primeira_busca.body.decode())
+                foto = db.listar_fotos_busca(user_id)[0]
+                self.assertTrue((pasta_fotos / foto["arquivo"]).is_file())
+
+                outro_id = db.criar_usuario(
+                    "outro", "outro@example.com", "hash"
+                )
+                request.state.user = {
+                    "id": outro_id,
+                    "username": "outro",
+                    "role": "cliente",
+                }
+                with self.assertRaises(HTTPException) as erro:
+                    obter_foto_busca(request, foto["id"])
+                self.assertEqual(erro.exception.status_code, 403)
+
+                request.state.user = {
+                    "id": user_id,
+                    "username": "cliente",
+                    "role": "cliente",
+                }
+                with (
+                    patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+                    patch(
+                        "app.main.serpapi.pesquisar_imagem",
+                        return_value={"visual_matches": []},
+                    ) as pesquisar_imagem,
+                ):
+                    await buscar_serpapi(
+                        request,
+                        api="google_lens",
+                        consentimento="on",
+                        foto_id=foto["id"],
+                        related_content_id="",
+                        image_file=None,
+                        target_user_id=user_id,
+                    )
+                pesquisar_imagem.assert_called_once()
+                self.assertEqual(len(db.listar_fotos_busca(user_id)), 1)
 
     async def test_consulta_de_saldo_nao_dispara_busca_paga(self):
         conta = {
@@ -272,10 +539,25 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch(
+                "app.main.db.obter_usuario_por_id",
+                return_value={
+                    "id": 1,
+                    "username": "cliente",
+                    "role": "cliente",
+                    "public_name": "BlackDragon",
+                    "public_handle": "user875s",
+                },
+            ),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
             patch("app.main.serpapi.obter_status_conta", return_value=conta) as status,
             patch("app.main.serpapi.pesquisar") as pesquisar,
         ):
-            resultado = await status_serpapi(self.criar_request("/status-serpapi"))
+            resultado = await status_serpapi(
+                self.criar_request("/status-serpapi"), target_user_id=1
+            )
 
         self.assertEqual(resultado.status_code, 200)
         status.assert_called_once_with()

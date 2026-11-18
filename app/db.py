@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sqlite3
@@ -101,7 +102,39 @@ def iniciar_banco():
                 password_hash TEXT NOT NULL,
                 email_verified INTEGER NOT NULL DEFAULT 0,
                 role TEXT NOT NULL DEFAULT 'cliente',
+                public_name TEXT,
+                public_handle TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS user_search_photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                arquivo TEXT NOT NULL UNIQUE,
+                nome_original TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS user_official_sites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_by INTEGER NOT NULL REFERENCES users(id),
+                nome TEXT NOT NULL,
+                url TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, url)
+            );
+            CREATE TABLE IF NOT EXISTS leak_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                reported_by INTEGER NOT NULL REFERENCES users(id),
+                url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                snippet TEXT NOT NULL DEFAULT '',
+                thumbnail TEXT NOT NULL DEFAULT '',
+                engine TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, url)
             );
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token_hash TEXT PRIMARY KEY,
@@ -170,7 +203,45 @@ def _iniciar_banco_postgresql():
             password_hash TEXT NOT NULL,
             email_verified INTEGER NOT NULL DEFAULT 0,
             role TEXT NOT NULL DEFAULT 'cliente',
+            public_name TEXT,
+            public_handle TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_search_photos (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            arquivo TEXT NOT NULL UNIQUE,
+            nome_original TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_official_sites (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_by BIGINT NOT NULL REFERENCES users(id),
+            nome TEXT NOT NULL,
+            url TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, url)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS leak_reports (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            reported_by BIGINT NOT NULL REFERENCES users(id),
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            snippet TEXT NOT NULL DEFAULT '',
+            thumbnail TEXT NOT NULL DEFAULT '',
+            engine TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, url)
         )
         """,
         """
@@ -275,6 +346,20 @@ def _migrar_usuarios():
             conn.execute(
                 "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'cliente'"
             )
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS public_name TEXT"
+            )
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS public_handle TEXT"
+            )
+        else:
+            colunas = {
+                coluna["name"] for coluna in conn.execute("PRAGMA table_info(users)")
+            }
+            if "public_name" not in colunas:
+                conn.execute("ALTER TABLE users ADD COLUMN public_name TEXT")
+            if "public_handle" not in colunas:
+                conn.execute("ALTER TABLE users ADD COLUMN public_handle TEXT")
         conn.execute(
             "UPDATE users SET role = 'cliente' WHERE role = 'user'"
         )
@@ -346,7 +431,10 @@ def obter_usuario_por_email(email):
 def obter_usuario_por_id(user_id):
     with conexao() as conn:
         return conn.execute(
-            "SELECT id, username, email, role FROM users WHERE id = ?",
+            """
+            SELECT id, username, email, role, public_name, public_handle
+            FROM users WHERE id = ?
+            """,
             (user_id,),
         ).fetchone()
 
@@ -355,7 +443,8 @@ def listar_usuarios():
     with conexao() as conn:
         return conn.execute(
             """
-            SELECT id, username, email, email_verified, role, created_at
+            SELECT id, username, email, email_verified, role, public_name,
+                   public_handle, created_at
             FROM users
             ORDER BY created_at DESC, id DESC
             """
@@ -371,6 +460,169 @@ def atualizar_perfil_usuario(user_id, role):
             (role, user_id),
         )
         return cur.rowcount > 0
+
+
+def atualizar_perfil_busca(user_id, public_name, public_handle):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE users
+            SET public_name = ?, public_handle = ?
+            WHERE id = ?
+            """,
+            (public_name, public_handle, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def listar_usuarios_com_perfil_busca():
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, username, public_name, public_handle
+            FROM users
+            WHERE public_name IS NOT NULL AND public_handle IS NOT NULL
+            ORDER BY public_name, username
+            """
+        ).fetchall()
+
+
+def adicionar_foto_busca(user_id, arquivo, nome_original):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO user_search_photos (user_id, arquivo, nome_original)
+            VALUES (?, ?, ?)
+            RETURNING id
+            """,
+            (user_id, arquivo, nome_original),
+        )
+        return cur.fetchone()["id"]
+
+
+def listar_fotos_busca(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, user_id, arquivo, nome_original, created_at
+            FROM user_search_photos
+            WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+
+def obter_foto_busca(foto_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, user_id, arquivo, nome_original
+            FROM user_search_photos
+            WHERE id = ?
+            """,
+            (foto_id,),
+        ).fetchone()
+
+
+def excluir_foto_busca(foto_id, user_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_search_photos WHERE id = ? AND user_id = ?",
+            (foto_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def adicionar_site_oficial_usuario(user_id, created_by, nome, url):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO user_official_sites (user_id, created_by, nome, url)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (user_id, url) DO NOTHING
+            RETURNING id
+            """,
+            (user_id, created_by, nome, url),
+        )
+        registro = cur.fetchone()
+        return registro["id"] if registro else None
+
+
+def listar_sites_oficiais_usuario(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, user_id, created_by, nome, url, created_at
+            FROM user_official_sites
+            WHERE user_id = ?
+            ORDER BY nome, url
+            """,
+            (user_id,),
+        ).fetchall()
+
+
+def excluir_site_oficial_usuario(site_id, user_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_official_sites WHERE id = ? AND user_id = ?",
+            (site_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def adicionar_site_vazado(
+    user_id,
+    reported_by,
+    url,
+    title,
+    source,
+    snippet,
+    thumbnail,
+    engine,
+    metadata,
+):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO leak_reports (
+                user_id, reported_by, url, title, source, snippet,
+                thumbnail, engine, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, url) DO NOTHING
+            RETURNING id
+            """,
+            (
+                user_id,
+                reported_by,
+                url,
+                title,
+                source,
+                snippet,
+                thumbnail,
+                engine,
+                json.dumps(metadata, ensure_ascii=False),
+            ),
+        )
+        registro = cur.fetchone()
+        return registro["id"] if registro else None
+
+
+def listar_sites_vazados(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT r.id, r.user_id, r.reported_by, r.url, r.title,
+                   r.source, r.snippet, r.thumbnail, r.engine,
+                   r.metadata_json, r.created_at, u.username AS reporter
+            FROM leak_reports r
+            JOIN users u ON u.id = r.reported_by
+            WHERE r.user_id = ?
+            ORDER BY r.created_at DESC, r.id DESC
+            """,
+            (user_id,),
+        ).fetchall()
 
 
 def atualizar_senha(user_id, password_hash):
@@ -435,7 +687,8 @@ def obter_usuario_da_sessao(token_hash):
     with conexao() as conn:
         return conn.execute(
             """
-            SELECT u.id, u.username, u.email, u.role
+            SELECT u.id, u.username, u.email, u.role,
+                   u.public_name, u.public_handle
             FROM auth_sessions s JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = ? AND s.expires_at > ?
             """,

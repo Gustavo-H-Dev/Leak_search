@@ -43,6 +43,14 @@ cp .env.example .env
 - O cadastro público cria contas de cliente e registra a data automaticamente
   no banco. A página `/usuarios` e a alteração de perfis admin/cliente ficam
   restritas a administradores; localidade não é solicitada nem inferida.
+- Cada usuário informa seu nome público e arroba em **Meu perfil**. Eles são
+  usados para montar a consulta SerpApi. Clientes pesquisam apenas o próprio
+  perfil; administradores podem selecionar usuários que já preencheram esses
+  dados. O nome e a arroba são autodeclarados: o app restringe a busca à conta
+  autenticada, mas ainda não verifica se esses identificadores pertencem a ela.
+- Fotos de busca ficam em armazenamento privado, separadas dos arquivos
+  públicos do catálogo. `USER_SEARCH_MEDIA_DIR` pode apontar para uma pasta
+  persistente; por padrão, o app usa `fotos_busca` ao lado de `MEDIA_DIR`.
 - Configure `SMTP_USER` e `SMTP_PASSWORD` com uma senha de app do Gmail, além
   de `SMTP_FROM` se o remetente precisar ser diferente. Nunca coloque a senha
   SMTP no código ou no chat.
@@ -79,13 +87,15 @@ Para levar os dados locais ao banco PostgreSQL:
 3. Na raiz do projeto, execute
    `python -m scripts.migrar_sqlite_para_postgres`. Por padrão, o script lê
    `data/catalogo.db`; use `SQLITE_PATH` para outro caminho. O destino deve
-   estar vazio: a migração se recusa a misturar dados e copia criadoras,
-   conteúdos, hashes, páginas oficiais, usuários, tokens, sessões e
-   configurações.
-4. Configure `MEDIA_DIR` para um disco persistente montado no serviço e copie
-   os arquivos de `media/oficiais` para a mesma pasta nesse disco. O banco
-   guarda referências aos nomes desses arquivos; o PostgreSQL não armazena as
-   imagens.
+   estar    vazio: a migração se recusa a misturar dados e copia criadoras,
+   conteúdos, hashes, páginas oficiais, perfis, fotos de busca, sites oficiais
+   pessoais, relatos, usuários, tokens, sessões e configurações.
+4. Configure `MEDIA_DIR` para um disco persistente e copie `media/oficiais`
+   para a pasta correspondente. Configure `USER_SEARCH_MEDIA_DIR` em uma pasta
+   privada no mesmo disco; para migrar fotos existentes, defina
+   `USER_SEARCH_SOURCE_DIR` (padrão `media/fotos_busca`) e
+   `USER_SEARCH_TARGET_DIR` ao executar o script de migração. O banco guarda
+   referências aos nomes; o PostgreSQL não armazena as imagens.
 5. Configure as demais variáveis do serviço, incluindo `APP_BASE_URL` com a
    URL pública HTTPS e `COOKIE_SECURE=true`, e valide o site antes de alterar
    seu endereço de uso.
@@ -98,14 +108,22 @@ e a [documentação de PostgreSQL do Render](https://render.com/docs/postgresql)
 
 ## Testes com SerpApi
 
-A página `/buscar-serpapi` separa cinco mecanismos e faz somente a chamada
-selecionada em cada envio:
+A página `/buscar-serpapi` pesquisa o perfil do próprio usuário ou, para
+administradores, o usuário selecionado. Os resultados podem ser marcados como
+site oficial, ocultados localmente com “Não sou eu” ou registrados como
+relatos de possível vazamento. Os relatos armazenam URL, data do registro,
+título, origem, resumo e outros dados retornados pela API; não são uma
+verificação automática do conteúdo.
+
+A página separa quatro mecanismos e faz somente a chamada selecionada em cada
+envio:
 
 - **Google Images** e **Google Images Light**: buscas por texto, não por imagem.
-- **Google Lens**: envia a imagem selecionada do catálogo à SerpApi. O aplicativo
-  reduz imagens grandes para respeitar o limite documentado de 500 KB.
-- **Google Reverse Image**: recebe uma URL de imagem pública que a SerpApi possa
-  acessar; arquivos locais do catálogo não são publicados automaticamente.
+- **Google Lens**: envia à SerpApi uma foto privada salva no perfil ou uma nova
+  foto do próprio usuário, que fica salva para buscas futuras. Administradores
+  podem pesquisar outros usuários por texto, mas não enviar as fotos deles.
+  O aplicativo reduz imagens grandes para respeitar o limite documentado de
+  500 KB.
 - **Google Images Related Content**: depende de um `related_content_id` retornado
   por uma busca Google Images anterior na mesma página.
 

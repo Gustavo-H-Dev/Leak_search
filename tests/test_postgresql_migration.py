@@ -117,5 +117,59 @@ class MigracaoPostgresTest(unittest.TestCase):
             migrar_sqlite_para_postgres._validar_destino_vazio()
 
 
+class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
+    def test_copia_perfil_fotos_sites_e_relatos_para_o_banco_destino(self):
+        with TemporaryDirectory() as diretorio:
+            caminho_origem = Path(diretorio) / "origem.db"
+            caminho_destino = Path(diretorio) / "destino.db"
+            caminho_db_original = db.CAMINHO_DB
+            try:
+                db.CAMINHO_DB = caminho_origem
+                db.iniciar_banco()
+                user_id = db.criar_usuario(
+                    "cliente", "cliente@example.com", "password-hash"
+                )
+                db.atualizar_perfil_busca(user_id, "BlackDragon", "user875s")
+                db.adicionar_foto_busca(user_id, "foto.png", "foto original.png")
+                db.adicionar_site_oficial_usuario(
+                    user_id,
+                    user_id,
+                    "Perfil oficial",
+                    "https://example.com/perfil",
+                )
+                db.adicionar_site_vazado(
+                    user_id,
+                    user_id,
+                    "https://example.com/vazado",
+                    "Resultado",
+                    "Example",
+                    "Descrição",
+                    "https://example.com/thumb.jpg",
+                    "google_images",
+                    {"date_resultado": "hoje"},
+                )
+
+                db.CAMINHO_DB = caminho_destino
+                db.iniciar_banco()
+                migrar_sqlite_para_postgres._copiar_banco(caminho_origem)
+
+                usuario = db.obter_usuario_por_id(user_id)
+                self.assertEqual(usuario["public_name"], "BlackDragon")
+                self.assertEqual(
+                    db.listar_fotos_busca(user_id)[0]["nome_original"],
+                    "foto original.png",
+                )
+                self.assertEqual(
+                    db.listar_sites_oficiais_usuario(user_id)[0]["url"],
+                    "https://example.com/perfil",
+                )
+                self.assertEqual(
+                    db.listar_sites_vazados(user_id)[0]["url"],
+                    "https://example.com/vazado",
+                )
+            finally:
+                db.CAMINHO_DB = caminho_db_original
+
+
 if __name__ == "__main__":
     unittest.main()

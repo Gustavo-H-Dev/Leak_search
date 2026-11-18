@@ -1,14 +1,40 @@
 {% extends "base.html" %}
-{% block titulo %}Testar APIs SerpApi{% endblock %}
+{% block titulo %}Busca pessoal SerpApi{% endblock %}
 {% block conteudo %}
 <section class="search-page">
   <span class="eyebrow">GOOGLE VIA SERPAPI</span>
-  <h1>Testar as APIs da SerpApi</h1>
+  <h1>Buscar sua presença na internet</h1>
   <p class="search-intro">
-    Cada formulário chama somente a API selecionada. Assim você pode testar um
-    mecanismo por vez e acompanhar o consumo no painel da SerpApi. Esta página
-    não usa as credenciais do Google Cloud Vision.
+    Pesquise por nome e arroba ou compare fotos. Os resultados são pistas da
+    busca e precisam ser conferidos por você; marcar um resultado como vazado
+    registra seu relato, não uma verificação automática.
   </p>
+
+  {% if current_user.role == "admin" %}
+  <form class="search-form target-user-form" method="get" action="/buscar-serpapi">
+    <label class="field-label" for="search-target">Pesquisar como administrador</label>
+    <select id="search-target" name="target_user_id" required>
+      {% for usuario in target_users %}
+      <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
+        {{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}
+      </option>
+      {% endfor %}
+    </select>
+    {% if not target_users %}<p>Nenhum usuário completou o perfil de busca ainda.</p>{% endif %}
+    <button type="submit">Selecionar usuário</button>
+  </form>
+  {% else %}
+  <p>Esta busca usa somente o perfil da sua conta: {{ target_user.public_name or target_user.username }}{% if target_user.public_handle %} (@{{ target_user.public_handle }}){% endif %}.</p>
+  {% endif %}
+
+  {% if not perfil_busca_completo %}
+  <p class="api-status api-status-missing">
+    Complete seu nome público e arroba antes de pesquisar.
+    <a href="/perfil-busca">Configurar perfil de busca</a>.
+  </p>
+  {% else %}
+  <p class="api-status api-status-ready">Termos da busca: <strong>{{ query_perfil }}</strong></p>
+  {% endif %}
 
   {% if api_key_configurada %}
   <p class="api-status api-status-ready">Chave SerpApi configurada no servidor.</p>
@@ -29,6 +55,7 @@
       {% if api_key_configurada %}
       <form method="post" action="/status-serpapi">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <button type="submit">{% if status_conta %}Atualizar saldo{% else %}Consultar saldo{% endif %}</button>
       </form>
       {% endif %}
@@ -82,16 +109,17 @@
     {% endif %}
   </section>
 
+  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+  {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
+
   <p class="privacy-note">
     Cada busca envia a consulta ou a imagem à SerpApi. A Google Lens API exige
     o envio da imagem para a SerpApi; a documentação limita esse upload a
-    500 KB. A Reverse Image API precisa de uma URL de imagem pública. Confira
+    500 KB. Use apenas fotos suas, confira
     os <a href="https://serpapi.com/pricing" target="_blank" rel="noopener noreferrer">limites e preços</a>
     e as <a href="https://serpapi.com/terms" target="_blank" rel="noopener noreferrer">condições da SerpApi</a>
     antes de testar com imagens sensíveis.
   </p>
-
-  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
 
   <div class="serpapi-sections">
     <section class="serpapi-card" id="google-images">
@@ -100,14 +128,13 @@
       <p>Pesquisa imagens usando termos, como no Google Images. Não é busca reversa pela foto.</p>
       <form class="search-form" method="post" action="/buscar-serpapi">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <input type="hidden" name="api" value="google_images">
-        <label class="field-label" for="images-query">Termos da busca</label>
-        <input id="images-query" name="q" value="{{ query if api_ativa == 'google_images' else '' }}" placeholder="Ex.: nome da criadora" required>
         <label class="consent-control">
           <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio desta consulta à SerpApi.</span>
+          <span>Autorizo o envio do meu nome e arroba à SerpApi.</span>
         </label>
-        <button type="submit">Testar Google Images</button>
+        <button type="submit" {% if not perfil_busca_completo %}disabled{% endif %}>Buscar por nome</button>
       </form>
     </section>
 
@@ -117,64 +144,51 @@
       <p>Busca imagens por texto em uma resposta simplificada. Também não é busca reversa pela foto.</p>
       <form class="search-form" method="post" action="/buscar-serpapi">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <input type="hidden" name="api" value="google_images_light">
-        <label class="field-label" for="images-light-query">Termos da busca</label>
-        <input id="images-light-query" name="q" value="{{ query if api_ativa == 'google_images_light' else '' }}" placeholder="Ex.: nome da criadora" required>
         <label class="consent-control">
           <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio desta consulta à SerpApi.</span>
+          <span>Autorizo o envio do meu nome e arroba à SerpApi.</span>
         </label>
-        <button type="submit">Testar Images Light</button>
+        <button type="submit" {% if not perfil_busca_completo %}disabled{% endif %}>Buscar por nome (Light)</button>
       </form>
     </section>
 
     <section class="serpapi-card" id="google-lens">
       <span class="eyebrow">03 · BUSCA VISUAL</span>
       <h2><a href="https://serpapi.com/google-lens-api" target="_blank" rel="noopener noreferrer">Google Lens API</a></h2>
-      <p>Compara visualmente uma imagem do Catálogo com resultados encontrados pelo Lens.</p>
-      {% if conteudos %}
-      <form class="search-form" method="post" action="/buscar-serpapi">
+      <p>Use uma foto já salva ou envie uma nova. Fotos novas são guardadas no seu perfil para buscas futuras.</p>
+      {% if target_user_id == current_user.id %}
+      <form class="search-form" method="post" action="/buscar-serpapi" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <input type="hidden" name="api" value="google_lens">
-        <label class="field-label" for="lens-content">Imagem do Catálogo</label>
-        <select id="lens-content" name="conteudo_id" required>
-          <option value="">Selecione uma imagem</option>
-          {% for conteudo in conteudos %}
-          <option value="{{ conteudo.id }}" {% if api_ativa == 'google_lens' and conteudo_selecionado == conteudo.id %}selected{% endif %}>
-            {{ conteudo.criadora }} — {{ conteudo.nome_original }}
+        {% if fotos %}
+        <label class="field-label" for="lens-photo">Foto já salva</label>
+        <select id="lens-photo" name="foto_id">
+          <option value="">Selecione uma foto salva</option>
+          {% for foto in fotos %}
+          <option value="{{ foto.id }}" {% if api_ativa == 'google_lens' and foto_selecionada == foto.id %}selected{% endif %}>
+            {{ foto.nome_original }} — {{ foto.created_at }}
           </option>
           {% endfor %}
         </select>
+        {% endif %}
+        <label class="field-label" for="lens-new-photo">Ou envie uma foto nova</label>
+        <input id="lens-new-photo" type="file" name="image_file" accept="image/jpeg,image/png,image/webp">
         <label class="consent-control">
           <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio desta imagem à SerpApi para esta busca.</span>
+          <span>Confirmo que esta foto é minha e autorizo seu envio à SerpApi para esta busca.</span>
         </label>
-        <button type="submit">Testar Google Lens</button>
+        <button type="submit" {% if not perfil_busca_completo %}disabled{% endif %}>Buscar com Google Lens</button>
       </form>
       {% else %}
-      <p>Cadastre uma imagem no <a href="/catalogo">Catálogo</a> para testar esta API.</p>
+      <p>A busca visual com foto fica disponível apenas para o próprio usuário.</p>
       {% endif %}
     </section>
 
-    <section class="serpapi-card" id="google-reverse-image">
-      <span class="eyebrow">04 · BUSCA REVERSA</span>
-      <h2><a href="https://serpapi.com/google-reverse-image" target="_blank" rel="noopener noreferrer">Google Reverse Image API</a></h2>
-      <p>Pesquisa uma imagem a partir de uma URL que a SerpApi consiga acessar publicamente.</p>
-      <form class="search-form" method="post" action="/buscar-serpapi">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="api" value="google_reverse_image">
-        <label class="field-label" for="reverse-image-url">URL pública da imagem</label>
-        <input id="reverse-image-url" type="url" name="image_url" value="{{ url_imagem if api_ativa == 'google_reverse_image' else '' }}" placeholder="https://exemplo.com/imagem.jpg" required>
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo a SerpApi a consultar esta URL para realizar a busca reversa.</span>
-        </label>
-        <button type="submit">Testar Reverse Image</button>
-      </form>
-    </section>
-
     <section class="serpapi-card" id="google-images-related-content">
-      <span class="eyebrow">05 · RESULTADOS RELACIONADOS</span>
+      <span class="eyebrow">04 · RESULTADOS RELACIONADOS</span>
       <h2><a href="https://serpapi.com/google-images-related-content-api" target="_blank" rel="noopener noreferrer">Google Images Related Content API</a></h2>
       <p>
         Busca sugestões relacionadas a um resultado da Google Images. Primeiro
@@ -184,8 +198,8 @@
       {% if related_options %}
       <form class="search-form" method="post" action="/buscar-serpapi">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <input type="hidden" name="api" value="google_images_related_content">
-        <input type="hidden" name="q" value="{{ query }}">
         <label class="field-label" for="related-content-id">Resultado da Google Images</label>
         <select id="related-content-id" name="related_content_id" required>
           {% for option in related_options %}
@@ -212,9 +226,37 @@
       {% for resultado in resultados %}
       <li>
         <a href="{{ resultado.link }}" target="_blank" rel="noopener noreferrer">{{ resultado.titulo }}</a>
-        {% if resultado.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ resultado.criadoras_oficiais|join(", ") }}</span>{% endif %}
+        {% if resultado.site_oficial %}<span class="official-site-badge">Site oficial cadastrado</span>{% endif %}
         {% if resultado.origem %}<span>{{ resultado.origem }}</span>{% endif %}
         <span>{{ resultado.link }}</span>
+        {% if resultado.resumo %}<span>{{ resultado.resumo }}</span>{% endif %}
+        {% if resultado.data_resultado %}<span>Data informada pela busca: {{ resultado.data_resultado }}</span>{% endif %}
+        <div class="result-actions">
+          {% if not resultado.site_oficial %}
+          <form method="post" action="/resultados/site-oficial" data-result-action>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+            <input type="hidden" name="url" value="{{ resultado.link }}">
+            <input type="hidden" name="nome" value="{{ resultado.titulo }}">
+            <button type="submit">Site oficial</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/resultados/vazado" data-result-action>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+            <input type="hidden" name="api" value="{{ api_ativa }}">
+            <input type="hidden" name="url" value="{{ resultado.link }}">
+            <input type="hidden" name="titulo" value="{{ resultado.titulo }}">
+            <input type="hidden" name="origem" value="{{ resultado.origem }}">
+            <input type="hidden" name="resumo" value="{{ resultado.resumo }}">
+            <input type="hidden" name="miniatura" value="{{ resultado.miniatura }}">
+            <input type="hidden" name="data_resultado" value="{{ resultado.data_resultado }}">
+            <input type="hidden" name="related_content_id" value="{{ resultado.related_content_id }}">
+            <button class="button-danger" type="submit">VAZADO!</button>
+          </form>
+          <button type="button" class="button-secondary" data-dismiss-result>Não sou eu</button>
+        </div>
+        <span class="result-action-status" aria-live="polite"></span>
       </li>
       {% endfor %}
     </ul>
@@ -223,5 +265,71 @@
     {% endif %}
   </section>
   {% endif %}
+
+  {% if sites_vazados %}
+  <section class="search-results">
+    <h2>Resultados que você marcou como vazados</h2>
+    <ul class="search-result-list">
+      {% for site in sites_vazados %}
+      <li>
+        <a href="{{ site.url }}" target="_blank" rel="noopener noreferrer">{{ site.title }}</a>
+        <span>{{ site.url }}</span>
+        {% if site.source %}<span>Origem: {{ site.source }}</span>{% endif %}
+        {% if site.snippet %}<span>{{ site.snippet }}</span>{% endif %}
+        <span>Registrado em {{ site.created_at }} · Busca: {{ nomes_apis.get(site.engine, site.engine) }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="search-results">
+    <h2>Sites oficiais cadastrados</h2>
+    {% if sites_oficiais_usuario %}
+    <ul class="profile-site-list">
+      {% for site in sites_oficiais_usuario %}
+      <li><a href="{{ site.url }}" target="_blank" rel="noopener noreferrer">{{ site.nome }}</a><span>{{ site.url }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>Nenhum site oficial cadastrado. Use “Site oficial” em um resultado para adicioná-lo.</p>
+    {% endif %}
+  </section>
 </section>
+<script>
+  document.querySelectorAll("[data-result-action]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const item = form.closest("li");
+      const status = item.querySelector(".result-action-status");
+      const button = form.querySelector("button");
+      button.disabled = true;
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          body: new FormData(form),
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.erro || payload.detail || "Não foi possível salvar.");
+        }
+        status.textContent = payload.mensagem;
+        if (form.action.endsWith("/site-oficial")) {
+          const badge = document.createElement("span");
+          badge.className = "official-site-badge";
+          badge.textContent = "Site oficial cadastrado";
+          item.insertBefore(badge, item.querySelector(".result-actions"));
+        }
+        item.querySelector(".result-actions").remove();
+      } catch (error) {
+        status.textContent = error.message;
+        button.disabled = false;
+      }
+    });
+  });
+  document.querySelectorAll("[data-dismiss-result]").forEach((button) => {
+    button.addEventListener("click", () => button.closest("li").remove());
+  });
+</script>
 {% endblock %}

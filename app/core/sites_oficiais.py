@@ -76,3 +76,21 @@ def marcar_resultados(
         item["criadoras_oficiais"] = criadoras_por_url.get(url, [])
         marcados.append(item)
     return marcados
+
+
+def marcar_sites_pessoais(resultados: list[dict], sites_oficiais) -> list[dict]:
+    urls_oficiais = {
+        url_pagina_da_busca(site["url"])
+        for site in sites_oficiais
+        if url_pagina_da_busca(site["url"])
+    }
+    return [
+        {
+            **resultado,
+            "site_oficial": url_pagina_da_busca(
+                resultado.get("url") or resultado.get("link") or ""
+            )
+            in urls_oficiais,
+        }
+        for resultado in resultados
+    ]

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block titulo %}Meu perfil de busca{% endblock %}
+{% block conteudo %}
+<section class="search-page">
+  <span class="eyebrow">MEU PERFIL</span>
+  <h1>Perfil de busca</h1>
+  <p>Esses dados são usados para pesquisar sua presença pública na internet. Fotos salvas ficam privadas e só podem ser acessadas por você e administradores.</p>
+  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+  {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
+
+  <form class="search-form profile-search-form" method="post" action="/perfil-busca">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field-label" for="public-name">Nome de usuário público</label>
+    <input id="public-name" name="nome_publico" maxlength="80" value="{{ usuario.public_name or '' }}" placeholder="Ex.: BlackDragon" required>
+    <label class="field-label" for="public-handle">Arroba</label>
+    <input id="public-handle" name="arroba" maxlength="31" value="{{ '@' ~ usuario.public_handle if usuario.public_handle else '' }}" placeholder="@user875s" required>
+    <button type="submit">Salvar perfil</button>
+  </form>
+
+  <section class="profile-section">
+    <h2>Fotos para suas buscas</h2>
+    <p>Você pode salvar várias fotos e escolher uma delas ao fazer uma busca visual.</p>
+    <form class="search-form profile-search-form" method="post" action="/perfil-busca/fotos" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="field-label" for="profile-photo">Enviar uma nova foto</label>
+      <input id="profile-photo" type="file" name="arquivo" accept="image/jpeg,image/png,image/webp" required>
+      <button type="submit">Salvar foto</button>
+    </form>
+    {% if fotos %}
+    <ul class="profile-photo-list">
+      {% for foto in fotos %}
+      <li>
+        <img src="/fotos-busca/{{ foto.id }}" alt="Foto salva para busca">
+        <span>{{ foto.nome_original }} · {{ foto.created_at }}</span>
+        <form method="post" action="/perfil-busca/fotos/{{ foto.id }}/excluir" onsubmit="return confirm('Remover esta foto salva?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button-danger" type="submit">Remover</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>Você ainda não salvou fotos para busca.</p>
+    {% endif %}
+  </section>
+
+  <section class="profile-section">
+    <h2>Sites oficiais</h2>
+    {% if sites_oficiais %}
+    <ul class="profile-site-list">
+      {% for site in sites_oficiais %}
+      <li>
+        <a href="{{ site.url }}" target="_blank" rel="noopener noreferrer">{{ site.nome }}</a>
+        <span>{{ site.url }}</span>
+        <form method="post" action="/perfil-busca/sites-oficiais/{{ site.id }}/excluir" onsubmit="return confirm('Remover este site oficial do seu perfil?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button-danger" type="submit">Remover</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>Ao marcar um resultado como site oficial, ele aparecerá aqui.</p>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

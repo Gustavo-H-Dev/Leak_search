@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -10,7 +11,7 @@ from urllib.parse import quote, urlencode
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -21,11 +22,18 @@ from app.core import autenticacao, busca_web, imagens, serpapi, sites_oficiais
 from app.core.middleware_auth import AutenticacaoMiddleware
 
 PASTA_OFICIAIS = Path(os.getenv("MEDIA_DIR", "media/oficiais"))
+PASTA_FOTOS_BUSCA = Path(
+    os.getenv(
+        "USER_SEARCH_MEDIA_DIR",
+        str(PASTA_OFICIAIS.parent / "fotos_busca"),
+    )
+)
 EXTENSOES_PERMITIDAS = {".jpg", ".jpeg", ".png", ".webp"}
 TAMANHO_MAXIMO = 20 * 1024 * 1024  # 20 MB
 logger = logging.getLogger(__name__)
 
 PASTA_OFICIAIS.mkdir(parents=True, exist_ok=True)
+PASTA_FOTOS_BUSCA.mkdir(parents=True, exist_ok=True)
 db.iniciar_banco()
 
 app = FastAPI(title="Monitoramento de Vazamentos")
@@ -87,6 +95,24 @@ def exigir_admin(request: Request):
     usuario = request.state.user
     if not usuario or usuario["role"] != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores.")
+
+
+def _usuario_alvo_busca(request: Request, usuario_id: int = 0):
+    atual = request.state.user
+    if atual["role"] != "admin":
+        if usuario_id and usuario_id != atual["id"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Clientes só podem pesquisar a própria conta.",
+            )
+        usuario_id = atual["id"]
+    elif not usuario_id:
+        usuario_id = atual["id"]
+
+    alvo = db.obter_usuario_por_id(usuario_id)
+    if alvo is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    return alvo
 
 
 def _proximo_caminho(valor: str) -> str:
@@ -494,6 +520,27 @@ async def _ler_imagem(arquivo: UploadFile) -> bytes:
     return dados
 
 
+async def _salvar_foto_busca(user_id: int, arquivo: UploadFile):
+    extensao = Path(arquivo.filename or "").suffix.lower()
+    if extensao not in EXTENSOES_PERMITIDAS:
+        raise ValueError("Formato não suportado. Use JPG, PNG ou WEBP.")
+    dados = await _ler_imagem(arquivo)
+    imagens.calcular_phash(dados)
+    nome_arquivo = f"{uuid.uuid4().hex}{extensao}"
+    caminho = PASTA_FOTOS_BUSCA / nome_arquivo
+    caminho.write_bytes(dados)
+    try:
+        foto_id = db.adicionar_foto_busca(
+            user_id,
+            nome_arquivo,
+            arquivo.filename or nome_arquivo,
+        )
+    except db.INTEGRITY_ERRORS:
+        caminho.unlink(missing_ok=True)
+        raise
+    return foto_id, nome_arquivo, dados
+
+
 def _voltar_com_erro(mensagem: str):
     return RedirectResponse("/catalogo?erro=" + quote(mensagem), status_code=303)
 
@@ -550,6 +597,218 @@ def atualizar_perfil_usuario(
     return RedirectResponse(
         "/usuarios?mensagem=" + quote("Perfil atualizado."),
         status_code=303,
+    )
+
+
+@app.get("/perfil-busca", response_class=HTMLResponse)
+def perfil_busca(request: Request, erro: str = "", mensagem: str = ""):
+    usuario = db.obter_usuario_por_id(request.state.user["id"])
+    return templates.TemplateResponse(
+        request,
+        "perfil_busca.html",
+        {
+            "usuario": usuario,
+            "fotos": db.listar_fotos_busca(usuario["id"]),
+            "sites_oficiais": db.listar_sites_oficiais_usuario(usuario["id"]),
+            "erro": erro,
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.post("/perfil-busca", dependencies=_csrf())
+def salvar_perfil_busca(
+    request: Request,
+    nome_publico: str = Form(...),
+    arroba: str = Form(...),
+):
+    nome_publico = nome_publico.strip()
+    if not nome_publico or len(nome_publico) > 80:
+        return RedirectResponse(
+            "/perfil-busca?erro="
+            + quote("Informe um nome público com até 80 caracteres."),
+            status_code=303,
+        )
+    try:
+        arroba_normalizada = serpapi.validar_usuario_instagram(arroba)
+    except ValueError as erro:
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote(str(erro)),
+            status_code=303,
+        )
+    db.atualizar_perfil_busca(
+        request.state.user["id"], nome_publico, arroba_normalizada
+    )
+    return RedirectResponse(
+        "/perfil-busca?mensagem=" + quote("Perfil de busca atualizado."),
+        status_code=303,
+    )
+
+
+@app.post("/perfil-busca/fotos", dependencies=_csrf())
+async def enviar_foto_busca(
+    request: Request,
+    arquivo: UploadFile = File(...),
+):
+    try:
+        await _salvar_foto_busca(request.state.user["id"], arquivo)
+    except ValueError as erro:
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote(str(erro)),
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/perfil-busca?mensagem=" + quote("Foto salva para suas buscas."),
+        status_code=303,
+    )
+
+
+@app.get("/fotos-busca/{foto_id}")
+def obter_foto_busca(request: Request, foto_id: int):
+    foto = db.obter_foto_busca(foto_id)
+    if foto is None:
+        raise HTTPException(status_code=404, detail="Foto não encontrada.")
+    if (
+        request.state.user["role"] != "admin"
+        and foto["user_id"] != request.state.user["id"]
+    ):
+        raise HTTPException(status_code=403, detail="Acesso negado.")
+    nome_arquivo = foto["arquivo"]
+    if Path(nome_arquivo).name != nome_arquivo:
+        raise HTTPException(status_code=404, detail="Foto não encontrada.")
+    caminho = PASTA_FOTOS_BUSCA / nome_arquivo
+    if not caminho.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo de foto não encontrado.")
+    return FileResponse(caminho, media_type=mimetypes.guess_type(nome_arquivo)[0])
+
+
+@app.post("/perfil-busca/fotos/{foto_id}/excluir", dependencies=_csrf())
+def excluir_foto_busca(request: Request, foto_id: int):
+    foto = db.obter_foto_busca(foto_id)
+    if foto is None or foto["user_id"] != request.state.user["id"]:
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote("Foto não encontrada."),
+            status_code=303,
+        )
+    if db.excluir_foto_busca(foto_id, request.state.user["id"]):
+        caminho = PASTA_FOTOS_BUSCA / foto["arquivo"]
+        caminho.unlink(missing_ok=True)
+    return RedirectResponse(
+        "/perfil-busca?mensagem=" + quote("Foto removida."),
+        status_code=303,
+    )
+
+
+@app.post(
+    "/resultados/site-oficial",
+    dependencies=_csrf(),
+)
+def salvar_site_oficial_resultado(
+    request: Request,
+    url: str = Form(...),
+    nome: str = Form("Site oficial"),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    nome = nome.strip() or "Site oficial"
+    if len(nome) > 160:
+        return JSONResponse(
+            {"erro": "O nome do site deve ter até 160 caracteres."},
+            status_code=400,
+        )
+    try:
+        url = sites_oficiais.normalizar_url_pagina(url)
+    except ValueError as erro:
+        return JSONResponse({"erro": str(erro)}, status_code=400)
+    site_id = db.adicionar_site_oficial_usuario(
+        alvo["id"], request.state.user["id"], nome, url
+    )
+    return JSONResponse(
+        {
+            "mensagem": (
+                "Site oficial salvo."
+                if site_id
+                else "Este site já está cadastrado como oficial."
+            ),
+            "duplicado": site_id is None,
+        },
+        status_code=201 if site_id else 200,
+    )
+
+
+@app.post("/perfil-busca/sites-oficiais/{site_id}/excluir", dependencies=_csrf())
+def excluir_site_oficial_usuario(request: Request, site_id: int):
+    user_id = request.state.user["id"]
+    if not db.excluir_site_oficial_usuario(site_id, user_id):
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote("Site oficial não encontrado."),
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/perfil-busca?mensagem=" + quote("Site oficial removido."),
+        status_code=303,
+    )
+
+
+@app.post(
+    "/resultados/vazado",
+    dependencies=_csrf(),
+)
+def salvar_resultado_vazado(
+    request: Request,
+    url: str = Form(...),
+    titulo: str = Form(...),
+    origem: str = Form(""),
+    resumo: str = Form(""),
+    miniatura: str = Form(""),
+    data_resultado: str = Form(""),
+    related_content_id: str = Form(""),
+    api: str = Form(...),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if api not in SERPAPI_ENGINES:
+        return JSONResponse({"erro": "API de busca inválida."}, status_code=400)
+    try:
+        url = sites_oficiais.normalizar_url_pagina(url)
+    except ValueError as erro:
+        return JSONResponse({"erro": str(erro)}, status_code=400)
+    titulo = titulo.strip()
+    origem = origem.strip()
+    resumo = resumo.strip()
+    if not titulo or len(titulo) > 500 or len(origem) > 200 or len(resumo) > 4000:
+        return JSONResponse(
+            {"erro": "Os dados do resultado excedem o tamanho permitido."},
+            status_code=400,
+        )
+    miniatura = miniatura.strip()
+    if miniatura and not serpapi.validar_url_imagem(miniatura):
+        miniatura = ""
+    metadata = {
+        "data_resultado": data_resultado[:200],
+        "related_content_id": related_content_id[:200],
+    }
+    report_id = db.adicionar_site_vazado(
+        alvo["id"],
+        request.state.user["id"],
+        url,
+        titulo,
+        origem,
+        resumo,
+        miniatura,
+        api,
+        metadata,
+    )
+    return JSONResponse(
+        {
+            "mensagem": (
+                "Resultado registrado para revisão."
+                if report_id
+                else "Este endereço já foi registrado."
+            ),
+            "duplicado": report_id is None,
+        },
+        status_code=201 if report_id else 200,
     )
 
 
@@ -870,25 +1129,31 @@ SERPAPI_ENGINES = {
     "google_images_light",
     "google_images_related_content",
     "google_lens",
-    "google_reverse_image",
 }
 SERPAPI_ENGINE_NAMES = {
     "google_images": "Google Images API",
     "google_images_light": "Google Images Light API",
     "google_lens": "Google Lens API",
-    "google_reverse_image": "Google Reverse Image API",
     "google_images_related_content": "Google Images Related Content API",
 }
 
 
-def _contexto_serpapi(request: Request, **valores):
+def _termos_busca(usuario):
+    return f"{usuario['public_name']} @{usuario['public_handle']}"
+
+
+def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    target_user_id = alvo["id"]
+    sites_oficiais = db.listar_sites_oficiais_usuario(target_user_id)
+    fotos = db.listar_fotos_busca(target_user_id)
     contexto = {
         "erro": "",
+        "mensagem": "",
         "api_ativa": "",
         "resultados": [],
         "query": "",
-        "conteudo_selecionado": None,
-        "url_imagem": "",
+        "foto_selecionada": None,
         "related_content_id": "",
         "api_key_configurada": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
         "status_conta": None,
@@ -896,15 +1161,32 @@ def _contexto_serpapi(request: Request, **valores):
         "pesquisa_realizada": False,
         "related_options": [],
         "nomes_apis": SERPAPI_ENGINE_NAMES,
-        "conteudos": db.listar_conteudos(),
+        "target_user": alvo,
+        "target_user_id": target_user_id,
+        "target_users": (
+            db.listar_usuarios_com_perfil_busca()
+            if request.state.user["role"] == "admin"
+            else []
+        ),
+        "perfil_busca_completo": bool(
+            alvo["public_name"] and alvo["public_handle"]
+        ),
+        "fotos": fotos,
+        "sites_oficiais_usuario": sites_oficiais,
+        "sites_vazados": db.listar_sites_vazados(target_user_id),
+        "query_perfil": (
+            _termos_busca(alvo)
+            if alvo["public_name"] and alvo["public_handle"]
+            else ""
+        ),
     }
     contexto.update(valores)
     return templates.TemplateResponse(request, "serpapi.html", contexto)
 
 
 @app.get("/buscar-serpapi", response_class=HTMLResponse)
-def buscar_serpapi_formulario(request: Request):
-    return _contexto_serpapi(request)
+def buscar_serpapi_formulario(request: Request, target_user_id: int = 0):
+    return _contexto_serpapi(request, target_user_id=target_user_id)
 
 
 @app.post(
@@ -912,20 +1194,22 @@ def buscar_serpapi_formulario(request: Request):
     response_class=HTMLResponse,
     dependencies=_csrf(),
 )
-async def status_serpapi(request: Request):
+async def status_serpapi(request: Request, target_user_id: int = Form(0)):
     if not os.getenv("SERPAPI_API_KEY", "").strip():
         return _contexto_serpapi(
             request,
+            target_user_id,
             erro="Configure SERPAPI_API_KEY para consultar o uso da conta.",
         )
     try:
         status_conta = await run_in_threadpool(serpapi.obter_status_conta)
     except serpapi.SerpApiNaoConfigurada as erro:
-        return _contexto_serpapi(request, erro=str(erro))
+        return _contexto_serpapi(request, target_user_id, erro=str(erro))
     except serpapi.ErroSerpApi:
         logger.exception("Falha ao consultar o uso da conta SerpApi")
         return _contexto_serpapi(
             request,
+            target_user_id,
             erro=(
                 "Não foi possível consultar a conta SerpApi. "
                 "Confira se a chave está correta e tente novamente."
@@ -933,6 +1217,7 @@ async def status_serpapi(request: Request):
         )
     return _contexto_serpapi(
         request,
+        target_user_id,
         status_conta=status_conta,
         status_conta_atualizado=True,
     )
@@ -943,94 +1228,117 @@ async def buscar_serpapi(
     request: Request,
     api: str = Form(...),
     consentimento: str = Form(""),
-    q: str = Form(""),
-    conteudo_id: int = Form(0),
-    image_url: str = Form(""),
+    foto_id: int = Form(0),
     related_content_id: str = Form(""),
+    target_user_id: int = Form(0),
+    image_file: UploadFile | None = File(None),
 ):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    target_user_id = alvo["id"]
+    query = (
+        _termos_busca(alvo)
+        if alvo["public_name"] and alvo["public_handle"]
+        else ""
+    )
     contexto = {
         "api_ativa": api,
-        "query": q.strip(),
-        "conteudo_selecionado": conteudo_id or None,
-        "url_imagem": image_url.strip(),
+        "query": query,
+        "foto_selecionada": foto_id or None,
         "related_content_id": related_content_id.strip(),
     }
     if api not in SERPAPI_ENGINES:
-        return _contexto_serpapi(request, erro="API selecionada inválida.", **contexto)
+        return _contexto_serpapi(
+            request, target_user_id, erro="API selecionada inválida.", **contexto
+        )
     if consentimento != "on":
         return _contexto_serpapi(
             request,
+            target_user_id,
             erro="Confirme o envio da consulta ou imagem à SerpApi.",
             **contexto,
         )
+    if not query:
+        return _contexto_serpapi(
+            request,
+            target_user_id,
+            erro="Complete seu nome público e arroba no perfil de busca.",
+            **contexto,
+        )
 
-    criadora_id = None
     try:
         if api in {"google_images", "google_images_light"}:
-            if not contexto["query"]:
-                raise ValueError("Digite os termos que deseja pesquisar.")
             dados = await run_in_threadpool(
-                serpapi.pesquisar, api, q=contexto["query"], gl="br", hl="pt"
+                serpapi.pesquisar, api, q=query, gl="br", hl="pt"
             )
         elif api == "google_lens":
-            conteudo = db.obter_conteudo(conteudo_id)
-            if conteudo is None:
-                raise ValueError("Selecione uma imagem existente no catálogo.")
-            criadora_id = conteudo["criadora_id"]
-            nome_arquivo = conteudo["arquivo"]
-            if Path(nome_arquivo).name != nome_arquivo:
-                raise ValueError("O caminho da imagem cadastrada é inválido.")
-            caminho_arquivo = PASTA_OFICIAIS / nome_arquivo
-            if caminho_arquivo.stat().st_size > TAMANHO_MAXIMO:
-                raise ValueError("A imagem cadastrada é maior que 20 MB.")
-            imagem = caminho_arquivo.read_bytes()
-            imagens.calcular_phash(imagem)
-            dados = await run_in_threadpool(serpapi.pesquisar_imagem, imagem)
-        elif api == "google_reverse_image":
-            if not serpapi.validar_url_imagem(contexto["url_imagem"]):
-                raise ValueError(
-                    "Informe uma URL pública de imagem começando com http:// ou https://."
+            if target_user_id != request.state.user["id"]:
+                raise HTTPException(
+                    status_code=403,
+                    detail="A busca visual só pode ser feita pelo próprio usuário.",
                 )
-            dados = await run_in_threadpool(
-                serpapi.pesquisar,
-                api,
-                image_url=contexto["url_imagem"],
-                gl="br",
-                hl="pt",
-            )
+            if image_file and image_file.filename:
+                foto_id, nome_arquivo, imagem = await _salvar_foto_busca(
+                    target_user_id, image_file
+                )
+            elif foto_id:
+                foto = db.obter_foto_busca(foto_id)
+                if foto is None or foto["user_id"] != target_user_id:
+                    raise ValueError("Selecione uma foto salva para esta conta.")
+                nome_arquivo = foto["arquivo"]
+                imagem = None
+            else:
+                raise ValueError("Escolha uma foto salva ou envie uma nova foto.")
+            if Path(nome_arquivo).name != nome_arquivo:
+                raise ValueError("O caminho da imagem salva é inválido.")
+            caminho_arquivo = PASTA_FOTOS_BUSCA / nome_arquivo
+            if not caminho_arquivo.is_file():
+                raise ValueError("O arquivo da foto selecionada não foi encontrado.")
+            if caminho_arquivo.stat().st_size > TAMANHO_MAXIMO:
+                raise ValueError("A imagem selecionada é maior que 20 MB.")
+            if imagem is None:
+                imagem = caminho_arquivo.read_bytes()
+            imagens.calcular_phash(imagem)
+            contexto["foto_selecionada"] = foto_id
+            dados = await run_in_threadpool(serpapi.pesquisar_imagem, imagem)
         else:
-            if not contexto["query"] or not contexto["related_content_id"]:
+            if not contexto["related_content_id"]:
                 raise ValueError(
                     "Use a opção de conteúdo relacionado em um resultado da Google Images."
                 )
             dados = await run_in_threadpool(
                 serpapi.pesquisar,
                 api,
-                q=contexto["query"],
+                q=query,
                 related_content_id=contexto["related_content_id"],
                 gl="br",
                 hl="pt",
             )
     except ValueError as erro:
-        return _contexto_serpapi(request, erro=str(erro), **contexto)
+        return _contexto_serpapi(
+            request, target_user_id, erro=str(erro), **contexto
+        )
     except serpapi.SerpApiNaoConfigurada as erro:
-        return _contexto_serpapi(request, erro=str(erro), **contexto)
+        return _contexto_serpapi(
+            request, target_user_id, erro=str(erro), **contexto
+        )
     except serpapi.ErroSerpApi as erro:
         logger.exception("Falha na consulta SerpApi (%s)", api)
-        return _contexto_serpapi(request, erro=str(erro), **contexto)
+        return _contexto_serpapi(
+            request, target_user_id, erro=str(erro), **contexto
+        )
     except OSError:
-        logger.exception("Não foi possível ler a imagem do catálogo (%s)", conteudo_id)
+        logger.exception("Não foi possível ler uma foto de busca (%s)", foto_id)
         return _contexto_serpapi(
             request,
+            target_user_id,
             erro="Não foi possível ler a imagem selecionada no catálogo.",
             **contexto,
         )
 
     resultados = serpapi.normalizar_resultados(dados, api)
-    resultados = sites_oficiais.marcar_resultados(
+    resultados = sites_oficiais.marcar_sites_pessoais(
         resultados,
-        db.listar_sites_oficiais(),
-        criadora_id=criadora_id,
+        db.listar_sites_oficiais_usuario(target_user_id),
     )
     related_options = []
     if api == "google_images":
@@ -1050,9 +1358,10 @@ async def buscar_serpapi(
 
     return _contexto_serpapi(
         request,
+        target_user_id,
         pesquisa_realizada=True,
         resultados=resultados,
-        query=contexto["query"],
+        query=query,
         api_ativa=api,
         related_options=related_options,
     )

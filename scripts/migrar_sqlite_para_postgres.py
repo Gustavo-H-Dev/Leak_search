@@ -32,6 +32,36 @@ TABELAS = {
         "password_hash",
         "email_verified",
         "role",
+        "public_name",
+        "public_handle",
+        "created_at",
+    ),
+    "user_search_photos": (
+        "id",
+        "user_id",
+        "arquivo",
+        "nome_original",
+        "created_at",
+    ),
+    "user_official_sites": (
+        "id",
+        "user_id",
+        "created_by",
+        "nome",
+        "url",
+        "created_at",
+    ),
+    "leak_reports": (
+        "id",
+        "user_id",
+        "reported_by",
+        "url",
+        "title",
+        "source",
+        "snippet",
+        "thumbnail",
+        "engine",
+        "metadata_json",
         "created_at",
     ),
     "auth_tokens": (
@@ -49,7 +79,16 @@ TABELAS = {
     ),
     "app_settings": ("name", "value"),
 }
-TABELAS_COM_ID = ("criadoras", "conteudos", "hashes", "sites_oficiais", "users")
+TABELAS_COM_ID = (
+    "criadoras",
+    "conteudos",
+    "hashes",
+    "sites_oficiais",
+    "users",
+    "user_search_photos",
+    "user_official_sites",
+    "leak_reports",
+)
 
 
 def _tabelas_origem(conn):
@@ -151,6 +190,19 @@ def _copiar_imagens():
     return True
 
 
+def _copiar_fotos_busca():
+    origem = Path(os.getenv("USER_SEARCH_SOURCE_DIR", "media/fotos_busca"))
+    destino_configurado = os.getenv("USER_SEARCH_TARGET_DIR", "").strip()
+    if not destino_configurado:
+        return False
+    destino = Path(destino_configurado)
+    if not origem.is_dir():
+        raise FileNotFoundError(f"Pasta de fotos de busca não encontrada: {origem}")
+    destino.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(origem, destino, dirs_exist_ok=True, copy_function=shutil.copy2)
+    return True
+
+
 def main():
     caminho_sqlite = Path(os.getenv("SQLITE_PATH", "data/catalogo.db"))
     if not caminho_sqlite.is_file():
@@ -163,6 +215,7 @@ def main():
     _copiar_banco(caminho_sqlite)
     _ajustar_sequencias()
     imagens_copiadas = _copiar_imagens()
+    fotos_busca_copiadas = _copiar_fotos_busca()
     print("Migração do banco SQLite para PostgreSQL concluída.")
     if imagens_copiadas:
         print("Arquivos de imagem copiados para MEDIA_TARGET_DIR.")
@@ -170,6 +223,13 @@ def main():
         print(
             "ATENÇÃO: imagens não copiadas. Copie media/oficiais para o disco "
             "persistente do Render e configure MEDIA_DIR."
+        )
+    if fotos_busca_copiadas:
+        print("Fotos de busca copiadas para USER_SEARCH_TARGET_DIR.")
+    else:
+        print(
+            "ATENÇÃO: fotos de busca não copiadas. Configure "
+            "USER_SEARCH_SOURCE_DIR e USER_SEARCH_TARGET_DIR se houver fotos."
         )
 
 
