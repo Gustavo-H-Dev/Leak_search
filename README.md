@@ -55,10 +55,10 @@ cp .env.example .env
   são armazenadas no banco como hashes Argon2. A conta existente não é
   sobrescrita em inicializações posteriores.
 - O cadastro público cria uma conta de criadora e solicita nome público e
-  arroba. Após a confirmação do e-mail, o aplicativo associa a conta a um perfil
-  existente do catálogo com esse mesmo e-mail; se não houver perfil, cria um
-  novo. Administradores também podem cadastrar perfis sem conta e informar o
-  e-mail para uma associação posterior. Nome e arroba são autodeclarados.
+  arroba. Com `EMAIL_VERIFICATION_REQUIRED=false`, a conta é ativada na hora e
+  associada a um perfil existente com o mesmo e-mail, ou cria um perfil novo.
+  Administradores também podem cadastrar perfis sem conta. Nome e arroba são
+  autodeclarados.
 - A página `/usuarios` e o catálogo de criadoras são administrados por
   administradores. Catálogo, comparação e buscas também são restritos a
   administradores; contas de criadoras não têm acesso aos arquivos, catálogo ou
@@ -75,10 +75,14 @@ cp .env.example .env
   os usuários realmente conseguem acessar.
 - Em produção, use HTTPS e defina `COOKIE_SECURE=true`.
 
-O cadastro exige confirmação de e-mail. A tela de login também permite
-recuperar a senha por e-mail. A página inicial permanece pública; catálogo,
-comparações, buscas, arquivos e demais rotas exigem sessão autenticada. Cada
-formulário de alteração envia proteção CSRF.
+Por enquanto, `EMAIL_VERIFICATION_REQUIRED=false` deixa o cadastro e o login
+sem confirmação de e-mail, sem remover os fluxos de confirmação. Quando o SMTP
+estiver pronto, altere para `EMAIL_VERIFICATION_REQUIRED=true` no `.env` e
+reinicie o serviço para exigir confirmação e envio de e-mail no cadastro. A tela
+de login também permite recuperar a senha por e-mail quando o SMTP estiver
+configurado. A página inicial permanece pública; catálogo, comparações, buscas,
+arquivos e demais rotas exigem sessão autenticada. Cada formulário de alteração
+envia proteção CSRF.
 
 Para iniciar ou atualizar o serviço:
 
@@ -174,10 +178,10 @@ cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; se
 uma conta e chave SerpApi, não há saldo que o site possa consultar.
 
 No catálogo, a criadora é o cadastro principal. Um perfil pode existir sem
-conta; quando o e-mail informado pelo administrador for confirmado durante o
-cadastro público, a conta é associada ao perfil. Foto e site oficial são
-opcionais; sites e fotos já cadastrados ficam agrupados dentro do registro da
-criadora e também podem ser adicionados depois. As buscas do Google Vision,
+conta; no cadastro público, a conta é associada a um perfil existente com o
+mesmo e-mail. Foto e site oficial são opcionais; sites e fotos já cadastrados
+ficam agrupados dentro do registro da criadora e também podem ser adicionados
+depois. As buscas do Google Vision,
 SerpApi e Instagram só marcam a URL exata da página cadastrada (sem considerar
 outras páginas do mesmo domínio). O resultado continua visível para revisão e
 a marcação identifica para qual criadora a página foi registrada. Endereços

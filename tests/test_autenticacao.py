@@ -1,4 +1,5 @@
 import re
+import os
 from datetime import datetime, timedelta, timezone
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -13,6 +14,99 @@ from app.main import app
 
 
 class AutenticacaoTest(unittest.TestCase):
+    def test_cadastro_ativa_conta_sem_smtp_quando_confirmacao_desativada(self):
+        with TemporaryDirectory() as diretorio:
+            with (
+                patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"),
+                patch.dict(
+                    os.environ,
+                    {
+                        "EMAIL_VERIFICATION_REQUIRED": "false",
+                        "SMTP_HOST": "",
+                        "SMTP_USER": "",
+                        "SMTP_PASSWORD": "",
+                    },
+                ),
+            ):
+                db.iniciar_banco()
+                with TestClient(app) as client:
+                    formulario = client.get("/cadastro")
+                    token_csrf = re.search(
+                        rb'name="csrf_token" value="([^"]+)"', formulario.content
+                    ).group(1).decode()
+                    resposta_cadastro = client.post(
+                        "/cadastro",
+                        data={
+                            "csrf_token": token_csrf,
+                            "username": "nova_criadora",
+                            "email": "nova@example.com",
+                            "nome_publico": "Novo Perfil",
+                            "arroba": "novo_perfil",
+                            "senha": "senha-cliente-teste-forte",
+                            "confirmar_senha": "senha-cliente-teste-forte",
+                        },
+                    )
+
+                    login_formulario = client.get("/login")
+                    token_csrf = re.search(
+                        rb'name="csrf_token" value="([^"]+)"',
+                        login_formulario.content,
+                    ).group(1).decode()
+                    resposta_login = client.post(
+                        "/login",
+                        data={
+                            "csrf_token": token_csrf,
+                            "username": "nova_criadora",
+                            "senha": "senha-cliente-teste-forte",
+                            "next": "/",
+                        },
+                        follow_redirects=False,
+                    )
+
+                usuario = db.obter_usuario_por_login("nova_criadora")
+                self.assertEqual(resposta_cadastro.status_code, 200)
+                self.assertIn("Sua conta já está ativa", resposta_cadastro.text)
+                self.assertTrue(usuario["email_verified"])
+                self.assertEqual(resposta_login.status_code, 303)
+                self.assertEqual(resposta_login.headers["location"], "/")
+
+    def test_cadastro_exige_smtp_quando_confirmacao_reativada(self):
+        with TemporaryDirectory() as diretorio:
+            with (
+                patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"),
+                patch.dict(
+                    os.environ,
+                    {
+                        "EMAIL_VERIFICATION_REQUIRED": "true",
+                        "SMTP_HOST": "",
+                        "SMTP_USER": "",
+                        "SMTP_PASSWORD": "",
+                    },
+                ),
+            ):
+                db.iniciar_banco()
+                with TestClient(app) as client:
+                    formulario = client.get("/cadastro")
+                    token_csrf = re.search(
+                        rb'name="csrf_token" value="([^"]+)"', formulario.content
+                    ).group(1).decode()
+                    resposta = client.post(
+                        "/cadastro",
+                        data={
+                            "csrf_token": token_csrf,
+                            "username": "nova_criadora",
+                            "email": "nova@example.com",
+                            "nome_publico": "Novo Perfil",
+                            "arroba": "novo_perfil",
+                            "senha": "senha-cliente-teste-forte",
+                            "confirmar_senha": "senha-cliente-teste-forte",
+                        },
+                    )
+
+                self.assertEqual(resposta.status_code, 400)
+                self.assertIn("envio de e-mail ainda não está configurado", resposta.text)
+                self.assertIsNone(db.obter_usuario_por_login("nova_criadora"))
+
     def test_usuario_novo_e_cliente_com_data_de_cadastro_no_banco(self):
         with TemporaryDirectory() as diretorio:
             with patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"):

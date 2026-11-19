@@ -75,6 +75,15 @@ def email_configurado() -> bool:
     )
 
 
+def confirmacao_email_obrigatoria() -> bool:
+    return os.getenv("EMAIL_VERIFICATION_REQUIRED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def enviar_email(destinatario: str, assunto: str, corpo: str) -> None:
     host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
     usuario = os.getenv("SMTP_USER", "").strip()

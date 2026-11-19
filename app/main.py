@@ -232,7 +232,7 @@ async def login(
             },
             status_code=400,
         )
-    if not usuario["email_verified"]:
+    if not usuario["email_verified"] and autenticacao.confirmacao_email_obrigatoria():
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -243,6 +243,8 @@ async def login(
             },
             status_code=403,
         )
+    if not usuario["email_verified"]:
+        db.confirmar_email(usuario["id"])
     if autenticacao.password_hasher.check_needs_rehash(usuario["password_hash"]):
         db.atualizar_senha(
             usuario["id"], autenticacao.hash_senha(senha)
@@ -256,7 +258,11 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
     return templates.TemplateResponse(
         request,
         "cadastro.html",
-        {"erro": erro, "mensagem": mensagem},
+        {
+            "erro": erro,
+            "mensagem": mensagem,
+            "confirmacao_email_obrigatoria": autenticacao.confirmacao_email_obrigatoria(),
+        },
     )
 
 
@@ -287,7 +293,10 @@ async def cadastrar(
             raise ValueError("As senhas não coincidem.")
         if username.casefold() == ADMIN_USERNAME.casefold():
             raise ValueError("Esse nome de usuário está reservado.")
-        if not autenticacao.email_configurado():
+        if (
+            autenticacao.confirmacao_email_obrigatoria()
+            and not autenticacao.email_configurado()
+        ):
             raise ValueError("O envio de e-mail ainda não está configurado.")
         user_id = db.criar_usuario(
             username,
@@ -296,11 +305,18 @@ async def cadastrar(
             nome_publico,
             arroba,
         )
+        confirmacao_email_obrigatoria = autenticacao.confirmacao_email_obrigatoria()
+        if not confirmacao_email_obrigatoria:
+            db.confirmar_email(user_id)
     except ValueError as erro:
         return templates.TemplateResponse(
             request,
             "cadastro.html",
-            {"erro": str(erro), "mensagem": ""},
+            {
+                "erro": str(erro),
+                "mensagem": "",
+                "confirmacao_email_obrigatoria": autenticacao.confirmacao_email_obrigatoria(),
+            },
             status_code=400,
         )
     except db.INTEGRITY_ERRORS:
@@ -310,38 +326,46 @@ async def cadastrar(
             {
                 "erro": "Esse nome de usuário ou e-mail já está cadastrado.",
                 "mensagem": "",
+                "confirmacao_email_obrigatoria": autenticacao.confirmacao_email_obrigatoria(),
             },
             status_code=400,
         )
 
-    try:
-        await _enviar_email_token(
-            user_id,
-            email,
-            username,
-            "confirmar_email",
-        )
-    except autenticacao.ErroEmail:
-        logger.exception("Falha ao enviar confirmação de e-mail para novo cadastro")
-        return templates.TemplateResponse(
-            request,
-            "cadastro.html",
-            {
-                "erro": (
-                    "A conta foi criada, mas não foi possível enviar o e-mail. "
-                    "Use a opção de reenviar confirmação."
-                ),
-                "mensagem": "",
-            },
-            status_code=503,
-        )
+    if confirmacao_email_obrigatoria:
+        try:
+            await _enviar_email_token(
+                user_id,
+                email,
+                username,
+                "confirmar_email",
+            )
+        except autenticacao.ErroEmail:
+            logger.exception("Falha ao enviar confirmação de e-mail para novo cadastro")
+            return templates.TemplateResponse(
+                request,
+                "cadastro.html",
+                {
+                    "erro": (
+                        "A conta foi criada, mas não foi possível enviar o e-mail. "
+                        "Use a opção de reenviar confirmação."
+                    ),
+                    "mensagem": "",
+                    "confirmacao_email_obrigatoria": True,
+                },
+                status_code=503,
+            )
 
     return templates.TemplateResponse(
         request,
         "cadastro.html",
         {
             "erro": "",
-            "mensagem": "Cadastro recebido. Enviamos um link para confirmar seu e-mail.",
+            "mensagem": (
+                "Cadastro concluído. Sua conta já está ativa."
+                if not confirmacao_email_obrigatoria
+                else "Cadastro recebido. Enviamos um link para confirmar seu e-mail."
+            ),
+            "confirmacao_email_obrigatoria": confirmacao_email_obrigatoria,
         },
     )
 
@@ -387,6 +411,16 @@ def confirmar_email(request: Request, token: str = Form(...)):
 @app.post("/reenviar-confirmacao", response_class=HTMLResponse, dependencies=_csrf())
 async def reenviar_confirmacao(request: Request, email: str = Form(...)):
     mensagem = "Se houver uma conta pendente para esse endereço, enviaremos um novo link."
+    if not autenticacao.confirmacao_email_obrigatoria():
+        return templates.TemplateResponse(
+            request,
+            "cadastro.html",
+            {
+                "erro": "",
+                "mensagem": "A confirmação de e-mail está desativada no momento.",
+                "confirmacao_email_obrigatoria": False,
+            },
+        )
     usuario = db.obter_usuario_por_email(email.strip())
     if usuario and not usuario["email_verified"] and autenticacao.email_configurado():
         try:
@@ -401,7 +435,11 @@ async def reenviar_confirmacao(request: Request, email: str = Form(...)):
     return templates.TemplateResponse(
         request,
         "cadastro.html",
-        {"erro": "", "mensagem": mensagem},
+        {
+            "erro": "",
+            "mensagem": mensagem,
+            "confirmacao_email_obrigatoria": True,
+        },
     )
 
 
