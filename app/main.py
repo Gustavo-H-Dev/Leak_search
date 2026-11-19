@@ -12,7 +12,6 @@ from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -68,8 +67,6 @@ templates = Jinja2Templates(
     directory="app/templates",
     context_processors=[_contexto_template],
 )
-app.mount("/arquivos", StaticFiles(directory=PASTA_OFICIAIS), name="arquivos")
-
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Gustavo.souza").strip()
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip()
 ADMIN_INITIAL_PASSWORD = os.getenv("ADMIN_INITIAL_PASSWORD", "")
@@ -102,6 +99,20 @@ def exigir_admin(request: Request):
     usuario = request.state.user
     if not usuario or usuario["role"] != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores.")
+
+
+def _admin_csrf():
+    return [Depends(exigir_admin), Depends(validar_csrf)]
+
+
+@app.get("/arquivos/{nome_arquivo}", dependencies=[Depends(exigir_admin)])
+def obter_arquivo_catalogo(nome_arquivo: str):
+    if Path(nome_arquivo).name != nome_arquivo:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    caminho = PASTA_OFICIAIS / nome_arquivo
+    if not caminho.is_file():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    return FileResponse(caminho, media_type=mimetypes.guess_type(nome_arquivo)[0])
 
 
 def _usuario_alvo_busca(request: Request, usuario_id: int = 0):
@@ -254,12 +265,23 @@ async def cadastrar(
     request: Request,
     username: str = Form(...),
     email: str = Form(...),
+    nome_publico: str = Form(...),
+    arroba: str = Form(...),
     senha: str = Form(...),
     confirmar_senha: str = Form(...),
 ):
     try:
         username = autenticacao.validar_usuario(username)
         email = autenticacao.validar_email(email)
+        nome_publico = nome_publico.strip()
+        if not nome_publico or len(nome_publico) > 80:
+            raise ValueError("Informe seu nome público com até 80 caracteres.")
+        arroba = serpapi.validar_usuario_instagram(arroba)
+        if not db.perfil_criadora_disponivel(nome_publico, email):
+            raise ValueError(
+                "Esse nome já está no catálogo com outro e-mail. "
+                "Peça ao administrador para atualizar o e-mail do perfil."
+            )
         autenticacao.validar_senha(senha)
         if senha != confirmar_senha:
             raise ValueError("As senhas não coincidem.")
@@ -271,6 +293,8 @@ async def cadastrar(
             username,
             email,
             autenticacao.hash_senha(senha),
+            nome_publico,
+            arroba,
         )
     except ValueError as erro:
         return templates.TemplateResponse(
@@ -708,7 +732,7 @@ def excluir_foto_busca(request: Request, foto_id: int):
 
 @app.post(
     "/resultados/site-oficial",
-    dependencies=_csrf(),
+    dependencies=_admin_csrf(),
 )
 def salvar_site_oficial_resultado(
     request: Request,
@@ -759,7 +783,7 @@ def excluir_site_oficial_usuario(request: Request, site_id: int):
 
 @app.post(
     "/resultados/vazado",
-    dependencies=_csrf(),
+    dependencies=_admin_csrf(),
 )
 def salvar_resultado_vazado(
     request: Request,
@@ -819,7 +843,11 @@ def salvar_resultado_vazado(
     )
 
 
-@app.get("/catalogo", response_class=HTMLResponse)
+@app.get(
+    "/catalogo",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
 def catalogo(request: Request, erro: str = "", mensagem: str = ""):
     sites_oficiais_cadastrados = db.listar_sites_oficiais()
     conteudos_cadastrados = db.listar_conteudos()
@@ -848,7 +876,7 @@ def catalogo(request: Request, erro: str = "", mensagem: str = ""):
     return templates.TemplateResponse(request, "catalogo.html", contexto)
 
 
-@app.post("/sites-oficiais", dependencies=_csrf())
+@app.post("/sites-oficiais", dependencies=_admin_csrf())
 def novo_site_oficial(
     criadora_id: int = Form(...),
     nome: str = Form(...),
@@ -873,7 +901,7 @@ def novo_site_oficial(
     )
 
 
-@app.post("/sites-oficiais/{site_id}/editar", dependencies=_csrf())
+@app.post("/sites-oficiais/{site_id}/editar", dependencies=_admin_csrf())
 def editar_site_oficial(
     site_id: int,
     criadora_id: int = Form(...),
@@ -903,7 +931,7 @@ def editar_site_oficial(
     )
 
 
-@app.post("/sites-oficiais/{site_id}/excluir", dependencies=_csrf())
+@app.post("/sites-oficiais/{site_id}/excluir", dependencies=_admin_csrf())
 def excluir_site_oficial(site_id: int):
     if not db.excluir_site_oficial(site_id):
         return _voltar_com_erro("Página oficial não encontrada.")
@@ -913,16 +941,33 @@ def excluir_site_oficial(site_id: int):
     )
 
 
-@app.post("/criadoras", dependencies=_csrf())
+@app.post("/criadoras", dependencies=_admin_csrf())
 async def nova_criadora(
     nome: str = Form(...),
     site_nome: str = Form("Site oficial"),
     site_url: str = Form(""),
     arquivo: UploadFile | None = File(None),
+    email: str = Form(""),
+    arroba: str = Form(""),
 ):
     nome = nome.strip()
     if not nome:
         return _voltar_com_erro("Informe o nome da criadora.")
+    if len(nome) > 80:
+        return _voltar_com_erro("O nome da criadora deve ter até 80 caracteres.")
+
+    email = email.strip() if isinstance(email, str) else ""
+    if email:
+        try:
+            email = autenticacao.validar_email(email)
+        except ValueError as erro:
+            return _voltar_com_erro(str(erro))
+    handle = ""
+    if isinstance(arroba, str) and arroba.strip():
+        try:
+            handle = serpapi.validar_usuario_instagram(arroba)
+        except ValueError as erro:
+            return _voltar_com_erro(str(erro))
 
     url_oficial = None
     if site_url.strip():
@@ -948,7 +993,15 @@ async def nova_criadora(
             return _voltar_com_erro(str(erro))
         imagem_nova = (dados, phash, extensao, arquivo.filename)
 
-    criadora_id = db.criar_criadora(nome)
+    try:
+        if email or handle:
+            criadora_id = db.criar_criadora_com_contato(nome, email, handle)
+        else:
+            criadora_id = db.criar_criadora(nome)
+    except db.INTEGRITY_ERRORS:
+        return _voltar_com_erro(
+            "Já existe um perfil de criadora com esse nome ou e-mail."
+        )
     if url_oficial:
         try:
             db.adicionar_site_oficial(criadora_id, site_nome, url_oficial)
@@ -966,7 +1019,47 @@ async def nova_criadora(
     return RedirectResponse("/catalogo", status_code=303)
 
 
-@app.post("/conteudos", dependencies=_csrf())
+@app.post("/criadoras/{criadora_id}/editar", dependencies=_admin_csrf())
+def editar_criadora(
+    criadora_id: int,
+    nome: str = Form(...),
+    email: str = Form(""),
+    arroba: str = Form(""),
+):
+    nome = nome.strip()
+    if not nome or len(nome) > 80:
+        return _voltar_com_erro("O nome da criadora deve ter entre 1 e 80 caracteres.")
+    email = email.strip()
+    if email:
+        try:
+            email = autenticacao.validar_email(email)
+        except ValueError as erro:
+            return _voltar_com_erro(str(erro))
+    handle = ""
+    if arroba.strip():
+        try:
+            handle = serpapi.validar_usuario_instagram(arroba)
+        except ValueError as erro:
+            return _voltar_com_erro(str(erro))
+    try:
+        atualizado = db.atualizar_criadora_contato(
+            criadora_id, nome, email, handle
+        )
+    except db.INTEGRITY_ERRORS:
+        return _voltar_com_erro(
+            "Já existe um perfil de criadora com esse nome ou e-mail."
+        )
+    if not atualizado:
+        return _voltar_com_erro(
+            "Perfil não encontrado ou já associado a uma conta."
+        )
+    return RedirectResponse(
+        "/catalogo?mensagem=" + quote("Perfil de criadora atualizado."),
+        status_code=303,
+    )
+
+
+@app.post("/conteudos", dependencies=_admin_csrf())
 async def novo_conteudo(criadora_id: int = Form(...), arquivo: UploadFile = File(...)):
     extensao = Path(arquivo.filename or "").suffix.lower()
     if extensao not in EXTENSOES_PERMITIDAS:
@@ -983,7 +1076,7 @@ async def novo_conteudo(criadora_id: int = Form(...), arquivo: UploadFile = File
     return RedirectResponse("/catalogo", status_code=303)
 
 
-@app.post("/conteudos/{conteudo_id}/excluir", dependencies=_csrf())
+@app.post("/conteudos/{conteudo_id}/excluir", dependencies=_admin_csrf())
 def excluir_conteudo(conteudo_id: int):
     nome_arquivo = db.excluir_conteudo(conteudo_id)
     if nome_arquivo is None:
@@ -1005,14 +1098,18 @@ def excluir_conteudo(conteudo_id: int):
     return RedirectResponse("/catalogo?mensagem=" + mensagem, status_code=303)
 
 
-@app.get("/comparar", response_class=HTMLResponse)
+@app.get(
+    "/comparar",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
 def comparar_formulario(request: Request):
     return templates.TemplateResponse(
         request, "comparar.html", {"resultados": None, "erro": ""}
     )
 
 
-@app.post("/comparar", response_class=HTMLResponse, dependencies=_csrf())
+@app.post("/comparar", response_class=HTMLResponse, dependencies=_admin_csrf())
 async def comparar(request: Request, arquivo: UploadFile = File(...)):
     try:
         dados = await _ler_imagem(arquivo)
@@ -1034,7 +1131,11 @@ def buscar_web_legado():
     return RedirectResponse("/buscar-google", status_code=307)
 
 
-@app.get("/buscar-google", response_class=HTMLResponse)
+@app.get(
+    "/buscar-google",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
 def buscar_google_formulario(request: Request):
     return templates.TemplateResponse(
         request,
@@ -1052,8 +1153,8 @@ def buscar_google_formulario(request: Request):
     )
 
 
-@app.post("/buscar-web", response_class=HTMLResponse, dependencies=_csrf())
-@app.post("/buscar-google", response_class=HTMLResponse, dependencies=_csrf())
+@app.post("/buscar-web", response_class=HTMLResponse, dependencies=_admin_csrf())
+@app.post("/buscar-google", response_class=HTMLResponse, dependencies=_admin_csrf())
 async def buscar_google_na_web(
     request: Request,
     conteudo_id: int = Form(...),
@@ -1203,7 +1304,11 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
     return templates.TemplateResponse(request, "serpapi.html", contexto)
 
 
-@app.get("/buscar-serpapi", response_class=HTMLResponse)
+@app.get(
+    "/buscar-serpapi",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
 def buscar_serpapi_formulario(request: Request, target_user_id: int = 0):
     return _contexto_serpapi(request, target_user_id=target_user_id)
 
@@ -1211,7 +1316,7 @@ def buscar_serpapi_formulario(request: Request, target_user_id: int = 0):
 @app.post(
     "/status-serpapi",
     response_class=HTMLResponse,
-    dependencies=_csrf(),
+    dependencies=_admin_csrf(),
 )
 async def status_serpapi(request: Request, target_user_id: int = Form(0)):
     if not os.getenv("SERPAPI_API_KEY", "").strip():
@@ -1242,7 +1347,7 @@ async def status_serpapi(request: Request, target_user_id: int = Form(0)):
     )
 
 
-@app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_csrf())
+@app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_admin_csrf())
 async def buscar_serpapi(
     request: Request,
     api: str = Form(...),
@@ -1423,12 +1528,16 @@ def _contexto_instagram(request: Request, **valores):
     return templates.TemplateResponse(request, "instagram.html", contexto)
 
 
-@app.get("/buscar-instagram", response_class=HTMLResponse)
+@app.get(
+    "/buscar-instagram",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
 def buscar_instagram_formulario(request: Request):
     return _contexto_instagram(request)
 
 
-@app.post("/buscar-instagram", response_class=HTMLResponse, dependencies=_csrf())
+@app.post("/buscar-instagram", response_class=HTMLResponse, dependencies=_admin_csrf())
 async def buscar_instagram(
     request: Request,
     api: str = Form(...),

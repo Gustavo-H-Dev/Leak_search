@@ -38,6 +38,55 @@ class AutenticacaoTest(unittest.TestCase):
                     db.obter_usuario_por_id(user_id)["role"], "cliente"
                 )
 
+    def test_email_confirmado_associa_conta_ao_perfil_pre_cadastrado(self):
+        with TemporaryDirectory() as diretorio:
+            with patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"):
+                db.iniciar_banco()
+                criadora_id = db.criar_criadora_com_contato(
+                    "Nome Público",
+                    "criadora@example.com",
+                    "perfil",
+                )
+                user_id = db.criar_usuario(
+                    "criadora",
+                    "CRIADORA@example.com",
+                    "hash",
+                    "Nome Público",
+                    "perfil",
+                )
+
+                db.confirmar_email(user_id)
+
+                criadora = next(
+                    item
+                    for item in db.listar_criadoras()
+                    if item["id"] == criadora_id
+                )
+                self.assertEqual(criadora["user_id"], user_id)
+                self.assertEqual(criadora["username"], "criadora")
+
+    def test_email_confirmado_cria_perfil_para_novo_cadastro(self):
+        with TemporaryDirectory() as diretorio:
+            with patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"):
+                db.iniciar_banco()
+                user_id = db.criar_usuario(
+                    "nova_criadora",
+                    "nova@example.com",
+                    "hash",
+                    "Novo Perfil",
+                    "novo_perfil",
+                )
+
+                db.confirmar_email(user_id)
+
+                criadora = next(
+                    item
+                    for item in db.listar_criadoras()
+                    if item["user_id"] == user_id
+                )
+                self.assertEqual(criadora["nome"], "Novo Perfil")
+                self.assertEqual(criadora["handle"], "novo_perfil")
+
     def test_pagina_e_alteracao_de_perfis_sao_restritas_a_admin(self):
         with TemporaryDirectory() as diretorio:
             with patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"):
@@ -76,12 +125,18 @@ class AutenticacaoTest(unittest.TestCase):
                         rb'name="csrf_token" value="([^"]+)"', pagina_cliente.content
                     ).group(1).decode()
                     pagina_restrita = cliente.get("/usuarios")
+                    catalogo_cliente = cliente.get("/catalogo")
+                    busca_cliente = cliente.get("/buscar-serpapi")
+                    arquivo_catalogo_cliente = cliente.get("/arquivos/nao-existe.png")
                     tentativa_alteracao = cliente.post(
                         f"/usuarios/{cliente_id}/perfil",
                         data={"role": "admin", "csrf_token": token_csrf},
                     )
 
                 self.assertEqual(pagina_restrita.status_code, 403)
+                self.assertEqual(catalogo_cliente.status_code, 403)
+                self.assertEqual(busca_cliente.status_code, 403)
+                self.assertEqual(arquivo_catalogo_cliente.status_code, 403)
                 self.assertNotIn(b'href="/usuarios"', pagina_cliente.content)
                 self.assertEqual(tentativa_alteracao.status_code, 403)
                 self.assertEqual(db.obter_usuario_por_id(cliente_id)["role"], "cliente")

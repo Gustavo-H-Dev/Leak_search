@@ -4,7 +4,7 @@
 <h1>Usuários</h1>
 {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
 {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
-<p>Contas cadastradas e data de criação. Só administradores podem alterar o perfil.</p>
+<p>Contas das criadoras. O perfil do catálogo é associado após a confirmação do e-mail.</p>
 {% if usuarios %}
 <div class="users-table-wrap">
   <table>
@@ -14,6 +14,7 @@
         <th>E-mail</th>
         <th>Confirmação</th>
         <th>Perfil</th>
+        <th>Catálogo</th>
         <th>Cadastro</th>
         <th>Ação</th>
       </tr>
@@ -24,7 +25,8 @@
         <td>{{ usuario.username }}</td>
         <td>{{ usuario.email }}</td>
         <td>{{ "Confirmado" if usuario.email_verified else "Pendente" }}</td>
-        <td>{{ "Administrador" if usuario.role == "admin" else "Cliente" }}</td>
+        <td>{{ "Administrador" if usuario.role == "admin" else "Criadora" }}</td>
+        <td>{{ "Associado" if usuario.criadora_id else "Não associado" }}</td>
         <td>{{ usuario.created_at }}</td>
         <td class="table-actions">
           {% if usuario.id == current_user.id %}
@@ -34,7 +36,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label class="sr-only" for="user-role-{{ usuario.id }}">Perfil de {{ usuario.username }}</label>
             <select id="user-role-{{ usuario.id }}" name="role">
-              <option value="cliente" {% if usuario.role == "cliente" %}selected{% endif %}>Cliente</option>
+              <option value="cliente" {% if usuario.role == "cliente" %}selected{% endif %}>Criadora</option>
               <option value="admin" {% if usuario.role == "admin" %}selected{% endif %}>Administrador</option>
             </select>
             <button type="submit">Salvar</button>

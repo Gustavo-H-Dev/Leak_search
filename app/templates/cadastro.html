@@ -4,7 +4,11 @@
 <section class="auth-card">
   <span class="eyebrow">NOVA CONTA</span>
   <h1>Criar conta</h1>
-  <p>Depois do cadastro, confirme seu endereço de e-mail para liberar o acesso.</p>
+  <p>
+    Cadastre sua conta e perfil de criadora. Depois, confirme o e-mail para
+    associar seu perfil ao catálogo, ou para reivindicar um perfil que o
+    administrador cadastrou com esse mesmo endereço.
+  </p>
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
   <form method="post" action="/cadastro">
@@ -13,6 +17,10 @@
     <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
     <label class="field-label" for="register-email">E-mail</label>
     <input id="register-email" name="email" type="email" autocomplete="email" required>
+    <label class="field-label" for="register-public-name">Nome público</label>
+    <input id="register-public-name" name="nome_publico" maxlength="80" required>
+    <label class="field-label" for="register-handle">Instagram (@)</label>
+    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required>
     <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
     <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
     <label class="field-label" for="register-confirm">Confirme a senha</label>

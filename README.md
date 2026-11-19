@@ -54,14 +54,15 @@ cp .env.example .env
   primeiro início do aplicativo. Use a senha desejada somente no `.env`; senhas
   são armazenadas no banco como hashes Argon2. A conta existente não é
   sobrescrita em inicializações posteriores.
-- O cadastro público cria contas de cliente e registra a data automaticamente
-  no banco. A página `/usuarios` e a alteração de perfis admin/cliente ficam
-  restritas a administradores; localidade não é solicitada nem inferida.
-- Cada usuário informa seu nome público e arroba em **Meu perfil**. Eles são
-  usados para montar a consulta SerpApi. Clientes pesquisam apenas o próprio
-  perfil; administradores podem selecionar usuários que já preencheram esses
-  dados. O nome e a arroba são autodeclarados: o app restringe a busca à conta
-  autenticada, mas ainda não verifica se esses identificadores pertencem a ela.
+- O cadastro público cria uma conta de criadora e solicita nome público e
+  arroba. Após a confirmação do e-mail, o aplicativo associa a conta a um perfil
+  existente do catálogo com esse mesmo e-mail; se não houver perfil, cria um
+  novo. Administradores também podem cadastrar perfis sem conta e informar o
+  e-mail para uma associação posterior. Nome e arroba são autodeclarados.
+- A página `/usuarios` e o catálogo de criadoras são administrados por
+  administradores. Catálogo, comparação e buscas também são restritos a
+  administradores; contas de criadoras não têm acesso aos arquivos, catálogo ou
+  ferramentas de busca.
 - Fotos de busca ficam em armazenamento privado, separadas dos arquivos
   públicos do catálogo. `USER_SEARCH_MEDIA_DIR` pode apontar para uma pasta
   persistente; por padrão, o app usa `fotos_busca` ao lado de `MEDIA_DIR`.
@@ -172,7 +173,9 @@ da busca, mas a SerpApi informa que a Account API é gratuita e não consome a
 cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; sem
 uma conta e chave SerpApi, não há saldo que o site possa consultar.
 
-No Catálogo, a criadora é o cadastro principal. Foto e site oficial são
+No catálogo, a criadora é o cadastro principal. Um perfil pode existir sem
+conta; quando o e-mail informado pelo administrador for confirmado durante o
+cadastro público, a conta é associada ao perfil. Foto e site oficial são
 opcionais; sites e fotos já cadastrados ficam agrupados dentro do registro da
 criadora e também podem ser adicionados depois. As buscas do Google Vision,
 SerpApi e Instagram só marcam a URL exata da página cadastrada (sem considerar

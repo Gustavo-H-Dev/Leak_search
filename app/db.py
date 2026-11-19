@@ -64,6 +64,7 @@ def iniciar_banco():
         _iniciar_banco_postgresql()
         _migrar_sites_oficiais()
         _migrar_usuarios()
+        _migrar_criadoras()
         return
 
     with conexao() as conn:
@@ -72,6 +73,9 @@ def iniciar_banco():
             CREATE TABLE IF NOT EXISTS criadoras (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT NOT NULL UNIQUE,
+                email TEXT,
+                handle TEXT,
+                user_id INTEGER UNIQUE,
                 criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS conteudos (
@@ -157,6 +161,7 @@ def iniciar_banco():
         )
     _migrar_sites_oficiais()
     _migrar_usuarios()
+    _migrar_criadoras()
 
 
 def _iniciar_banco_postgresql():
@@ -165,6 +170,9 @@ def _iniciar_banco_postgresql():
         CREATE TABLE IF NOT EXISTS criadoras (
             id BIGSERIAL PRIMARY KEY,
             nome TEXT NOT NULL UNIQUE,
+            email TEXT,
+            handle TEXT,
+            user_id BIGINT UNIQUE,
             criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
@@ -365,6 +373,40 @@ def _migrar_usuarios():
         )
 
 
+def _migrar_criadoras():
+    with conexao() as conn:
+        if usando_postgresql():
+            conn.execute("ALTER TABLE criadoras ADD COLUMN IF NOT EXISTS email TEXT")
+            conn.execute("ALTER TABLE criadoras ADD COLUMN IF NOT EXISTS handle TEXT")
+            conn.execute(
+                "ALTER TABLE criadoras ADD COLUMN IF NOT EXISTS user_id BIGINT"
+            )
+        else:
+            colunas = {
+                coluna["name"]
+                for coluna in conn.execute("PRAGMA table_info(criadoras)")
+            }
+            if "email" not in colunas:
+                conn.execute("ALTER TABLE criadoras ADD COLUMN email TEXT")
+            if "handle" not in colunas:
+                conn.execute("ALTER TABLE criadoras ADD COLUMN handle TEXT")
+            if "user_id" not in colunas:
+                conn.execute("ALTER TABLE criadoras ADD COLUMN user_id INTEGER")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS criadoras_user_id_unique
+            ON criadoras (user_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS criadoras_email_unique
+            ON criadoras (lower(email))
+            WHERE email IS NOT NULL AND email != ''
+            """
+        )
+
+
 def _agora_utc():
     return datetime.now(timezone.utc).isoformat()
 
@@ -391,15 +433,19 @@ def criar_admin_se_ausente(username, email, password_hash):
         return True
 
 
-def criar_usuario(username, email, password_hash):
+def criar_usuario(
+    username, email, password_hash, public_name=None, public_handle=None
+):
     with conexao() as conn:
         cur = conn.execute(
             """
-            INSERT INTO users (username, email, password_hash, role)
-            VALUES (?, ?, ?, 'cliente')
+            INSERT INTO users (
+                username, email, password_hash, role, public_name, public_handle
+            )
+            VALUES (?, ?, ?, 'cliente', ?, ?)
             RETURNING id
             """,
-            (username, email, password_hash),
+            (username, email, password_hash, public_name, public_handle),
         )
         return cur.fetchone()["id"]
 
@@ -444,7 +490,8 @@ def listar_usuarios():
         return conn.execute(
             """
             SELECT id, username, email, email_verified, role, public_name,
-                   public_handle, created_at
+                   public_handle, created_at,
+                   (SELECT id FROM criadoras WHERE user_id = users.id) AS criadora_id
             FROM users
             ORDER BY created_at DESC, id DESC
             """
@@ -472,7 +519,33 @@ def atualizar_perfil_busca(user_id, public_name, public_handle):
             """,
             (public_name, public_handle, user_id),
         )
-        return cur.rowcount > 0
+        atualizado = cur.rowcount > 0
+        conn.execute(
+            """
+            UPDATE criadoras SET nome = ?, handle = ?
+            WHERE user_id = ?
+            """,
+            (public_name, public_handle, user_id),
+        )
+        return atualizado
+
+
+def perfil_criadora_disponivel(nome, email):
+    with conexao() as conn:
+        mesma_email = conn.execute(
+            """
+            SELECT id FROM criadoras
+            WHERE lower(email) = lower(?) AND user_id IS NULL
+            """,
+            (email,),
+        ).fetchone()
+        nome_existente = conn.execute(
+            "SELECT id FROM criadoras WHERE lower(nome) = lower(?)",
+            (nome,),
+        ).fetchone()
+        if nome_existente is None:
+            return True
+        return mesma_email is not None and mesma_email["id"] == nome_existente["id"]
 
 
 def listar_usuarios_com_perfil_busca():
@@ -636,6 +709,50 @@ def atualizar_senha(user_id, password_hash):
 def confirmar_email(user_id):
     with conexao() as conn:
         conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+        usuario = conn.execute(
+            """
+            SELECT email, public_name, public_handle
+            FROM users WHERE id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+        if not usuario or not usuario["public_name"] or not usuario["public_handle"]:
+            return
+
+        criadora = conn.execute(
+            """
+            SELECT id FROM criadoras
+            WHERE lower(email) = lower(?) AND user_id IS NULL
+            """,
+            (usuario["email"],),
+        ).fetchone()
+        if criadora:
+            conn.execute(
+                """
+                UPDATE criadoras SET user_id = ?, nome = ?, handle = ?
+                WHERE id = ? AND user_id IS NULL
+                """,
+                (
+                    user_id,
+                    usuario["public_name"],
+                    usuario["public_handle"],
+                    criadora["id"],
+                ),
+            )
+            return
+
+        conn.execute(
+            """
+            INSERT INTO criadoras (nome, email, handle, user_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                usuario["public_name"],
+                usuario["email"],
+                usuario["public_handle"],
+                user_id,
+            ),
+        )
 
 
 def salvar_token_auth(token_hash, user_id, purpose, expires_at):
@@ -741,7 +858,40 @@ def criar_criadora(nome):
 
 def listar_criadoras():
     with conexao() as conn:
-        return conn.execute("SELECT id, nome FROM criadoras ORDER BY nome").fetchall()
+        return conn.execute(
+            """
+            SELECT c.id, c.nome, c.email, c.handle, c.user_id,
+                   u.username, u.email_verified
+            FROM criadoras c
+            LEFT JOIN users u ON u.id = c.user_id
+            ORDER BY c.nome
+            """
+        ).fetchall()
+
+
+def criar_criadora_com_contato(nome, email, handle=None):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO criadoras (nome, email, handle)
+            VALUES (?, ?, ?)
+            RETURNING id
+            """,
+            (nome, email or None, handle or None),
+        )
+        return cur.fetchone()["id"]
+
+
+def atualizar_criadora_contato(criadora_id, nome, email, handle=None):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE criadoras SET nome = ?, email = ?, handle = ?
+            WHERE id = ? AND user_id IS NULL
+            """,
+            (nome, email or None, handle or None, criadora_id),
+        )
+        return cur.rowcount > 0
 
 
 def adicionar_site_oficial(criadora_id, nome, url):

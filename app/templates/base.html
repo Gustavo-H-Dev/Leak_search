@@ -584,11 +584,13 @@
       <nav class="main-nav" aria-label="Navegação principal">
         {% if current_user %}
           <a href="/">Início</a>
-          <a href="/catalogo">Catálogo</a>
+          {% if current_user.role == "admin" %}
+          <a href="/catalogo">Criadoras</a>
           <a href="/comparar">Comparar</a>
           <a href="/buscar-google">Google</a>
           <a href="/buscar-serpapi">SerpApi</a>
           <a href="/buscar-instagram">Instagram</a>
+          {% endif %}
           <a href="/perfil-busca">Meu perfil</a>
           {% if current_user.role == "admin" %}<a href="/usuarios">Usuários</a>{% endif %}
           <a href="/alterar-senha">Senha</a>

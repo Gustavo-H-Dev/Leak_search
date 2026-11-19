@@ -7,11 +7,15 @@
 
 <section class="creator-create">
   <h2>Nova criadora</h2>
-  <p>O nome é obrigatório. Foto e site oficial são opcionais e podem ser adicionados depois.</p>
+  <p>O nome é obrigatório. O e-mail permite que a criadora associe a conta após confirmar o endereço.</p>
   <form method="post" action="/criadoras" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="field-label" for="creator-name">Nome da criadora</label>
     <input id="creator-name" name="nome" placeholder="Nome da criadora" required>
+    <label class="field-label" for="creator-email">E-mail da criadora (opcional)</label>
+    <input id="creator-email" name="email" type="email" placeholder="criadora@exemplo.com">
+    <label class="field-label" for="creator-handle">Instagram (@) (opcional)</label>
+    <input id="creator-handle" name="arroba" maxlength="31" placeholder="@usuario">
     <label class="field-label" for="creator-site-name">Nome do site oficial (opcional)</label>
     <input id="creator-site-name" name="site_nome" maxlength="80" placeholder="Site oficial">
     <label class="field-label" for="creator-site-url">URL do site oficial (opcional)</label>
@@ -28,6 +32,27 @@
   {% for criadora in criadoras %}
   <article class="creator-card">
     <h3>{{ criadora.nome }}</h3>
+    {% if criadora.email %}<p>E-mail de associação: {{ criadora.email }}</p>{% endif %}
+    {% if criadora.user_id %}
+    <p class="api-status api-status-ready">
+      Conta associada: {{ criadora.username }} ·
+      {{ "e-mail confirmado" if criadora.email_verified else "e-mail pendente" }}
+    </p>
+    {% else %}
+    <p class="api-status api-status-missing">
+      {{ "Aguardando a criadora confirmar o e-mail e criar a conta." if criadora.email else "Perfil sem conta associada." }}
+    </p>
+    <form class="creator-child-form" method="post" action="/criadoras/{{ criadora.id }}/editar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="field-label" for="edit-creator-name-{{ criadora.id }}">Nome</label>
+      <input id="edit-creator-name-{{ criadora.id }}" name="nome" value="{{ criadora.nome }}" maxlength="80" required>
+      <label class="field-label" for="edit-creator-email-{{ criadora.id }}">E-mail para associação</label>
+      <input id="edit-creator-email-{{ criadora.id }}" name="email" type="email" value="{{ criadora.email or '' }}">
+      <label class="field-label" for="edit-creator-handle-{{ criadora.id }}">Instagram (@)</label>
+      <input id="edit-creator-handle-{{ criadora.id }}" name="arroba" value="{{ criadora.handle or '' }}" maxlength="31">
+      <button type="submit">Atualizar perfil</button>
+    </form>
+    {% endif %}
 
     <section class="creator-children">
       <h4>Site oficial</h4>
