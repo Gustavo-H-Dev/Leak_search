@@ -99,6 +99,21 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Confirme o envio", resposta.body.decode())
         buscar.assert_not_called()
 
+    async def test_nao_executa_provedor_de_imagem_nao_integrado(self):
+        with (
+            patch("app.main.db.listar_conteudos", return_value=[]),
+            patch("app.main.db.obter_conteudo") as obter_conteudo,
+        ):
+            resposta = await buscar_google_na_web(
+                self.criar_request(),
+                conteudo_id=1,
+                consentimento="on",
+                provedor="tineye",
+            )
+
+        self.assertIn("ainda não está integrado", resposta.body.decode())
+        obter_conteudo.assert_not_called()
+
     async def test_envia_imagem_selecionada_do_catalogo_apos_consentimento(self):
         conteudo = BytesIO()
         Image.new("RGB", (16, 16), "#cc5599").save(conteudo, format="PNG")

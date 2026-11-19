@@ -169,6 +169,7 @@ def normalizar_resultados(dados: dict, engine: str) -> list[dict[str, str]]:
             resultado = {
                 "titulo": str(item.get("title") or item.get("name") or "Resultado"),
                 "link": link,
+                "provedor": "SerpApi",
                 "origem": str(item.get("source") or ""),
                 "miniatura": str(item.get("thumbnail") or ""),
                 "resumo": str(item.get("snippet") or item.get("description") or ""),

@@ -4,6 +4,22 @@
 <section class="search-page">
   <span class="eyebrow">GOOGLE CLOUD VISION</span>
   <h1>Busca Google na web</h1>
+  <section class="provider-panel" aria-labelledby="provider-title">
+    <div>
+      <span class="eyebrow">PROVEDORES DE BUSCA IMAGEM</span>
+      <h2 id="provider-title">Selecione a fonte desta busca</h2>
+    </div>
+    <div class="provider-grid">
+      {% for provedor in provedores %}
+      <label class="provider-option {% if provedor.status != 'Ativo' and provedor.status != 'Integrado, não configurado' %}provider-disabled{% endif %}">
+        <input type="radio" name="provedor_imagem" value="{{ provedor.id }}" {% if provedor_selecionado == provedor.id %}checked{% endif %} {% if provedor.id != "google_vision" %}disabled{% endif %}>
+        <strong>{{ provedor.nome }}</strong>
+        <span>{{ provedor.descricao }}</span>
+        <small>{{ provedor.status }}</small>
+      </label>
+      {% endfor %}
+    </div>
+  </section>
   <p class="search-intro">
     Compare uma imagem do seu catálogo com páginas públicas indexadas pelo
     Google Cloud Vision. Esta página usa somente o Web Detection do Google Cloud;
@@ -17,6 +33,7 @@
   {% if conteudos %}
   <form class="search-form" method="post" action="/buscar-google">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="provedor" value="google_vision">
     <label class="field-label" for="conteudo_id">Imagem do catálogo</label>
     <select id="conteudo_id" name="conteudo_id" required>
       <option value="">Selecione uma imagem</option>
@@ -55,6 +72,7 @@
       {% for pagina in paginas %}
       <li>
         <a href="{{ pagina.url }}" target="_blank" rel="noopener noreferrer">{{ pagina.titulo }}</a>
+        <span class="official-site-badge">Google Cloud Vision</span>
         {% if pagina.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ pagina.criadoras_oficiais|join(", ") }}</span>{% endif %}
         <span>{{ pagina.url }}</span>
       </li>
@@ -70,6 +88,7 @@
       {% for imagem in imagens %}
       <li>
         <a href="{{ imagem.url }}" target="_blank" rel="noopener noreferrer">{{ imagem.tipo }}</a>
+        <span class="official-site-badge">Google Cloud Vision</span>
         {% if imagem.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ imagem.criadoras_oficiais|join(", ") }}</span>{% endif %}
         <span>{{ imagem.url }}</span>
       </li>

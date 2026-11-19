@@ -463,6 +463,14 @@
     .serpapi-card h2 a:hover { color: var(--pink-light); }
     .serpapi-card > p { font-size: .86rem; }
     .serpapi-card .search-form { margin-bottom: 0; padding: 1rem; border-color: #39333e; background: #151319; }
+    .provider-panel { margin: 1.5rem 0; padding: 1.1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .provider-panel h2 { margin: .45rem 0 1rem; }
+    .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; }
+    .provider-option { display: grid; gap: .35rem; padding: .9rem; border: 1px solid var(--border); border-radius: 10px; background: #151319; cursor: pointer; }
+    .provider-option:has(input:checked) { border-color: rgb(240 120 173 / 65%); background: rgb(240 120 173 / 7%); }
+    .provider-option span { color: var(--muted); font-size: .78rem; }
+    .provider-option small { color: var(--pink-light); }
+    .provider-disabled { opacity: .58; cursor: not-allowed; }
     .instagram-profile { margin: 1rem 0 1.5rem; padding: 1.1rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
     .instagram-profile h3 { margin-bottom: .35rem; }
     .instagram-profile h3 a { text-decoration: none; }

@@ -112,6 +112,23 @@
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
 
+  <section class="provider-panel" aria-labelledby="providers-title">
+    <div>
+      <span class="eyebrow">CAMADA DE PROVEDORES</span>
+      <h2 id="providers-title">Escolha a fonte da consulta</h2>
+    </div>
+    <div class="provider-grid">
+      {% for provedor in provedores %}
+      <label class="provider-option {% if not provedor.integrado %}provider-disabled{% endif %}">
+        <input type="radio" name="provedor" value="{{ provedor.id }}" {% if provedor_selecionado == provedor.id %}checked{% endif %} {% if not provedor.integrado %}disabled{% endif %}>
+        <strong>{{ provedor.nome }}</strong>
+        <span>{{ provedor.descricao }}</span>
+        <small>{{ provedor.status }}</small>
+      </label>
+      {% endfor %}
+    </div>
+  </section>
+
   <p class="privacy-note">
     Cada busca envia a consulta ou a imagem à SerpApi. A Google Lens API exige
     o envio da imagem para a SerpApi; a documentação limita esse upload a
@@ -226,6 +243,7 @@
       {% for resultado in resultados %}
       <li>
         <a href="{{ resultado.link }}" target="_blank" rel="noopener noreferrer">{{ resultado.titulo }}</a>
+        <span class="official-site-badge">{{ resultado.provedor or "SerpApi" }}</span>
         {% if resultado.site_oficial %}<span class="official-site-badge">Site oficial cadastrado</span>{% endif %}
         {% if resultado.origem %}<span>{{ resultado.origem }}</span>{% endif %}
         <span>{{ resultado.link }}</span>
@@ -297,6 +315,22 @@
   </section>
 </section>
 <script>
+  const provedorSelecionado = () =>
+    document.querySelector('input[name="provedor"]:checked')?.value || "serpapi";
+
+  document.querySelectorAll('form[action="/buscar-serpapi"]').forEach((form) => {
+    form.addEventListener("submit", () => {
+      let campo = form.querySelector('input[name="provedor"]');
+      if (!campo) {
+        campo = document.createElement("input");
+        campo.type = "hidden";
+        campo.name = "provedor";
+        form.appendChild(campo);
+      }
+      campo.value = provedorSelecionado();
+    });
+  });
+
   document.querySelectorAll("[data-result-action]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

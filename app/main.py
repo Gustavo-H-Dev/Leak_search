@@ -18,7 +18,14 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from app import db
-from app.core import autenticacao, busca_web, imagens, serpapi, sites_oficiais
+from app.core import (
+    autenticacao,
+    busca_web,
+    imagens,
+    provedores_busca,
+    serpapi,
+    sites_oficiais,
+)
 from app.core.middleware_auth import AutenticacaoMiddleware
 
 PASTA_OFICIAIS = Path(os.getenv("MEDIA_DIR", "media/oficiais"))
@@ -1039,6 +1046,8 @@ def buscar_google_formulario(request: Request):
             "pesquisa_realizada": False,
             "conteudos": db.listar_conteudos(),
             "conteudo_selecionado": None,
+            "provedores": provedores_busca.listar_provedores("imagem"),
+            "provedor_selecionado": "google_vision",
         },
     )
 
@@ -1049,7 +1058,10 @@ async def buscar_google_na_web(
     request: Request,
     conteudo_id: int = Form(...),
     consentimento: str = Form(""),
+    provedor: str = Form("google_vision"),
 ):
+    if not isinstance(provedor, str):
+        provedor = "google_vision"
     contexto = {
         "erro": "",
         "paginas": [],
@@ -1057,7 +1069,12 @@ async def buscar_google_na_web(
         "pesquisa_realizada": False,
         "conteudos": db.listar_conteudos(),
         "conteudo_selecionado": conteudo_id,
+        "provedores": provedores_busca.listar_provedores("imagem"),
+        "provedor_selecionado": provedor,
     }
+    if provedor != "google_vision":
+        contexto["erro"] = "Este provedor ainda não está integrado nesta busca."
+        return templates.TemplateResponse(request, "buscar_web.html", contexto)
     if consentimento != "on":
         contexto["erro"] = (
             "Confirme o envio da imagem ao Google Cloud Vision para iniciar a busca."
@@ -1151,6 +1168,7 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
         "erro": "",
         "mensagem": "",
         "api_ativa": "",
+        "provedor_selecionado": "serpapi",
         "resultados": [],
         "query": "",
         "foto_selecionada": None,
@@ -1161,6 +1179,7 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
         "pesquisa_realizada": False,
         "related_options": [],
         "nomes_apis": SERPAPI_ENGINE_NAMES,
+        "provedores": provedores_busca.listar_provedores("texto"),
         "target_user": alvo,
         "target_user_id": target_user_id,
         "target_users": (
@@ -1232,7 +1251,10 @@ async def buscar_serpapi(
     related_content_id: str = Form(""),
     target_user_id: int = Form(0),
     image_file: UploadFile | None = File(None),
+    provedor: str = Form("serpapi"),
 ):
+    if not isinstance(provedor, str):
+        provedor = "serpapi"
     alvo = _usuario_alvo_busca(request, target_user_id)
     target_user_id = alvo["id"]
     query = (
@@ -1242,6 +1264,7 @@ async def buscar_serpapi(
     )
     contexto = {
         "api_ativa": api,
+        "provedor_selecionado": provedor,
         "query": query,
         "foto_selecionada": foto_id or None,
         "related_content_id": related_content_id.strip(),
@@ -1249,6 +1272,17 @@ async def buscar_serpapi(
     if api not in SERPAPI_ENGINES:
         return _contexto_serpapi(
             request, target_user_id, erro="API selecionada inválida.", **contexto
+        )
+    if provedor != "serpapi":
+        provedor_info = provedores_busca.obter_provedor(provedor)
+        nome_provedor = provedor_info["nome"] if provedor_info else "desconhecido"
+        return _contexto_serpapi(
+            request,
+            target_user_id,
+            erro=(
+                f"O provedor {nome_provedor} ainda não está integrado nesta busca."
+            ),
+            **contexto,
         )
     if consentimento != "on":
         return _contexto_serpapi(

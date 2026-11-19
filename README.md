@@ -25,6 +25,20 @@ não garantem cobertura total nem identificam com certeza quem publicou.
 As páginas internas exigem login. Mesmo assim, configure limites de uso antes de
 disponibilizar o site publicamente para controlar custos de APIs externas.
 
+## Provedores de busca
+
+As telas de busca mostram um catálogo de provedores separado por tipo. Google
+Cloud Vision e SerpApi continuam sendo as integrações disponíveis nos fluxos
+atuais; Brave Search, TinEye, DataForSEO e SearXNG aparecem como opções futuras,
+mas ficam desabilitados e não recebem consultas. A seleção de um provedor ainda
+não integrado retorna uma mensagem explícita, sem simular uma busca.
+
+As variáveis `BRAVE_SEARCH_API_KEY`, `TINEYE_API_KEY`, `DATAFORSEO_LOGIN`,
+`DATAFORSEO_PASSWORD` e `SEARXNG_BASE_URL` podem ser preparadas no `.env`, mas
+configurá-las não ativa essas integrações. Cada provedor precisará de um
+adaptador próprio e de normalização para o formato de resultados já usado pela
+aplicação antes de ser habilitado.
+
 ## Contas, login e e-mail
 
 Copie `.env.example` para `.env` na raiz do projeto e preencha as configurações
