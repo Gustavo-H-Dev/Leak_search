@@ -3,7 +3,7 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -157,6 +157,15 @@ def iniciar_banco():
                 name TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS search_snapshots (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, kind)
+            );
+            CREATE INDEX IF NOT EXISTS search_snapshots_updated_at
+            ON search_snapshots (updated_at);
             """
         )
     _migrar_sites_oficiais()
@@ -274,6 +283,19 @@ def _iniciar_banco_postgresql():
             name TEXT PRIMARY KEY,
             value TEXT NOT NULL
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS search_snapshots (
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, kind)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS search_snapshots_updated_at
+        ON search_snapshots (updated_at)
         """,
         """
         CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower
@@ -696,6 +718,45 @@ def listar_sites_vazados(user_id):
             """,
             (user_id,),
         ).fetchall()
+
+
+# Uma linha por usuário e tipo (upsert), então a tabela não cresce com o uso;
+# a limpeza por updated_at remove usuários inativos.
+RETENCAO_SNAPSHOTS = timedelta(days=30)
+
+
+def salvar_snapshot_busca(user_id, kind, payload):
+    agora = _agora_utc()
+    limite = (datetime.now(timezone.utc) - RETENCAO_SNAPSHOTS).isoformat()
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO search_snapshots (user_id, kind, payload_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (user_id, kind) DO UPDATE
+            SET payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, kind, json.dumps(payload, ensure_ascii=False, default=str), agora),
+        )
+        conn.execute("DELETE FROM search_snapshots WHERE updated_at < ?", (limite,))
+
+
+def obter_snapshot_busca(user_id, kind):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT payload_json, updated_at FROM search_snapshots
+            WHERE user_id = ? AND kind = ?
+            """,
+            (user_id, kind),
+        ).fetchone()
+    if not linha:
+        return None
+    try:
+        return {"dados": json.loads(linha["payload_json"]), "updated_at": linha["updated_at"]}
+    except ValueError:
+        return None
 
 
 def atualizar_senha(user_id, password_hash):

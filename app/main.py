@@ -1318,7 +1318,6 @@ def _termos_busca(usuario):
 def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
     alvo = _usuario_alvo_busca(request, target_user_id)
     target_user_id = alvo["id"]
-    sites_oficiais = db.listar_sites_oficiais_usuario(target_user_id)
     fotos = db.listar_fotos_busca(target_user_id)
     contexto = {
         "erro": "",
@@ -1358,7 +1357,6 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
             alvo["public_name"] and alvo["public_handle"]
         ),
         "fotos": fotos,
-        "sites_oficiais_usuario": sites_oficiais,
         "sites_vazados": db.listar_sites_vazados(target_user_id),
         "query_perfil": (
             _termos_busca(alvo)
@@ -1367,7 +1365,55 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         ),
     }
     contexto.update(valores)
+    _persistir_ou_restaurar_busca(request, contexto, valores)
     return templates.TemplateResponse(request, "busca_web.html", contexto)
+
+
+CHAVES_SNAPSHOT_BUSCA = (
+    "fonte", "api_ativa", "pesquisa_realizada", "resultados", "query",
+    "related_options", "paginas", "imagens", "perfil", "posts", "username",
+    "keyword", "conteudo_selecionado", "foto_selecionada",
+)
+# Chamadas que só mudam avisos ou o saldo não devem apagar a última busca.
+CHAVES_SEM_BUSCA = {"erro", "mensagem", "status_conta", "status_conta_atualizado"}
+
+
+def _persistir_ou_restaurar_busca(request: Request, contexto: dict, valores: dict):
+    usuario_id = request.state.user["id"]
+    alvo_id = contexto["target_user_id"]
+
+    if "status_conta" in valores and valores["status_conta"]:
+        db.salvar_snapshot_busca(usuario_id, "saldo", valores["status_conta"])
+    elif not valores.get("status_conta"):
+        saldo = db.obter_snapshot_busca(usuario_id, "saldo")
+        if saldo:
+            contexto["status_conta"] = saldo["dados"]
+            contexto["status_conta_em"] = saldo["updated_at"]
+
+    if valores.get("pesquisa_realizada"):
+        dados = {chave: contexto[chave] for chave in CHAVES_SNAPSHOT_BUSCA}
+        dados["target_user_id"] = alvo_id
+        db.salvar_snapshot_busca(usuario_id, "busca", dados)
+        return
+    if set(valores) - CHAVES_SEM_BUSCA:
+        return
+
+    ultima = db.obter_snapshot_busca(usuario_id, "busca")
+    if not ultima or ultima["dados"].get("target_user_id") != alvo_id:
+        return
+    dados = ultima["dados"]
+    if dados.get("fonte") == "serpapi":
+        resultados = sites_oficiais.marcar_sites_pessoais(
+            dados.get("resultados", []),
+            db.listar_sites_oficiais_usuario(alvo_id),
+        )
+        dados["resultados"] = sites_oficiais.filtrar_resultados_pessoais(
+            resultados, [r["url"] for r in contexto["sites_vazados"]]
+        )
+    for chave in CHAVES_SNAPSHOT_BUSCA:
+        if chave in dados:
+            contexto[chave] = dados[chave]
+    contexto["busca_restaurada_em"] = ultima["updated_at"]
 
 
 def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):

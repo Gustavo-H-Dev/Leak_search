@@ -86,6 +86,8 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
             "listar_fotos_busca": [],
             "listar_sites_vazados": [],
             "listar_sites_oficiais_usuario": [],
+            "obter_snapshot_busca": None,
+            "salvar_snapshot_busca": None,
         }.items():
             patcher = patch(f"app.main.db.{alvo}", return_value=retorno)
             patcher.start()
