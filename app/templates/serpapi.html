@@ -242,6 +242,7 @@
     <ul class="search-result-list">
       {% for resultado in resultados %}
       <li>
+        {% if resultado.miniatura %}<img class="result-thumb" src="{{ resultado.miniatura }}" alt="Miniatura de {{ resultado.titulo }}" loading="lazy" referrerpolicy="no-referrer">{% endif %}
         <a href="{{ resultado.link }}" target="_blank" rel="noopener noreferrer">{{ resultado.titulo }}</a>
         <span class="official-site-badge">{{ resultado.provedor or "SerpApi" }}</span>
         {% if resultado.site_oficial %}<span class="official-site-badge">Site oficial cadastrado</span>{% endif %}
