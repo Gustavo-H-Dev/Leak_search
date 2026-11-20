@@ -237,3 +237,20 @@ def test_perfil_tiktok_marca_videos_do_mesmo_usuario_como_oficiais():
     ]
     marcados = sites_oficiais.marcar_resultados(resultados, paginas)
     assert [r["criadoras_oficiais"] for r in marcados] == [["Ana"], []]
+
+
+def test_filtrar_resultados_pessoais_oculta_oficiais_e_mantem_vazados():
+    from app.core import sites_oficiais
+
+    resultados = [
+        {"link": "https://a.com/novo", "site_oficial": False},
+        {"link": "https://a.com/oficial", "site_oficial": True},
+        {"link": "https://a.com/vazado", "site_oficial": True},
+    ]
+    filtrados = sites_oficiais.filtrar_resultados_pessoais(
+        resultados, ["https://a.com/vazado"]
+    )
+    assert [(r["link"], r["vazado"]) for r in filtrados] == [
+        ("https://a.com/novo", False),
+        ("https://a.com/vazado", True),
+    ]

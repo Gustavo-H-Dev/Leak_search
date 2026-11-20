@@ -8,7 +8,7 @@ app/
     home.html        (alterado)
     catalogo.html    cadastro de criadoras e fotos
     perfil_busca.html perfil público e fotos privadas de busca
-    serpapi.html     buscas pessoais e revisão dos resultados
+    busca_web.html   busca na web unificada (SerpApi, Google Vision, Instagram)
     comparar.html    envio da imagem suspeita
 compose.yaml         (alterado)
 requirements.txt     (alterado)

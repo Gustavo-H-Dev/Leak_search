@@ -115,3 +115,17 @@ def marcar_sites_pessoais(resultados: list[dict], sites_oficiais) -> list[dict]:
         }
         for resultado in resultados
     ]
+
+
+def filtrar_resultados_pessoais(resultados: list[dict], urls_vazadas) -> list[dict]:
+    """Oculta sites oficiais; mantém novos resultados e os já marcados como vazados."""
+    vazadas = {url_pagina_da_busca(url) for url in urls_vazadas}
+    vazadas.discard("")
+    filtrados = []
+    for resultado in resultados:
+        url = url_pagina_da_busca(resultado.get("url") or resultado.get("link") or "")
+        vazado = url in vazadas
+        if resultado.get("site_oficial") and not vazado:
+            continue
+        filtrados.append({**resultado, "vazado": vazado})
+    return filtrados

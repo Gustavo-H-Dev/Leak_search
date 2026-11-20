@@ -464,6 +464,11 @@
     .serpapi-card h2 a:hover { color: var(--pink-light); }
     .serpapi-card > p { font-size: .86rem; }
     .serpapi-card .search-form { margin-bottom: 0; padding: 1rem; border-color: #39333e; background: #151319; }
+    .search-group-title { margin: 1.2rem 0 0; font-size: 1rem; color: var(--muted); }
+    details.serpapi-card > summary, details.collapsible > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; }
+    details.serpapi-card[open] > summary { margin-bottom: .8rem; }
+    details.collapsible { margin: 1rem 0; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .doc-link { font-size: .8rem; margin: 0 0 .5rem; }
     .provider-panel { margin: 1.5rem 0; padding: 1.1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
     .provider-panel h2 { margin: .45rem 0 1rem; }
     .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; }
@@ -619,9 +624,7 @@
           {% if current_user.role == "admin" %}
           <a href="/catalogo">Criadoras</a>
           <a href="/comparar">Comparar</a>
-          <a href="/buscar-google">Google</a>
-          <a href="/buscar-serpapi">SerpApi</a>
-          <a href="/buscar-instagram">Instagram</a>
+          <a href="/busca-web">Busca na web</a>
           {% endif %}
           <a href="/perfil-busca">Meu perfil</a>
           {% if current_user.role == "admin" %}<a href="/usuarios">Usuários</a>{% endif %}

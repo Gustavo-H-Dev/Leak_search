@@ -263,7 +263,10 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                 },
             ),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
-            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch(
+                "app.main.db.listar_sites_vazados",
+                return_value=[{"url": "https://example.com/image"}],
+            ),
             patch(
                 "app.main.db.listar_sites_oficiais_usuario",
                 return_value=[
@@ -292,9 +295,51 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         corpo = resultado.body.decode()
         self.assertIn("Resultado", corpo)
         self.assertIn("related-123", corpo)
-        self.assertIn("Site oficial cadastrado", corpo)
-        self.assertIn("VAZADO!", corpo)
+        self.assertIn("Já marcado como vazado", corpo)
         self.assertIn("Não sou eu", corpo)
+
+    async def test_resultado_oficial_nao_vazado_e_omitido(self):
+        resposta = {
+            "images_results": [
+                {"title": "Oficial", "link": "https://example.com/oficial"},
+                {"title": "Novo", "link": "https://example.com/novo"},
+            ]
+        }
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch(
+                "app.main.db.obter_usuario_por_id",
+                return_value={
+                    "id": 1,
+                    "username": "cliente",
+                    "role": "cliente",
+                    "public_name": "BlackDragon",
+                    "public_handle": "user875s",
+                },
+            ),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch(
+                "app.main.db.listar_sites_oficiais_usuario",
+                return_value=[
+                    {"user_id": 1, "nome": "Site", "url": "https://example.com/oficial"}
+                ],
+            ),
+            patch("app.main.serpapi.pesquisar", return_value=resposta),
+        ):
+            resultado = await buscar_serpapi(
+                self.criar_request("/buscar-serpapi"),
+                api="google_images",
+                consentimento="on",
+                foto_id=0,
+                related_content_id="",
+                target_user_id=1,
+                image_file=None,
+            )
+
+        corpo = resultado.body.decode()
+        self.assertNotIn("Oficial", corpo)
+        self.assertIn("Novo", corpo)
 
     async def test_cliente_nao_pode_escolher_outro_usuario_para_busca(self):
         with self.assertRaises(HTTPException) as erro:
@@ -577,6 +622,11 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value={"id": 1, "username": "cliente", "role": "cliente", "public_name": "", "public_handle": ""}),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
             patch("app.main.serpapi.pesquisar", return_value=resposta) as pesquisar,
         ):
             resultado = await buscar_instagram(
@@ -595,6 +645,11 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
     async def test_instagram_popular_envia_apenas_keyword(self):
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value={"id": 1, "username": "cliente", "role": "cliente", "public_name": "", "public_handle": ""}),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
                 "app.main.serpapi.pesquisar",
                 return_value={"popular_results": []},
