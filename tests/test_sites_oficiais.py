@@ -223,3 +223,17 @@ class PaginasOficiaisTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_perfil_tiktok_marca_videos_do_mesmo_usuario_como_oficiais():
+    from app.core import sites_oficiais
+
+    paginas = [
+        {"criadora_id": 1, "criadora": "Ana", "url": "https://www.tiktok.com/@Ana.x"}
+    ]
+    resultados = [
+        {"link": "https://www.tiktok.com/@ana.x/video/123"},
+        {"link": "https://www.tiktok.com/@outra/video/123"},
+    ]
+    marcados = sites_oficiais.marcar_resultados(resultados, paginas)
+    assert [r["criadoras_oficiais"] for r in marcados] == [["Ana"], []]
