@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block titulo %}Revisão de imagens candidatas{% endblock %}
+{% block conteudo %}
+<section class="search-page">
+  <h1>Revisão de imagens candidatas</h1>
+  <p>
+    Perfil analisado: {{ target_user.public_name or target_user.username }}.
+    Os arquivos enviados não são armazenados. A comparação usa somente imagens
+    do catálogo vinculadas a este perfil; sem vínculo ou referências, não há
+    comparação automática.
+  </p>
+  {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
+  {% if not tem_referencias %}
+  <p class="api-status api-status-missing">
+    Este perfil não tem imagens oficiais vinculadas no catálogo. Os candidatos
+    ficam registrados para revisão, mas não são comparados com fotos de outras pessoas.
+  </p>
+  {% endif %}
+  {% if candidatos %}
+  <ul class="search-result-list">
+    {% for candidato in candidatos %}
+    <li>
+      <a href="{{ candidato.source_url }}" target="_blank" rel="noopener noreferrer">
+        {{ candidato.title }}
+      </a>
+      <span>{{ candidato.source_url }}</span>
+      <span>Encontrado por {{ candidato.engine }} · {{ candidato.created_at }}</span>
+      <span>Status: {{ {"pending": "pendente", "reviewed": "revisado", "dismissed": "descartado"}.get(candidato.status, candidato.status) }}</span>
+
+      {% if candidato.correspondencias %}
+      <h3>Referências oficiais mais semelhantes</h3>
+      <ul>
+        {% for resultado in candidato.correspondencias %}
+        <li>
+          <img class="mini" src="/arquivos/{{ resultado.arquivo }}" alt="">
+          <span>{{ resultado.criadora }} — {{ resultado.classificacao }}</span>
+          <span>Distância perceptual: {{ resultado.distancia }} de 64</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>Nenhuma correspondência no catálogo vinculado a este perfil.</p>
+      {% endif %}
+
+      {% if candidato.status == "pending" %}
+      <div class="result-actions">
+        <form method="post" action="/candidatos-imagem/{{ candidato.id }}/status">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+          <input type="hidden" name="status" value="reviewed">
+          <button type="submit">Marcar como revisado</button>
+        </form>
+        <form method="post" action="/candidatos-imagem/{{ candidato.id }}/status">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+          <input type="hidden" name="status" value="dismissed">
+          <button class="button-secondary" type="submit">Descartar</button>
+        </form>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Nenhum candidato registrado para este perfil.</p>
+  {% endif %}
+</section>
+{% endblock %}

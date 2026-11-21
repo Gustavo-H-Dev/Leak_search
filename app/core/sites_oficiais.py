@@ -94,3 +94,20 @@ def marcar_sites_pessoais(resultados: list[dict], sites_oficiais) -> list[dict]:
         }
         for resultado in resultados
     ]
+
+
+def proprietario_pagina_oficial(url: str, paginas_oficiais, user_id: int) -> str:
+    pagina_normalizada = url_pagina_da_busca(url)
+    if not pagina_normalizada:
+        return "desconhecido"
+
+    donos = {
+        pagina.get("user_id")
+        for pagina in paginas_oficiais
+        if url_pagina_da_busca(pagina["url"]) == pagina_normalizada
+    }
+    if not donos:
+        return "nao_oficial"
+    if donos == {user_id}:
+        return "proprio"
+    return "terceiro_ou_incerto"

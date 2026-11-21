@@ -1164,6 +1164,167 @@ async def comparar(request: Request, arquivo: UploadFile = File(...)):
     )
 
 
+def _correspondencias_candidato(candidato, hashes_catalogo):
+    correspondencias = imagens.melhores_correspondencias(
+        candidato["phash"], hashes_catalogo
+    )
+    ids_exatos = set()
+    arquivos_vistos = set()
+    for linha in hashes_catalogo:
+        arquivo = linha["arquivo"]
+        if arquivo in arquivos_vistos or Path(arquivo).name != arquivo:
+            continue
+        arquivos_vistos.add(arquivo)
+        try:
+            conteudo = (PASTA_OFICIAIS / arquivo).read_bytes()
+        except OSError:
+            continue
+        if imagens.calcular_sha256(conteudo) == candidato["sha256"]:
+            ids_exatos.add(linha["conteudo_id"])
+
+    por_id = {resultado["conteudo_id"]: resultado for resultado in correspondencias}
+    for linha in hashes_catalogo:
+        conteudo_id = linha["conteudo_id"]
+        if conteudo_id in ids_exatos and conteudo_id not in por_id:
+            por_id[conteudo_id] = {
+                "conteudo_id": conteudo_id,
+                "criadora": linha["criadora"],
+                "arquivo": linha["arquivo"],
+                "distancia": 0,
+                "classificacao": "cópia exata",
+            }
+        elif conteudo_id in ids_exatos:
+            por_id[conteudo_id]["distancia"] = 0
+            por_id[conteudo_id]["classificacao"] = "cópia exata"
+    return sorted(
+        por_id.values(),
+        key=lambda resultado: (
+            resultado["classificacao"] != "cópia exata",
+            resultado["distancia"],
+        ),
+    )[:5]
+
+
+@app.get(
+    "/candidatos-imagem",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def candidatos_imagem(
+    request: Request, target_user_id: int = 0, mensagem: str = ""
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    hashes_catalogo = db.listar_hashes_criadora_do_usuario(alvo["id"])
+    candidatos = []
+    for candidato in db.listar_candidatos_imagem(alvo["id"]):
+        candidatos.append(
+            {
+                **candidato,
+                "correspondencias": _correspondencias_candidato(
+                    candidato, hashes_catalogo
+                ),
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "candidatos_imagem.html",
+        {
+            "target_user": alvo,
+            "target_user_id": alvo["id"],
+            "candidatos": candidatos,
+            "tem_referencias": bool(hashes_catalogo),
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.post(
+    "/candidatos-imagem",
+    response_class=HTMLResponse,
+    dependencies=_admin_csrf(),
+)
+async def adicionar_candidato_imagem(
+    request: Request,
+    target_user_id: int = Form(0),
+    source_url: str = Form(...),
+    titulo: str = Form(...),
+    engine: str = Form(...),
+    consentimento: str = Form(""),
+    arquivo: UploadFile = File(...),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if engine not in {"google_images", "google_images_light"}:
+        raise HTTPException(status_code=400, detail="API de imagens inválida.")
+    if consentimento != "on":
+        raise HTTPException(status_code=400, detail="Confirme o processamento da imagem.")
+    try:
+        source_url = sites_oficiais.normalizar_url_pagina(source_url)
+        dados = await _ler_imagem(arquivo)
+        phash = imagens.calcular_phash(dados)
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro)) from erro
+
+    proprietario = sites_oficiais.proprietario_pagina_oficial(
+        source_url,
+        db.listar_paginas_oficiais_com_donos(),
+        alvo["id"],
+    )
+    if proprietario != "nao_oficial":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A página consta como oficial ou tem propriedade incerta; "
+                "ela foi excluída da comparação."
+            ),
+        )
+
+    titulo = titulo.strip()
+    if not titulo or len(titulo) > 500:
+        raise HTTPException(status_code=400, detail="Título do resultado inválido.")
+    candidate_id = db.adicionar_candidato_imagem(
+        alvo["id"],
+        source_url,
+        titulo,
+        engine,
+        imagens.calcular_sha256(dados),
+        phash,
+    )
+    mensagem = (
+        "Imagem adicionada à fila de revisão."
+        if candidate_id
+        else "Esta imagem já havia sido analisada para este perfil."
+    )
+    return RedirectResponse(
+        f"/candidatos-imagem?target_user_id={alvo['id']}&mensagem={quote(mensagem)}",
+        status_code=303,
+    )
+
+
+@app.post(
+    "/candidatos-imagem/{candidate_id}/status",
+    dependencies=_admin_csrf(),
+)
+def atualizar_status_candidato_imagem(
+    request: Request,
+    candidate_id: int,
+    status: str = Form(...),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    try:
+        atualizado = db.atualizar_status_candidato_imagem(
+            candidate_id, alvo["id"], status
+        )
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro)) from erro
+    if not atualizado:
+        raise HTTPException(status_code=404, detail="Candidato não encontrado.")
+    return RedirectResponse(
+        f"/candidatos-imagem?target_user_id={alvo['id']}",
+        status_code=303,
+    )
+
+
 @app.get("/buscar-web")
 def buscar_web_legado():
     return RedirectResponse("/buscar-google", status_code=307)
