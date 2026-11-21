@@ -13,6 +13,20 @@
     hash; a semelhança é uma pista e não confirma identidade.
   </p>
 
+  <details class="collapsible" open>
+    <summary>Como ler a semelhança</summary>
+    <p>
+      A semelhança vai de 0 a 100 e compara o candidato com a imagem de
+      referência mais parecida (100 = praticamente idêntica; perto de 0 = sem
+      relação).
+    </p>
+    <ul>
+      <li><strong>Atenção:</strong> {{ pontuacao_atencao }} a 100</li>
+      <li><strong>Possíveis:</strong> {{ pontuacao_possivel }} a {{ pontuacao_atencao - 1 }}</li>
+      <li><strong>Diferentes:</strong> 0 a {{ pontuacao_possivel - 1 }}, ou sem imagem para comparar</li>
+    </ul>
+  </details>
+
   {% if current_user.role == "admin" %}
   <form class="search-form target-user-form" method="get" action="/valida">
     <label class="field-label" for="valida-target">Criadora</label>
@@ -58,11 +72,9 @@
           {% if candidato.source %}<span>{{ candidato.source }}</span>{% endif %}
           {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
           {% if candidato.distancia is not none %}
-          {% if candidato.nivel == "diferente" %}
-          <span>Nada parecido nas referências (a mais próxima, {{ candidato.referencia }}, está a distância {{ candidato.distancia }} de 64).</span>
-          {% else %}
-          <span>Mais parecido com: {{ candidato.referencia }} · distância {{ candidato.distancia }} de 64</span>
-          {% endif %}
+          <span><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>
+            {% if candidato.nivel == "diferente" %}— nada parecido nas referências; a mais próxima é{% else %}— mais parecido com{% endif %}
+            {{ candidato.referencia }}</span>
           {% elif not candidato.phash %}
           <span>Sem imagem comparável para este resultado.</span>
           {% endif %}
