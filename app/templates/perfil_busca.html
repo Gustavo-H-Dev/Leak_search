@@ -46,6 +46,14 @@
 
   <section class="profile-section">
     <h2>Sites oficiais</h2>
+    <form class="search-form" method="post" action="/perfil-busca/sites-oficiais">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="field-label" for="site-nome">Nome do site (opcional)</label>
+      <input id="site-nome" name="nome" maxlength="160" placeholder="Site oficial">
+      <label class="field-label" for="site-url">URL do site oficial</label>
+      <input id="site-url" name="url" required placeholder="https://www.tiktok.com/@seuusuario">
+      <button type="submit">Adicionar site oficial</button>
+    </form>
     {% if sites_oficiais %}
     <ul class="profile-site-list">
       {% for site in sites_oficiais %}
@@ -60,7 +68,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p>Ao marcar um resultado como site oficial, ele aparecerá aqui.</p>
+    <p>Adicione acima ou marque um resultado da busca como site oficial para ele aparecer aqui.</p>
     {% endif %}
   </section>
 </section>

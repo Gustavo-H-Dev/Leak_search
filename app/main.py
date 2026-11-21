@@ -805,6 +805,38 @@ def salvar_site_oficial_resultado(
     )
 
 
+@app.post("/perfil-busca/sites-oficiais", dependencies=_csrf())
+def adicionar_site_oficial_perfil(
+    request: Request,
+    nome: str = Form("Site oficial"),
+    url: str = Form(...),
+):
+    nome = nome.strip() or "Site oficial"
+    if len(nome) > 160:
+        return RedirectResponse(
+            "/perfil-busca?erro="
+            + quote("O nome do site deve ter até 160 caracteres."),
+            status_code=303,
+        )
+    try:
+        url = sites_oficiais.normalizar_url_pagina(url)
+    except ValueError as erro:
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote(str(erro)), status_code=303
+        )
+    user_id = request.state.user["id"]
+    if not db.adicionar_site_oficial_usuario(user_id, user_id, nome, url):
+        return RedirectResponse(
+            "/perfil-busca?erro="
+            + quote("Este site já está cadastrado como oficial."),
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/perfil-busca?mensagem=" + quote("Site oficial adicionado."),
+        status_code=303,
+    )
+
+
 @app.post("/perfil-busca/sites-oficiais/{site_id}/excluir", dependencies=_csrf())
 def excluir_site_oficial_usuario(request: Request, site_id: int):
     user_id = request.state.user["id"]
@@ -1332,7 +1364,7 @@ def atualizar_status_candidato_imagem(
 
 @app.get("/buscar-web")
 def buscar_web_legado():
-    return RedirectResponse("/buscar-google", status_code=307)
+    return RedirectResponse("/busca-web", status_code=307)
 
 
 @app.get(
@@ -1340,21 +1372,8 @@ def buscar_web_legado():
     response_class=HTMLResponse,
     dependencies=[Depends(exigir_admin)],
 )
-def buscar_google_formulario(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "buscar_web.html",
-        {
-            "erro": "",
-            "paginas": [],
-            "imagens": [],
-            "pesquisa_realizada": False,
-            "conteudos": db.listar_conteudos(),
-            "conteudo_selecionado": None,
-            "provedores": provedores_busca.listar_provedores("imagem"),
-            "provedor_selecionado": "google_vision",
-        },
-    )
+def buscar_google_formulario():
+    return RedirectResponse("/busca-web", status_code=307)
 
 
 @app.post("/buscar-web", response_class=HTMLResponse, dependencies=_admin_csrf())
@@ -1372,29 +1391,27 @@ async def buscar_google_na_web(
         "paginas": [],
         "imagens": [],
         "pesquisa_realizada": False,
-        "conteudos": db.listar_conteudos(),
         "conteudo_selecionado": conteudo_id,
-        "provedores": provedores_busca.listar_provedores("imagem"),
-        "provedor_selecionado": provedor,
+        "provedor_imagem_selecionado": provedor,
     }
     if provedor != "google_vision":
         contexto["erro"] = "Este provedor ainda não está integrado nesta busca."
-        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+        return _contexto_google(request, **contexto)
     if consentimento != "on":
         contexto["erro"] = (
             "Confirme o envio da imagem ao Google Cloud Vision para iniciar a busca."
         )
-        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+        return _contexto_google(request, **contexto)
 
     conteudo = db.obter_conteudo(conteudo_id)
     if conteudo is None:
         contexto["erro"] = "Conteúdo não encontrado no catálogo."
-        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+        return _contexto_google(request, **contexto)
 
     nome_arquivo = conteudo["arquivo"]
     if Path(nome_arquivo).name != nome_arquivo:
         contexto["erro"] = "O caminho da imagem cadastrada é inválido."
-        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+        return _contexto_google(request, **contexto)
     caminho_arquivo = PASTA_OFICIAIS / nome_arquivo
 
     try:
@@ -1405,10 +1422,10 @@ async def buscar_google_na_web(
     except OSError:
         logger.exception("Não foi possível ler a imagem do conteúdo %s", conteudo_id)
         contexto["erro"] = "Não foi possível ler a imagem selecionada no catálogo."
-        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+        return _contexto_google(request, **contexto)
     except ValueError as erro:
         contexto["erro"] = str(erro)
-        return templates.TemplateResponse(request, "buscar_web.html", contexto)
+        return _contexto_google(request, **contexto)
 
     try:
         contexto["paginas"], contexto["imagens"] = await run_in_threadpool(
@@ -1443,7 +1460,7 @@ async def buscar_google_na_web(
         sites_cadastrados,
         criadora_id=conteudo["criadora_id"],
     )
-    return templates.TemplateResponse(request, "buscar_web.html", contexto)
+    return _contexto_google(request, **contexto)
 
 
 SERPAPI_ENGINES = {
@@ -1464,10 +1481,9 @@ def _termos_busca(usuario):
     return f"{usuario['public_name']} @{usuario['public_handle']}"
 
 
-def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
+def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
     alvo = _usuario_alvo_busca(request, target_user_id)
     target_user_id = alvo["id"]
-    sites_oficiais = db.listar_sites_oficiais_usuario(target_user_id)
     fotos = db.listar_fotos_busca(target_user_id)
     contexto = {
         "erro": "",
@@ -1483,7 +1499,18 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
         "status_conta_atualizado": False,
         "pesquisa_realizada": False,
         "related_options": [],
-        "nomes_apis": SERPAPI_ENGINE_NAMES,
+        "nomes_apis": {**SERPAPI_ENGINE_NAMES, **INSTAGRAM_ENGINE_NAMES},
+        "fonte": "serpapi",
+        "paginas": [],
+        "imagens": [],
+        "conteudos": db.listar_conteudos(),
+        "conteudo_selecionado": None,
+        "provedores_imagem": provedores_busca.listar_provedores("imagem"),
+        "provedor_imagem_selecionado": "google_vision",
+        "username": "",
+        "keyword": "",
+        "perfil": {},
+        "posts": [],
         "provedores": provedores_busca.listar_provedores("texto"),
         "target_user": alvo,
         "target_user_id": target_user_id,
@@ -1496,7 +1523,6 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
             alvo["public_name"] and alvo["public_handle"]
         ),
         "fotos": fotos,
-        "sites_oficiais_usuario": sites_oficiais,
         "sites_vazados": db.listar_sites_vazados(target_user_id),
         "query_perfil": (
             _termos_busca(alvo)
@@ -1505,7 +1531,63 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
         ),
     }
     contexto.update(valores)
-    return templates.TemplateResponse(request, "serpapi.html", contexto)
+    _persistir_ou_restaurar_busca(request, contexto, valores)
+    return templates.TemplateResponse(request, "busca_web.html", contexto)
+
+
+CHAVES_SNAPSHOT_BUSCA = (
+    "fonte", "api_ativa", "pesquisa_realizada", "resultados", "query",
+    "related_options", "paginas", "imagens", "perfil", "posts", "username",
+    "keyword", "conteudo_selecionado", "foto_selecionada",
+)
+# Chamadas que só mudam avisos ou o saldo não devem apagar a última busca.
+CHAVES_SEM_BUSCA = {"erro", "mensagem", "status_conta", "status_conta_atualizado"}
+
+
+def _persistir_ou_restaurar_busca(request: Request, contexto: dict, valores: dict):
+    usuario_id = request.state.user["id"]
+    alvo_id = contexto["target_user_id"]
+
+    if "status_conta" in valores and valores["status_conta"]:
+        db.salvar_snapshot_busca(usuario_id, "saldo", valores["status_conta"])
+    elif not valores.get("status_conta"):
+        saldo = db.obter_snapshot_busca(usuario_id, "saldo")
+        if saldo:
+            contexto["status_conta"] = saldo["dados"]
+            contexto["status_conta_em"] = saldo["updated_at"]
+
+    if valores.get("pesquisa_realizada"):
+        dados = {chave: contexto[chave] for chave in CHAVES_SNAPSHOT_BUSCA}
+        dados["target_user_id"] = alvo_id
+        db.salvar_snapshot_busca(usuario_id, "busca", dados)
+        return
+    if set(valores) - CHAVES_SEM_BUSCA:
+        return
+
+    ultima = db.obter_snapshot_busca(usuario_id, "busca")
+    if not ultima or ultima["dados"].get("target_user_id") != alvo_id:
+        return
+    dados = ultima["dados"]
+    if dados.get("fonte") == "serpapi":
+        resultados = sites_oficiais.marcar_sites_pessoais(
+            dados.get("resultados", []),
+            db.listar_sites_oficiais_usuario(alvo_id),
+        )
+        dados["resultados"] = sites_oficiais.filtrar_resultados_pessoais(
+            resultados, [r["url"] for r in contexto["sites_vazados"]]
+        )
+    for chave in CHAVES_SNAPSHOT_BUSCA:
+        if chave in dados:
+            contexto[chave] = dados[chave]
+    contexto["busca_restaurada_em"] = ultima["updated_at"]
+
+
+def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
+    return _contexto_busca_web(request, target_user_id, **valores)
+
+
+def _contexto_google(request: Request, **valores):
+    return _contexto_busca_web(request, fonte="google", **valores)
 
 
 @app.get(
@@ -1513,7 +1595,16 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
     response_class=HTMLResponse,
     dependencies=[Depends(exigir_admin)],
 )
-def buscar_serpapi_formulario(request: Request, target_user_id: int = 0):
+def buscar_serpapi_formulario():
+    return RedirectResponse("/busca-web", status_code=307)
+
+
+@app.get(
+    "/busca-web",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def pagina_busca_na_web(request: Request, target_user_id: int = 0):
     return _contexto_serpapi(request, target_user_id=target_user_id)
 
 
@@ -1683,6 +1774,10 @@ async def buscar_serpapi(
         resultados,
         db.listar_sites_oficiais_usuario(target_user_id),
     )
+    resultados = sites_oficiais.filtrar_resultados_pessoais(
+        resultados,
+        [r["url"] for r in db.listar_sites_vazados(target_user_id)],
+    )
     related_options = []
     if api == "google_images":
         ids_vistos = set()
@@ -1717,19 +1812,7 @@ INSTAGRAM_ENGINE_NAMES = {
 
 
 def _contexto_instagram(request: Request, **valores):
-    contexto = {
-        "erro": "",
-        "api_ativa": "",
-        "username": "",
-        "keyword": "",
-        "api_key_configurada": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
-        "pesquisa_realizada": False,
-        "perfil": {},
-        "posts": [],
-        "nomes_apis": INSTAGRAM_ENGINE_NAMES,
-    }
-    contexto.update(valores)
-    return templates.TemplateResponse(request, "instagram.html", contexto)
+    return _contexto_busca_web(request, fonte="instagram", **valores)
 
 
 @app.get(
@@ -1737,8 +1820,8 @@ def _contexto_instagram(request: Request, **valores):
     response_class=HTMLResponse,
     dependencies=[Depends(exigir_admin)],
 )
-def buscar_instagram_formulario(request: Request):
-    return _contexto_instagram(request)
+def buscar_instagram_formulario():
+    return RedirectResponse("/busca-web", status_code=307)
 
 
 @app.post("/buscar-instagram", response_class=HTMLResponse, dependencies=_admin_csrf())

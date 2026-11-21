@@ -319,6 +319,7 @@
     .search-results h2 { margin: 1.8rem 0 .85rem; }
     .search-result-list { display: grid; gap: .7rem; margin: 0; padding: 0; list-style: none; }
     .search-result-list li { display: grid; gap: .3rem; padding: .9rem 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .search-result-list .result-thumb { width: 100%; max-width: 160px; max-height: 160px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
     .search-result-list a { width: fit-content; font-weight: 650; overflow-wrap: anywhere; }
     .search-result-list span { color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
     .search-result-list .official-site-badge, .official-site-badge {
@@ -463,6 +464,11 @@
     .serpapi-card h2 a:hover { color: var(--pink-light); }
     .serpapi-card > p { font-size: .86rem; }
     .serpapi-card .search-form { margin-bottom: 0; padding: 1rem; border-color: #39333e; background: #151319; }
+    .search-group-title { margin: 1.2rem 0 0; font-size: 1rem; color: var(--muted); }
+    details.serpapi-card > summary, details.collapsible > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; }
+    details.serpapi-card[open] > summary { margin-bottom: .8rem; }
+    details.collapsible { margin: 1rem 0; padding: .8rem 1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .doc-link { font-size: .8rem; margin: 0 0 .5rem; }
     .provider-panel { margin: 1.5rem 0; padding: 1.1rem; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
     .provider-panel h2 { margin: .45rem 0 1rem; }
     .provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; }
@@ -569,6 +575,36 @@
       .main-nav { width: 100%; justify-content: center; }
     }
 
+    @media (max-width: 700px) {
+      .header-inner { flex-wrap: wrap; justify-content: center; padding: .75rem 0; }
+      .main-nav { width: 100%; flex-wrap: wrap; justify-content: center; gap: .25rem; }
+      .main-nav a, .nav-logout button { min-height: 40px; display: inline-flex; align-items: center; }
+      .nav-logout { margin: 0; }
+      .page-content { padding-bottom: 2.5rem; overflow-wrap: anywhere; }
+      h1 { font-size: clamp(1.7rem, 8vw, 2.4rem); line-height: 1.12; }
+      input, select, textarea, button { font-size: 16px; min-height: 44px; max-width: 100%; }
+      table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      img, video, iframe { max-width: 100%; height: auto; }
+      .provider-grid { grid-template-columns: 1fr; }
+    }
+
+    .menu-toggle { display: none; }
+
+    @media (max-width: 700px) {
+      .header-inner { justify-content: space-between; flex-wrap: wrap; }
+      .menu-toggle {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 44px; padding: 0; font-size: 1.4rem; line-height: 1;
+        border: 1px solid var(--border); color: var(--text); background: var(--surface-raised);
+      }
+      .menu-toggle:hover { background: var(--surface); }
+      .main-nav { display: none; flex-direction: column; align-items: stretch; width: 100%; gap: .15rem; }
+      .main-nav.open { display: flex; }
+      .main-nav a { width: 100%; padding: .65rem .8rem; font-size: .95rem; }
+      .nav-user { padding: .5rem .8rem; }
+      .nav-logout button { width: 100%; justify-content: center; }
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
     }
@@ -581,15 +617,14 @@
         <span class="brand-mark" aria-hidden="true">LS</span>
         <span class="brand-name">Monitoramento</span>
       </a>
-      <nav class="main-nav" aria-label="Navegação principal">
+      <button class="menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="main-nav">&#9776;</button>
+      <nav class="main-nav" id="main-nav" aria-label="Navegação principal">
         {% if current_user %}
           <a href="/">Início</a>
           {% if current_user.role == "admin" %}
           <a href="/catalogo">Criadoras</a>
           <a href="/comparar">Comparar</a>
-          <a href="/buscar-google">Google</a>
-          <a href="/buscar-serpapi">SerpApi</a>
-          <a href="/buscar-instagram">Instagram</a>
+          <a href="/busca-web">Busca na web</a>
           {% endif %}
           <a href="/perfil-busca">Meu perfil</a>
           {% if current_user.role == "admin" %}<a href="/usuarios">Usuários</a>{% endif %}
@@ -610,5 +645,16 @@
   <main class="page-content">
     {% block conteudo %}{% endblock %}
   </main>
+<script>
+  (function () {
+    var btn = document.querySelector(".menu-toggle");
+    var nav = document.getElementById("main-nav");
+    btn.addEventListener("click", function () {
+      var open = nav.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open);
+      btn.setAttribute("aria-label", open ? "Fechar menu" : "Abrir menu");
+    });
+  })();
+</script>
 </body>
 </html>

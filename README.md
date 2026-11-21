@@ -1,6 +1,6 @@
 ## Busca de imagens na web
 
-A página `/buscar-google` usa o recurso Web Detection do Google Cloud Vision para
+A seção Google Cloud Vision da página `/busca-web` usa o recurso Web Detection do Google Cloud Vision para
 procurar páginas públicas com imagens correspondentes. A imagem só é enviada
 depois que a pessoa marca a confirmação no formulário; o aplicativo não a grava
 no catálogo nem no disco durante essa busca. Consulte as
@@ -17,7 +17,7 @@ Para habilitar a busca:
    ou produção, forneça credenciais ao processo de forma segura e defina
    `GOOGLE_APPLICATION_CREDENTIALS` para o caminho dessas credenciais dentro do
    contêiner. Não versione chaves ou arquivos de credenciais.
-3. Acesse `/buscar-google` e confirme o envio da imagem em cada busca.
+3. Acesse `/busca-web` e confirme o envio da imagem em cada busca.
 
 Os resultados são páginas e imagens públicas que o serviço conseguiu indexar;
 não garantem cobertura total nem identificam com certeza quem publicou.
@@ -127,7 +127,7 @@ e a [documentação de PostgreSQL do Render](https://render.com/docs/postgresql)
 
 ## Testes com SerpApi
 
-A página `/buscar-serpapi` pesquisa o perfil do próprio usuário ou, para
+A página `/busca-web` (menu "Busca na web") pesquisa o perfil do próprio usuário ou, para
 administradores, o usuário selecionado. Os resultados podem ser marcados como
 site oficial, ocultados localmente com “Não sou eu” ou registrados como
 relatos de possível vazamento. Os relatos armazenam URL, data do registro,
@@ -208,7 +208,7 @@ revisados.
 
 ## Testes com APIs do Instagram
 
-A página `/buscar-instagram` usa a mesma `SERPAPI_API_KEY` e mantém as duas
+A seção Instagram da página `/busca-web` usa a mesma `SERPAPI_API_KEY` e mantém as duas
 consultas independentes:
 
 - **Instagram Profile API** recebe o nome de usuário (sem precisar do `@`) e

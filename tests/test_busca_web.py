@@ -72,6 +72,27 @@ class BuscarNaWebTest(unittest.TestCase):
 
 
 class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        usuario = {
+            "id": 1,
+            "username": "admin",
+            "role": "admin",
+            "public_name": "Admin",
+            "public_handle": "admin",
+        }
+        for alvo, retorno in {
+            "obter_usuario_por_id": usuario,
+            "listar_usuarios_com_perfil_busca": [],
+            "listar_fotos_busca": [],
+            "listar_sites_vazados": [],
+            "listar_sites_oficiais_usuario": [],
+            "obter_snapshot_busca": None,
+            "salvar_snapshot_busca": None,
+        }.items():
+            patcher = patch(f"app.main.db.{alvo}", return_value=retorno)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def criar_request(self):
         return Request(
             {
@@ -86,6 +107,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
                 "http_version": "1.1",
                 "root_path": "",
                 "app": app,
+                "state": {"user": {"id": 1, "username": "admin", "role": "admin"}},
             }
         )
 

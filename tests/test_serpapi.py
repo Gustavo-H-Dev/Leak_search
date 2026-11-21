@@ -17,6 +17,7 @@ from app.main import (
     buscar_instagram,
     buscar_serpapi,
     obter_foto_busca,
+    pagina_busca_na_web,
     perfil_busca,
     salvar_perfil_busca,
     salvar_resultado_vazado,
@@ -215,6 +216,15 @@ class SerpApiTest(unittest.TestCase):
 
 
 class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.patchers_snapshot = [
+            patch("app.main.db.obter_snapshot_busca", return_value=None),
+            patch("app.main.db.salvar_snapshot_busca", return_value=None),
+        ]
+        for patcher in self.patchers_snapshot:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def criar_request(self, path):
         return Request(
             {
@@ -263,7 +273,10 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                 },
             ),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
-            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch(
+                "app.main.db.listar_sites_vazados",
+                return_value=[{"url": "https://example.com/image"}],
+            ),
             patch(
                 "app.main.db.listar_sites_oficiais_usuario",
                 return_value=[
@@ -292,9 +305,51 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         corpo = resultado.body.decode()
         self.assertIn("Resultado", corpo)
         self.assertIn("related-123", corpo)
-        self.assertIn("Site oficial cadastrado", corpo)
-        self.assertIn("VAZADO!", corpo)
+        self.assertIn("Já marcado como vazado", corpo)
         self.assertIn("Não sou eu", corpo)
+
+    async def test_resultado_oficial_nao_vazado_e_omitido(self):
+        resposta = {
+            "images_results": [
+                {"title": "Oficial", "link": "https://example.com/oficial"},
+                {"title": "Novo", "link": "https://example.com/novo"},
+            ]
+        }
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch(
+                "app.main.db.obter_usuario_por_id",
+                return_value={
+                    "id": 1,
+                    "username": "cliente",
+                    "role": "cliente",
+                    "public_name": "BlackDragon",
+                    "public_handle": "user875s",
+                },
+            ),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch(
+                "app.main.db.listar_sites_oficiais_usuario",
+                return_value=[
+                    {"user_id": 1, "nome": "Site", "url": "https://example.com/oficial"}
+                ],
+            ),
+            patch("app.main.serpapi.pesquisar", return_value=resposta),
+        ):
+            resultado = await buscar_serpapi(
+                self.criar_request("/buscar-serpapi"),
+                api="google_images",
+                consentimento="on",
+                foto_id=0,
+                related_content_id="",
+                target_user_id=1,
+                image_file=None,
+            )
+
+        corpo = resultado.body.decode()
+        self.assertNotIn("Oficial", corpo)
+        self.assertIn("Novo", corpo)
 
     async def test_cliente_nao_pode_escolher_outro_usuario_para_busca(self):
         with self.assertRaises(HTTPException) as erro:
@@ -367,6 +422,40 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(erro.exception.status_code, 403)
         pesquisar_imagem.assert_not_called()
+
+    async def test_ultima_busca_e_saldo_persistem_apos_consultar_saldo(self):
+        resposta = {"images_results": [{"title": "Novo", "link": "https://example.com/novo"}]}
+        with TemporaryDirectory() as diretorio:
+            with (
+                patch.object(db, "CAMINHO_DB", Path(diretorio) / "users.db"),
+                patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            ):
+                db.iniciar_banco()
+                user_id = db.criar_usuario("cliente", "c@example.com", "hash")
+                db.atualizar_perfil_busca(user_id, "Ana", "ana")
+                request = self.criar_request("/buscar-serpapi")
+                request.state.user = {"id": user_id, "username": "cliente", "role": "cliente"}
+                for patcher in self.patchers_snapshot:
+                    patcher.stop()
+                with patch("app.main.serpapi.pesquisar", return_value=resposta):
+                    await buscar_serpapi(
+                        request, api="google_images", consentimento="on",
+                        foto_id=0, related_content_id="", target_user_id=0,
+                        image_file=None,
+                    )
+                with patch(
+                    "app.main.serpapi.obter_status_conta",
+                    return_value={"plan_name": "Free", "searches_per_month": 100, "this_month_usage": 3},
+                ):
+                    saldo = await status_serpapi(request, target_user_id=0)
+                pagina = pagina_busca_na_web(request)
+
+                for corpo in (saldo.body.decode(), pagina.body.decode()):
+                    self.assertIn("Novo", corpo)
+                    self.assertIn("Free", corpo)
+                with db.conexao() as conn:
+                    total = conn.execute("SELECT COUNT(*) AS n FROM search_snapshots").fetchone()["n"]
+                self.assertEqual(total, 2)
 
     async def test_cliente_nao_pode_marcar_resultado_para_outro_usuario(self):
         request = self.criar_request("/resultados/vazado")
@@ -577,6 +666,11 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value={"id": 1, "username": "cliente", "role": "cliente", "public_name": "", "public_handle": ""}),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
             patch("app.main.serpapi.pesquisar", return_value=resposta) as pesquisar,
         ):
             resultado = await buscar_instagram(
@@ -595,6 +689,11 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
     async def test_instagram_popular_envia_apenas_keyword(self):
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value={"id": 1, "username": "cliente", "role": "cliente", "public_name": "", "public_handle": ""}),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
                 "app.main.serpapi.pesquisar",
                 return_value={"popular_results": []},
