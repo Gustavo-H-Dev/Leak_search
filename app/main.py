@@ -20,6 +20,7 @@ from app import db
 from app.core import (
     autenticacao,
     busca_web,
+    candidatos as candidatos_core,
     imagens,
     provedores_busca,
     serpapi,
@@ -768,43 +769,6 @@ def excluir_foto_busca(request: Request, foto_id: int):
     )
 
 
-@app.post(
-    "/resultados/site-oficial",
-    dependencies=_admin_csrf(),
-)
-def salvar_site_oficial_resultado(
-    request: Request,
-    url: str = Form(...),
-    nome: str = Form("Site oficial"),
-    target_user_id: int = Form(0),
-):
-    alvo = _usuario_alvo_busca(request, target_user_id)
-    nome = nome.strip() or "Site oficial"
-    if len(nome) > 160:
-        return JSONResponse(
-            {"erro": "O nome do site deve ter até 160 caracteres."},
-            status_code=400,
-        )
-    try:
-        url = sites_oficiais.normalizar_url_pagina(url)
-    except ValueError as erro:
-        return JSONResponse({"erro": str(erro)}, status_code=400)
-    site_id = db.adicionar_site_oficial_usuario(
-        alvo["id"], request.state.user["id"], nome, url
-    )
-    return JSONResponse(
-        {
-            "mensagem": (
-                "Site oficial salvo."
-                if site_id
-                else "Este site já está cadastrado como oficial."
-            ),
-            "duplicado": site_id is None,
-        },
-        status_code=201 if site_id else 200,
-    )
-
-
 @app.post("/perfil-busca/sites-oficiais", dependencies=_csrf())
 def adicionar_site_oficial_perfil(
     request: Request,
@@ -848,68 +812,6 @@ def excluir_site_oficial_usuario(request: Request, site_id: int):
     return RedirectResponse(
         "/perfil-busca?mensagem=" + quote("Site oficial removido."),
         status_code=303,
-    )
-
-
-@app.post(
-    "/resultados/vazado",
-    dependencies=_admin_csrf(),
-)
-def salvar_resultado_vazado(
-    request: Request,
-    url: str = Form(...),
-    titulo: str = Form(...),
-    origem: str = Form(""),
-    resumo: str = Form(""),
-    miniatura: str = Form(""),
-    data_resultado: str = Form(""),
-    related_content_id: str = Form(""),
-    api: str = Form(...),
-    target_user_id: int = Form(0),
-):
-    alvo = _usuario_alvo_busca(request, target_user_id)
-    if api not in SERPAPI_ENGINES:
-        return JSONResponse({"erro": "API de busca inválida."}, status_code=400)
-    try:
-        url = sites_oficiais.normalizar_url_pagina(url)
-    except ValueError as erro:
-        return JSONResponse({"erro": str(erro)}, status_code=400)
-    titulo = titulo.strip()
-    origem = origem.strip()
-    resumo = resumo.strip()
-    if not titulo or len(titulo) > 500 or len(origem) > 200 or len(resumo) > 4000:
-        return JSONResponse(
-            {"erro": "Os dados do resultado excedem o tamanho permitido."},
-            status_code=400,
-        )
-    miniatura = miniatura.strip()
-    if miniatura and not serpapi.validar_url_imagem(miniatura):
-        miniatura = ""
-    metadata = {
-        "data_resultado": data_resultado[:200],
-        "related_content_id": related_content_id[:200],
-    }
-    report_id = db.adicionar_site_vazado(
-        alvo["id"],
-        request.state.user["id"],
-        url,
-        titulo,
-        origem,
-        resumo,
-        miniatura,
-        api,
-        metadata,
-    )
-    return JSONResponse(
-        {
-            "mensagem": (
-                "Resultado registrado para revisão."
-                if report_id
-                else "Este endereço já foi registrado."
-            ),
-            "duplicado": report_id is None,
-        },
-        status_code=201 if report_id else 200,
     )
 
 
@@ -1196,168 +1098,129 @@ async def comparar(request: Request, arquivo: UploadFile = File(...)):
     )
 
 
-def _correspondencias_candidato(candidato, hashes_catalogo):
-    correspondencias = imagens.melhores_correspondencias(
-        candidato["phash"], hashes_catalogo
-    )
-    ids_exatos = set()
-    arquivos_vistos = set()
-    for linha in hashes_catalogo:
-        arquivo = linha["arquivo"]
-        if arquivo in arquivos_vistos or Path(arquivo).name != arquivo:
+def _referencias_do_usuario(alvo):
+    """Hashes de referência: catálogo, fotos do perfil e sites oficiais."""
+    referencias = [
+        {"phash": linha["phash"], "origem": f"Catálogo — {linha['criadora']}"}
+        for linha in db.listar_hashes_criadora_do_usuario(alvo["id"])
+    ]
+    for foto in db.listar_fotos_busca(alvo["id"]):
+        if Path(foto["arquivo"]).name != foto["arquivo"]:
             continue
-        arquivos_vistos.add(arquivo)
         try:
-            conteudo = (PASTA_OFICIAIS / arquivo).read_bytes()
-        except OSError:
+            phash = imagens.calcular_phash(
+                (PASTA_FOTOS_BUSCA / foto["arquivo"]).read_bytes()
+            )
+        except (OSError, ValueError):
             continue
-        if imagens.calcular_sha256(conteudo) == candidato["sha256"]:
-            ids_exatos.add(linha["conteudo_id"])
-
-    por_id = {resultado["conteudo_id"]: resultado for resultado in correspondencias}
-    for linha in hashes_catalogo:
-        conteudo_id = linha["conteudo_id"]
-        if conteudo_id in ids_exatos and conteudo_id not in por_id:
-            por_id[conteudo_id] = {
-                "conteudo_id": conteudo_id,
-                "criadora": linha["criadora"],
-                "arquivo": linha["arquivo"],
-                "distancia": 0,
-                "classificacao": "cópia exata",
-            }
-        elif conteudo_id in ids_exatos:
-            por_id[conteudo_id]["distancia"] = 0
-            por_id[conteudo_id]["classificacao"] = "cópia exata"
-    return sorted(
-        por_id.values(),
-        key=lambda resultado: (
-            resultado["classificacao"] != "cópia exata",
-            resultado["distancia"],
-        ),
-    )[:5]
+        referencias.append(
+            {"phash": phash, "origem": f"Foto do perfil — {foto['nome_original']}"}
+        )
+    referencias.extend(
+        {"phash": linha["phash"], "origem": f"Site oficial — {linha['url']}"}
+        for linha in db.listar_hashes_oficiais(alvo["id"])
+    )
+    return referencias
 
 
-@app.get(
-    "/candidatos-imagem",
-    response_class=HTMLResponse,
-    dependencies=[Depends(exigir_admin)],
-)
-def candidatos_imagem(
-    request: Request, target_user_id: int = 0, mensagem: str = ""
+STATUS_VALIDA = {
+    "pending": "Pendentes",
+    "leaked": "Vazados",
+    "not_me": "Não sou eu",
+    "official": "Oficiais",
+}
+
+
+@app.get("/valida", response_class=HTMLResponse)
+def valida(
+    request: Request,
+    target_user_id: int = 0,
+    status: str = "pending",
+    mensagem: str = "",
 ):
     alvo = _usuario_alvo_busca(request, target_user_id)
-    hashes_catalogo = db.listar_hashes_criadora_do_usuario(alvo["id"])
+    if status not in STATUS_VALIDA:
+        status = "pending"
+    referencias = _referencias_do_usuario(alvo)
     candidatos = []
-    for candidato in db.listar_candidatos_imagem(alvo["id"]):
+    for candidato in db.listar_candidatos(alvo["id"], status):
+        melhor = candidatos_core.melhor_referencia(candidato["phash"], referencias)
+        distancia = melhor["distancia"] if melhor else None
         candidatos.append(
             {
                 **candidato,
-                "correspondencias": _correspondencias_candidato(
-                    candidato, hashes_catalogo
-                ),
+                "distancia": distancia,
+                "referencia": melhor["origem"] if melhor else "",
+                "nivel": imagens.nivel_de_similaridade(distancia),
             }
         )
+    candidatos = candidatos_core.ordenar_por_atencao(candidatos)
     return templates.TemplateResponse(
         request,
-        "candidatos_imagem.html",
+        "valida.html",
         {
             "target_user": alvo,
             "target_user_id": alvo["id"],
+            "target_users": (
+                db.listar_usuarios_com_perfil_busca()
+                if request.state.user["role"] == "admin"
+                else []
+            ),
             "candidatos": candidatos,
-            "tem_referencias": bool(hashes_catalogo),
+            "status_atual": status,
+            "status_nomes": STATUS_VALIDA,
+            "contagens": db.contar_candidatos_por_status(alvo["id"]),
+            "tem_referencias": bool(referencias),
             "mensagem": mensagem,
         },
     )
 
 
-@app.post(
-    "/candidatos-imagem",
-    response_class=HTMLResponse,
-    dependencies=_admin_csrf(),
-)
-async def adicionar_candidato_imagem(
-    request: Request,
-    target_user_id: int = Form(0),
-    source_url: str = Form(...),
-    titulo: str = Form(...),
-    engine: str = Form(...),
-    consentimento: str = Form(""),
-    arquivo: UploadFile = File(...),
-):
-    alvo = _usuario_alvo_busca(request, target_user_id)
-    if engine not in {"google_images", "google_images_light"}:
-        raise HTTPException(status_code=400, detail="API de imagens inválida.")
-    if consentimento != "on":
-        raise HTTPException(status_code=400, detail="Confirme o processamento da imagem.")
-    try:
-        source_url = sites_oficiais.normalizar_url_pagina(source_url)
-    except ValueError as erro:
-        raise HTTPException(status_code=400, detail=str(erro)) from erro
-    if len(source_url) > 2048:
-        raise HTTPException(status_code=400, detail="URL de origem muito longa.")
-    titulo = titulo.strip()
-    if not titulo or len(titulo) > 500:
-        raise HTTPException(status_code=400, detail="Título do resultado inválido.")
-
-    proprietario = sites_oficiais.proprietario_pagina_oficial(
-        source_url,
-        db.listar_paginas_oficiais_com_donos(),
-        alvo["id"],
-    )
-    if proprietario != "nao_oficial":
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "A página consta como oficial ou tem propriedade incerta; "
-                "ela foi excluída da comparação."
-            ),
-        )
-
-    try:
-        dados = await _ler_imagem(arquivo)
-        phash = imagens.calcular_phash(dados)
-    except ValueError as erro:
-        raise HTTPException(status_code=400, detail=str(erro)) from erro
-    candidate_id = db.adicionar_candidato_imagem(
-        alvo["id"],
-        source_url,
-        titulo,
-        engine,
-        imagens.calcular_sha256(dados),
-        phash,
-    )
-    mensagem = (
-        "Imagem adicionada à fila de revisão."
-        if candidate_id
-        else "Esta imagem já havia sido analisada para este perfil."
-    )
-    return RedirectResponse(
-        f"/candidatos-imagem?target_user_id={alvo['id']}&mensagem={quote(mensagem)}",
-        status_code=303,
-    )
+@app.get("/candidatos-imagem")
+def candidatos_imagem_legado():
+    return RedirectResponse("/valida", status_code=307)
 
 
-@app.post(
-    "/candidatos-imagem/{candidate_id}/status",
-    dependencies=_admin_csrf(),
-)
-def atualizar_status_candidato_imagem(
+@app.post("/valida/{candidate_id}/status", dependencies=_csrf())
+def validar_candidato(
     request: Request,
     candidate_id: int,
     status: str = Form(...),
     target_user_id: int = Form(0),
 ):
     alvo = _usuario_alvo_busca(request, target_user_id)
-    try:
-        atualizado = db.atualizar_status_candidato_imagem(
-            candidate_id, alvo["id"], status
-        )
-    except ValueError as erro:
-        raise HTTPException(status_code=400, detail=str(erro)) from erro
-    if not atualizado:
+    if status not in {"leaked", "not_me", "official"}:
+        raise HTTPException(status_code=400, detail="Status de candidato inválido.")
+    candidato = db.obter_candidato(candidate_id, alvo["id"])
+    if candidato is None:
         raise HTTPException(status_code=404, detail="Candidato não encontrado.")
+    db.atualizar_status_candidato(candidate_id, alvo["id"], status)
+    if status == "leaked":
+        db.adicionar_site_vazado(
+            alvo["id"],
+            request.state.user["id"],
+            candidato["url"],
+            candidato["title"],
+            candidato["source"],
+            candidato["snippet"],
+            candidato["thumbnail"],
+            candidato["engine"],
+            {},
+        )
+    elif status == "official":
+        db.adicionar_site_oficial_usuario(
+            alvo["id"],
+            request.state.user["id"],
+            candidato["title"][:160] or "Site oficial",
+            candidato["url"],
+        )
+        if candidato["phash"]:
+            db.adicionar_hash_oficial(
+                alvo["id"], candidato["url"], candidato["phash"]
+            )
     return RedirectResponse(
-        f"/candidatos-imagem?target_user_id={alvo['id']}",
+        f"/valida?target_user_id={alvo['id']}"
+        f"&mensagem={quote('Candidato atualizado.')}",
         status_code=303,
     )
 
@@ -1383,10 +1246,14 @@ async def buscar_google_na_web(
     conteudo_id: int = Form(...),
     consentimento: str = Form(""),
     provedor: str = Form("google_vision"),
+    target_user_id: int = Form(0),
 ):
     if not isinstance(provedor, str):
         provedor = "google_vision"
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    target_user_id = alvo["id"]
     contexto = {
+        "target_user_id": target_user_id,
         "erro": "",
         "paginas": [],
         "imagens": [],
@@ -1404,8 +1271,10 @@ async def buscar_google_na_web(
         return _contexto_google(request, **contexto)
 
     conteudo = db.obter_conteudo(conteudo_id)
-    if conteudo is None:
-        contexto["erro"] = "Conteúdo não encontrado no catálogo."
+    if conteudo is None or conteudo["id"] not in {
+        c["id"] for c in db.listar_conteudos(target_user_id)
+    }:
+        contexto["erro"] = "Conteúdo não encontrado no catálogo desta criadora."
         return _contexto_google(request, **contexto)
 
     nome_arquivo = conteudo["arquivo"]
@@ -1449,18 +1318,95 @@ async def buscar_google_na_web(
     else:
         contexto["pesquisa_realizada"] = True
 
-    sites_cadastrados = db.listar_sites_oficiais()
-    contexto["paginas"] = sites_oficiais.marcar_resultados(
-        contexto["paginas"],
-        sites_cadastrados,
-        criadora_id=conteudo["criadora_id"],
-    )
-    contexto["imagens"] = sites_oficiais.marcar_resultados(
-        contexto["imagens"],
-        sites_cadastrados,
-        criadora_id=conteudo["criadora_id"],
-    )
+    if contexto["pesquisa_realizada"]:
+        resultados = [
+            {
+                "link": pagina["url"],
+                "titulo": pagina["titulo"],
+                "miniatura": pagina["miniatura"],
+            }
+            for pagina in contexto["paginas"]
+        ] + [
+            {"link": imagem["url"], "titulo": imagem["tipo"], "miniatura": imagem["url"]}
+            for imagem in contexto["imagens"]
+        ]
+        contexto["resumo_busca"] = await run_in_threadpool(
+            _enviar_para_valida, alvo, resultados, "google_vision"
+        )
+    contexto["paginas"] = contexto["imagens"] = []
     return _contexto_google(request, **contexto)
+
+
+def _enviar_para_valida(alvo, resultados, engine):
+    """Filtra os resultados da API e envia os candidatos à página Valida.
+
+    Omite páginas oficiais (ou filhas delas), as já marcadas como "não sou eu"
+    e repetições. Só o hash da miniatura é guardado; a imagem é descartada.
+    """
+    user_id = alvo["id"]
+    paginas_oficiais = db.listar_paginas_oficiais_com_donos()
+    existentes = {c["url"]: c["status"] for c in db.listar_candidatos(user_id)}
+    hashes_oficiais = {h["url"] for h in db.listar_hashes_oficiais(user_id)}
+    resumo = {
+        "total": len(resultados),
+        "novos": 0,
+        "oficiais": 0,
+        "nao_sou_eu": 0,
+        "repetidos": 0,
+        "sem_hash": 0,
+    }
+    vistos = set()
+    novos = []
+    oficiais_proprios = []
+    for resultado in resultados:
+        url = sites_oficiais.url_pagina_da_busca(
+            resultado.get("link") or resultado.get("url") or ""
+        )
+        if not url:
+            continue
+        if url in vistos:
+            resumo["repetidos"] += 1
+            continue
+        vistos.add(url)
+        dono = sites_oficiais.proprietario_pagina_oficial(
+            url, paginas_oficiais, user_id
+        )
+        if dono != "nao_oficial":
+            resumo["oficiais"] += 1
+            if dono == "proprio" and url not in hashes_oficiais:
+                oficiais_proprios.append((url, resultado))
+            continue
+        status = existentes.get(url)
+        if status == "not_me":
+            resumo["nao_sou_eu"] += 1
+        elif status is not None:
+            resumo["repetidos"] += 1
+        else:
+            novos.append((url, resultado))
+
+    hashes = candidatos_core.calcular_hashes(
+        [r["miniatura"] for _, r in novos + oficiais_proprios if r.get("miniatura")]
+    )
+    for url, resultado in oficiais_proprios:
+        phash = hashes.get(resultado.get("miniatura"), "")
+        if phash:
+            db.adicionar_hash_oficial(user_id, url, phash)
+    for url, resultado in novos:
+        phash = hashes.get(resultado.get("miniatura"), "")
+        if not phash:
+            resumo["sem_hash"] += 1
+        db.adicionar_candidato(
+            user_id,
+            url,
+            (resultado.get("titulo") or "Resultado")[:500],
+            (resultado.get("origem") or "")[:200],
+            (resultado.get("resumo") or "")[:4000],
+            resultado.get("miniatura") or "",
+            engine,
+            phash,
+        )
+        resumo["novos"] += 1
+    return resumo
 
 
 SERPAPI_ENGINES = {
@@ -1503,7 +1449,8 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         "fonte": "serpapi",
         "paginas": [],
         "imagens": [],
-        "conteudos": db.listar_conteudos(),
+        "conteudos": db.listar_conteudos(target_user_id),
+        "resumo_busca": None,
         "conteudo_selecionado": None,
         "provedores_imagem": provedores_busca.listar_provedores("imagem"),
         "provedor_imagem_selecionado": "google_vision",
@@ -1538,7 +1485,7 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
 CHAVES_SNAPSHOT_BUSCA = (
     "fonte", "api_ativa", "pesquisa_realizada", "resultados", "query",
     "related_options", "paginas", "imagens", "perfil", "posts", "username",
-    "keyword", "conteudo_selecionado", "foto_selecionada",
+    "keyword", "conteudo_selecionado", "foto_selecionada", "resumo_busca",
 )
 # Chamadas que só mudam avisos ou o saldo não devem apagar a última busca.
 CHAVES_SEM_BUSCA = {"erro", "mensagem", "status_conta", "status_conta_atualizado"}
@@ -1568,14 +1515,6 @@ def _persistir_ou_restaurar_busca(request: Request, contexto: dict, valores: dic
     if not ultima or ultima["dados"].get("target_user_id") != alvo_id:
         return
     dados = ultima["dados"]
-    if dados.get("fonte") == "serpapi":
-        resultados = sites_oficiais.marcar_sites_pessoais(
-            dados.get("resultados", []),
-            db.listar_sites_oficiais_usuario(alvo_id),
-        )
-        dados["resultados"] = sites_oficiais.filtrar_resultados_pessoais(
-            resultados, [r["url"] for r in contexto["sites_vazados"]]
-        )
     for chave in CHAVES_SNAPSHOT_BUSCA:
         if chave in dados:
             contexto[chave] = dados[chave]
@@ -1587,7 +1526,9 @@ def _contexto_serpapi(request: Request, target_user_id: int = 0, **valores):
 
 
 def _contexto_google(request: Request, **valores):
-    return _contexto_busca_web(request, fonte="google", **valores)
+    return _contexto_busca_web(
+        request, valores.pop("target_user_id", 0), fonte="google", **valores
+    )
 
 
 @app.get(
@@ -1770,13 +1711,8 @@ async def buscar_serpapi(
         )
 
     resultados = serpapi.normalizar_resultados(dados, api)
-    resultados = sites_oficiais.marcar_sites_pessoais(
-        resultados,
-        db.listar_sites_oficiais_usuario(target_user_id),
-    )
-    resultados = sites_oficiais.filtrar_resultados_pessoais(
-        resultados,
-        [r["url"] for r in db.listar_sites_vazados(target_user_id)],
+    resumo_busca = await run_in_threadpool(
+        _enviar_para_valida, alvo, resultados, api
     )
     related_options = []
     if api == "google_images":
@@ -1798,7 +1734,7 @@ async def buscar_serpapi(
         request,
         target_user_id,
         pesquisa_realizada=True,
-        resultados=resultados,
+        resumo_busca=resumo_busca,
         query=query,
         api_ativa=api,
         related_options=related_options,

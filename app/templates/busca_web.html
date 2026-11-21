@@ -5,14 +5,14 @@
   <span class="eyebrow">BUSCA NA WEB</span>
   <h1>Busca na web</h1>
   <p class="search-intro">
-    Pesquise por nome e arroba ou compare fotos. Os resultados são pistas da
-    busca e precisam ser conferidos por você; marcar um resultado como vazado
-    registra seu relato, não uma verificação automática.
+    Escolha a criadora, a API e o endpoint. Os resultados da API são filtrados e os
+    candidatos seguem para a página <a href="/valida">Valida</a>, onde são
+    comparados por hash e validados pela criadora.
   </p>
 
   {% if current_user.role == "admin" %}
   <form class="search-form target-user-form" method="get" action="/busca-web">
-    <label class="field-label" for="search-target">Pesquisar como administrador</label>
+    <label class="field-label" for="search-target">Criadora pesquisada</label>
     <select id="search-target" name="target_user_id" required>
       {% for usuario in target_users %}
       <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
@@ -257,7 +257,8 @@
       <form class="search-form" method="post" action="/buscar-google">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="provedor" value="google_vision">
-        <label class="field-label" for="conteudo_id">Imagem do catálogo</label>
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+        <label class="field-label" for="conteudo_id">Imagem do catálogo desta criadora</label>
         <select id="conteudo_id" name="conteudo_id" required>
           <option value="">Selecione uma imagem</option>
           {% for conteudo in conteudos %}
@@ -322,40 +323,6 @@
     </details>
   </div>
 
-  {% if pesquisa_realizada and fonte == "google" %}
-  <section class="search-results" aria-live="polite">
-    <h2>Páginas com imagens correspondentes</h2>
-    {% if paginas %}
-    <ul class="search-result-list">
-      {% for pagina in paginas %}
-      <li>
-        <a href="{{ pagina.url }}" target="_blank" rel="noopener noreferrer">{{ pagina.titulo }}</a>
-        <span class="official-site-badge">Google Cloud Vision</span>
-        {% if pagina.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ pagina.criadoras_oficiais|join(", ") }}</span>{% endif %}
-        <span>{{ pagina.url }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p>Nenhuma página com imagem correspondente foi encontrada. Isso não prova que a imagem não foi publicada.</p>
-    {% endif %}
-
-    {% if imagens %}
-    <h2>Imagens correspondentes ou semelhantes</h2>
-    <ul class="search-result-list">
-      {% for imagem in imagens %}
-      <li>
-        <a href="{{ imagem.url }}" target="_blank" rel="noopener noreferrer">{{ imagem.tipo }}</a>
-        <span class="official-site-badge">Google Cloud Vision</span>
-        {% if imagem.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ imagem.criadoras_oficiais|join(", ") }}</span>{% endif %}
-        <span>{{ imagem.url }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-  </section>
-  {% endif %}
-
   {% if pesquisa_realizada and fonte == "instagram" %}
   <section class="search-results" aria-live="polite">
     <h2>Resultados: {{ nomes_apis[api_ativa] }}</h2>
@@ -407,82 +374,27 @@
 
   {% if busca_restaurada_em %}<p class="account-usage-note">Mostrando a última busca, feita em {{ busca_restaurada_em[:19]|replace("T", " ") }} (UTC).</p>{% endif %}
 
-  {% if pesquisa_realizada and fonte == "serpapi" %}
+  {% if pesquisa_realizada and resumo_busca %}
   <section class="search-results" aria-live="polite">
-    <h2>Resultados: {{ nomes_apis[api_ativa] }}</h2>
-    {% if api_ativa in ['google_images', 'google_images_light'] %}
+    <h2>Resultado da busca{% if nomes_apis[api_ativa] %}: {{ nomes_apis[api_ativa] }}{% endif %}</h2>
     <p>
-      <a href="/candidatos-imagem?target_user_id={{ target_user_id }}">Revisar imagens candidatas salvas</a>.
-      Para comparar um resultado novo, baixe a imagem e envie pelo formulário abaixo.
+      A API retornou <strong>{{ resumo_busca.total }}</strong> resultado(s).
+      <strong>{{ resumo_busca.novos }}</strong> foram enviados como candidatos para a página
+      <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>,
+      onde são comparados com as imagens de referência e validados.
     </p>
-    {% endif %}
-    {% if resultados %}
-    <ul class="search-result-list">
-      {% for resultado in resultados %}
-      <li>
-        {% if resultado.miniatura %}<img class="result-thumb" src="{{ resultado.miniatura }}" alt="Miniatura de {{ resultado.titulo }}" loading="lazy" referrerpolicy="no-referrer">{% endif %}
-        <a href="{{ resultado.link }}" target="_blank" rel="noopener noreferrer">{{ resultado.titulo }}</a>
-        <span class="official-site-badge">{{ resultado.provedor or "SerpApi" }}</span>
-        {% if resultado.site_oficial %}<span class="official-site-badge">Site oficial cadastrado</span>{% endif %}
-        {% if resultado.vazado %}<span class="official-site-badge">Já marcado como vazado</span>{% endif %}
-        {% if resultado.origem %}<span>{{ resultado.origem }}</span>{% endif %}
-        <span>{{ resultado.link }}</span>
-        {% if resultado.resumo %}<span>{{ resultado.resumo }}</span>{% endif %}
-        {% if resultado.data_resultado %}<span>Data informada pela busca: {{ resultado.data_resultado }}</span>{% endif %}
-        {% if api_ativa in ['google_images', 'google_images_light'] %}
-        <form class="search-form" method="post" action="/candidatos-imagem" enctype="multipart/form-data">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-          <input type="hidden" name="source_url" value="{{ resultado.link }}">
-          <input type="hidden" name="titulo" value="{{ resultado.titulo }}">
-          <input type="hidden" name="engine" value="{{ api_ativa }}">
-          <label class="field-label">Imagem baixada deste resultado</label>
-          <input type="file" name="arquivo" accept="image/jpeg,image/png,image/webp" required>
-          <label class="consent-control">
-            <input type="checkbox" name="consentimento" value="on" required>
-            <span>Autorizo comparar esta imagem e guardar somente hashes e dados do resultado; o arquivo enviado será descartado.</span>
-          </label>
-          <button type="submit">Comparar e enviar para revisão</button>
-        </form>
-        {% endif %}
-        <div class="result-actions">
-          {% if not resultado.site_oficial %}
-          <form method="post" action="/resultados/site-oficial" data-result-action>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-            <input type="hidden" name="url" value="{{ resultado.link }}">
-            <input type="hidden" name="nome" value="{{ resultado.titulo }}">
-            <button type="submit">Site oficial</button>
-          </form>
-          {% endif %}
-          <form method="post" action="/resultados/vazado" data-result-action>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-            <input type="hidden" name="api" value="{{ api_ativa }}">
-            <input type="hidden" name="url" value="{{ resultado.link }}">
-            <input type="hidden" name="titulo" value="{{ resultado.titulo }}">
-            <input type="hidden" name="origem" value="{{ resultado.origem }}">
-            <input type="hidden" name="resumo" value="{{ resultado.resumo }}">
-            <input type="hidden" name="miniatura" value="{{ resultado.miniatura }}">
-            <input type="hidden" name="data_resultado" value="{{ resultado.data_resultado }}">
-            <input type="hidden" name="related_content_id" value="{{ resultado.related_content_id }}">
-            <button class="button-danger" type="submit">VAZADO!</button>
-          </form>
-          <button type="button" class="button-secondary" data-dismiss-result>Não sou eu</button>
-        </div>
-        <span class="result-action-status" aria-live="polite"></span>
-      </li>
-      {% endfor %}
+    <ul>
+      <li>Omitidos por serem sites oficiais ou páginas filhas deles: {{ resumo_busca.oficiais }}</li>
+      <li>Omitidos por já terem sido marcados como “não sou eu”: {{ resumo_busca.nao_sou_eu }}</li>
+      <li>Omitidos por serem repetidos ou já estarem na Valida: {{ resumo_busca.repetidos }}</li>
+      {% if resumo_busca.sem_hash %}<li>Candidatos sem imagem comparável (sem hash): {{ resumo_busca.sem_hash }}</li>{% endif %}
     </ul>
-    {% else %}
-    <p>A API respondeu, mas não retornou resultados reconhecidos para exibição.</p>
-    {% endif %}
   </section>
   {% endif %}
 
   {% if sites_vazados %}
   <section class="search-results">
-    <h2>Resultados que você marcou como vazados</h2>
+    <h2>Resultados validados como vazados</h2>
     <ul class="search-result-list">
       {% for site in sites_vazados %}
       <li>
@@ -512,41 +424,6 @@
       }
       campo.value = provedorSelecionado();
     });
-  });
-
-  document.querySelectorAll("[data-result-action]").forEach((form) => {
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const item = form.closest("li");
-      const status = item.querySelector(".result-action-status");
-      const button = form.querySelector("button");
-      button.disabled = true;
-      try {
-        const response = await fetch(form.action, {
-          method: "POST",
-          body: new FormData(form),
-          headers: { Accept: "application/json" },
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.erro || payload.detail || "Não foi possível salvar.");
-        }
-        status.textContent = payload.mensagem;
-        if (form.action.endsWith("/site-oficial")) {
-          const badge = document.createElement("span");
-          badge.className = "official-site-badge";
-          badge.textContent = "Site oficial cadastrado";
-          item.insertBefore(badge, item.querySelector(".result-actions"));
-        }
-        item.querySelector(".result-actions").remove();
-      } catch (error) {
-        status.textContent = error.message;
-        button.disabled = false;
-      }
-    });
-  });
-  document.querySelectorAll("[data-dismiss-result]").forEach((button) => {
-    button.addEventListener("click", () => button.closest("li").remove());
   });
 </script>
 {% endblock %}

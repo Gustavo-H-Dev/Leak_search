@@ -99,50 +99,32 @@ def marcar_resultados(
     return marcados
 
 
-def marcar_sites_pessoais(resultados: list[dict], sites_oficiais) -> list[dict]:
-    urls_oficiais = {
-        _chave_oficial(site["url"])
-        for site in sites_oficiais
-        if _chave_oficial(site["url"])
-    }
-    return [
-        {
-            **resultado,
-            "site_oficial": _chave_oficial(
-                resultado.get("url") or resultado.get("link") or ""
-            )
-            in urls_oficiais,
-        }
-        for resultado in resultados
-    ]
+def _mesma_ou_filha(chave: str, chave_oficial: str) -> bool:
+    if chave == chave_oficial:
+        return True
+    if chave.startswith("tiktok:") or chave_oficial.startswith("tiktok:"):
+        return False
+    pagina = urlsplit(chave)
+    oficial = urlsplit(chave_oficial)
+    if oficial.query or pagina.netloc != oficial.netloc:
+        return False
+    return pagina.path.startswith(oficial.path.rstrip("/") + "/")
 
 
 def proprietario_pagina_oficial(url: str, paginas_oficiais, user_id: int) -> str:
+    """Classifica a URL frente às páginas oficiais, incluindo páginas filhas."""
     pagina_normalizada = _chave_oficial(url)
     if not pagina_normalizada:
         return "desconhecido"
 
     donos = {
-        pagina.get("user_id")
+        pagina["user_id"]
         for pagina in paginas_oficiais
-        if _chave_oficial(pagina["url"]) == pagina_normalizada
+        if (chave := _chave_oficial(pagina["url"]))
+        and _mesma_ou_filha(pagina_normalizada, chave)
     }
     if not donos:
         return "nao_oficial"
     if donos == {user_id}:
         return "proprio"
     return "terceiro_ou_incerto"
-
-
-def filtrar_resultados_pessoais(resultados: list[dict], urls_vazadas) -> list[dict]:
-    """Oculta sites oficiais; mantém novos resultados e os já marcados como vazados."""
-    vazadas = {url_pagina_da_busca(url) for url in urls_vazadas}
-    vazadas.discard("")
-    filtrados = []
-    for resultado in resultados:
-        url = url_pagina_da_busca(resultado.get("url") or resultado.get("link") or "")
-        vazado = url in vazadas
-        if resultado.get("site_oficial") and not vazado:
-            continue
-        filtrados.append({**resultado, "vazado": vazado})
-    return filtrados

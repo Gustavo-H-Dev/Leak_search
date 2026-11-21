@@ -271,18 +271,13 @@ def test_perfil_tiktok_marca_videos_do_mesmo_usuario_como_oficiais():
     assert [r["criadoras_oficiais"] for r in marcados] == [["Ana"], []]
 
 
-def test_filtrar_resultados_pessoais_oculta_oficiais_e_mantem_vazados():
+def test_pagina_filha_de_site_oficial_e_oficial_mas_irma_nao():
     from app.core import sites_oficiais
 
-    resultados = [
-        {"link": "https://a.com/novo", "site_oficial": False},
-        {"link": "https://a.com/oficial", "site_oficial": True},
-        {"link": "https://a.com/vazado", "site_oficial": True},
-    ]
-    filtrados = sites_oficiais.filtrar_resultados_pessoais(
-        resultados, ["https://a.com/vazado"]
+    paginas = [{"user_id": 1, "url": "https://a.com/perfil"}]
+    classificar = lambda url: sites_oficiais.proprietario_pagina_oficial(
+        url, paginas, 1
     )
-    assert [(r["link"], r["vazado"]) for r in filtrados] == [
-        ("https://a.com/novo", False),
-        ("https://a.com/vazado", True),
-    ]
+    assert classificar("https://a.com/perfil/posts/9") == "proprio"
+    assert classificar("https://a.com/perfil-falso") == "nao_oficial"
+    assert classificar("https://b.com/perfil/posts/9") == "nao_oficial"

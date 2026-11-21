@@ -152,6 +152,28 @@ def iniciar_banco():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, sha256)
             );
+            CREATE TABLE IF NOT EXISTS search_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                snippet TEXT NOT NULL DEFAULT '',
+                thumbnail TEXT NOT NULL DEFAULT '',
+                engine TEXT NOT NULL,
+                phash TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, url)
+            );
+            CREATE TABLE IF NOT EXISTS official_image_hashes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                url TEXT NOT NULL,
+                phash TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, url)
+            );
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -285,6 +307,32 @@ def _iniciar_banco_postgresql():
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, sha256)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS search_candidates (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            snippet TEXT NOT NULL DEFAULT '',
+            thumbnail TEXT NOT NULL DEFAULT '',
+            engine TEXT NOT NULL,
+            phash TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, url)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS official_image_hashes (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            url TEXT NOT NULL,
+            phash TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, url)
         )
         """,
         """
@@ -696,51 +744,104 @@ def listar_paginas_oficiais_com_donos():
         ).fetchall()
 
 
-def adicionar_candidato_imagem(
-    user_id, source_url, title, engine, sha256, phash
+STATUS_CANDIDATO = {"pending", "leaked", "not_me", "official"}
+
+
+def adicionar_candidato(
+    user_id, url, title, source, snippet, thumbnail, engine, phash
 ):
     with conexao() as conn:
         cur = conn.execute(
             """
-            INSERT INTO image_candidates (
-                user_id, source_url, title, engine, sha256, phash
+            INSERT INTO search_candidates (
+                user_id, url, title, source, snippet, thumbnail, engine, phash
             )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (user_id, sha256) DO NOTHING
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, url) DO NOTHING
             RETURNING id
             """,
-            (user_id, source_url, title, engine, sha256, phash),
+            (user_id, url, title, source, snippet, thumbnail, engine, phash),
         )
         registro = cur.fetchone()
         return registro["id"] if registro else None
 
 
-def listar_candidatos_imagem(user_id):
+def listar_candidatos(user_id, status=None):
+    consulta = """
+        SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
+               phash, status, created_at
+        FROM search_candidates
+        WHERE user_id = ?
+    """
+    parametros = [user_id]
+    if status:
+        consulta += " AND status = ?"
+        parametros.append(status)
+    consulta += " ORDER BY created_at DESC, id DESC"
     with conexao() as conn:
-        return conn.execute(
+        return conn.execute(consulta, tuple(parametros)).fetchall()
+
+
+def contar_candidatos_por_status(user_id):
+    with conexao() as conn:
+        linhas = conn.execute(
             """
-            SELECT id, user_id, source_url, title, engine, sha256, phash,
-                   status, created_at
-            FROM image_candidates
-            WHERE user_id = ?
-            ORDER BY created_at DESC, id DESC
+            SELECT status, COUNT(*) AS total
+            FROM search_candidates WHERE user_id = ?
+            GROUP BY status
             """,
             (user_id,),
         ).fetchall()
+    return {linha["status"]: linha["total"] for linha in linhas}
 
 
-def atualizar_status_candidato_imagem(candidate_id, user_id, status):
-    if status not in {"reviewed", "dismissed"}:
+def obter_candidato(candidate_id, user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
+                   phash, status, created_at
+            FROM search_candidates WHERE id = ? AND user_id = ?
+            """,
+            (candidate_id, user_id),
+        ).fetchone()
+
+
+def atualizar_status_candidato(candidate_id, user_id, status):
+    if status not in STATUS_CANDIDATO:
         raise ValueError("Status de candidato inválido.")
     with conexao() as conn:
         cur = conn.execute(
-            """
-            UPDATE image_candidates SET status = ?
-            WHERE id = ? AND user_id = ?
-            """,
+            "UPDATE search_candidates SET status = ? WHERE id = ? AND user_id = ?",
             (status, candidate_id, user_id),
         )
         return cur.rowcount > 0
+
+
+def adicionar_hash_oficial(user_id, url, phash):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO official_image_hashes (user_id, url, phash)
+            VALUES (?, ?, ?)
+            ON CONFLICT (user_id, url) DO NOTHING
+            RETURNING id
+            """,
+            (user_id, url, phash),
+        )
+        registro = cur.fetchone()
+        return registro["id"] if registro else None
+
+
+def listar_hashes_oficiais(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT url, phash FROM official_image_hashes
+            WHERE user_id = ? ORDER BY id
+            """,
+            (user_id,),
+        ).fetchall()
 
 
 def excluir_site_oficial_usuario(site_id, user_id):
@@ -1102,17 +1203,20 @@ def adicionar_conteudo(criadora_id, tipo, arquivo, nome_original, phashes):
         return conteudo_id
 
 
-def listar_conteudos():
+def listar_conteudos(user_id=None):
+    consulta = """
+        SELECT c.id, c.criadora_id, c.tipo, c.arquivo, c.nome_original,
+               c.criado_em, cr.nome AS criadora
+        FROM conteudos c
+        JOIN criadoras cr ON cr.id = c.criadora_id
+    """
+    parametros = ()
+    if user_id is not None:
+        consulta += " WHERE cr.user_id = ?"
+        parametros = (user_id,)
+    consulta += " ORDER BY c.id DESC"
     with conexao() as conn:
-        return conn.execute(
-            """
-            SELECT c.id, c.criadora_id, c.tipo, c.arquivo, c.nome_original,
-                   c.criado_em, cr.nome AS criadora
-            FROM conteudos c
-            JOIN criadoras cr ON cr.id = c.criadora_id
-            ORDER BY c.id DESC
-            """
-        ).fetchall()
+        return conn.execute(consulta, parametros).fetchall()
 
 
 def obter_conteudo(conteudo_id):

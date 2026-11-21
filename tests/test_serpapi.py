@@ -20,8 +20,6 @@ from app.main import (
     pagina_busca_na_web,
     perfil_busca,
     salvar_perfil_busca,
-    salvar_resultado_vazado,
-    salvar_site_oficial_resultado,
     status_serpapi,
 )
 
@@ -249,44 +247,44 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             }
         )
 
-    async def test_google_images_roda_so_o_engine_selecionado(self):
+    async def test_google_images_roda_so_o_engine_selecionado_e_envia_para_valida(self):
         resposta = {
             "images_results": [
                 {
                     "title": "Resultado",
                     "link": "https://example.com/image",
                     "related_content_id": "related-123",
-                }
+                },
+                {"title": "Oficial", "link": "https://example.com/perfil/post"},
+                {"title": "Repetido", "link": "https://example.com/image/"},
             ]
+        }
+        usuario = {
+            "id": 1,
+            "username": "cliente",
+            "role": "cliente",
+            "public_name": "BlackDragon",
+            "public_handle": "user875s",
         }
 
         with (
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
-            patch(
-                "app.main.db.obter_usuario_por_id",
-                return_value={
-                    "id": 1,
-                    "username": "cliente",
-                    "role": "cliente",
-                    "public_name": "BlackDragon",
-                    "public_handle": "user875s",
-                },
-            ),
+            patch("app.main.db.obter_usuario_por_id", return_value=usuario),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
-                "app.main.db.listar_sites_vazados",
-                return_value=[{"url": "https://example.com/image"}],
+                "app.main.db.listar_paginas_oficiais_com_donos",
+                return_value=[{"user_id": 1, "url": "https://example.com/perfil"}],
             ),
             patch(
-                "app.main.db.listar_sites_oficiais_usuario",
+                "app.main.db.listar_candidatos",
                 return_value=[
-                    {
-                        "user_id": 1,
-                        "nome": "Site oficial",
-                        "url": "https://example.com/image",
-                    }
+                    {"url": "https://example.com/recusado", "status": "not_me"}
                 ],
             ),
+            patch("app.main.db.listar_hashes_oficiais", return_value=[]),
+            patch("app.main.db.adicionar_candidato") as adicionar,
             patch("app.main.serpapi.pesquisar", return_value=resposta) as pesquisar,
         ):
             resultado = await buscar_serpapi(
@@ -302,54 +300,12 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         pesquisar.assert_called_once_with(
             "google_images", q="BlackDragon @user875s", gl="br", hl="pt"
         )
+        adicionar.assert_called_once()
+        self.assertEqual(adicionar.call_args.args[:2], (1, "https://example.com/image"))
         corpo = resultado.body.decode()
-        self.assertIn("Resultado", corpo)
         self.assertIn("related-123", corpo)
-        self.assertIn("Já marcado como vazado", corpo)
-        self.assertIn("Não sou eu", corpo)
-
-    async def test_resultado_oficial_nao_vazado_e_omitido(self):
-        resposta = {
-            "images_results": [
-                {"title": "Oficial", "link": "https://example.com/oficial"},
-                {"title": "Novo", "link": "https://example.com/novo"},
-            ]
-        }
-        with (
-            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
-            patch(
-                "app.main.db.obter_usuario_por_id",
-                return_value={
-                    "id": 1,
-                    "username": "cliente",
-                    "role": "cliente",
-                    "public_name": "BlackDragon",
-                    "public_handle": "user875s",
-                },
-            ),
-            patch("app.main.db.listar_fotos_busca", return_value=[]),
-            patch("app.main.db.listar_sites_vazados", return_value=[]),
-            patch(
-                "app.main.db.listar_sites_oficiais_usuario",
-                return_value=[
-                    {"user_id": 1, "nome": "Site", "url": "https://example.com/oficial"}
-                ],
-            ),
-            patch("app.main.serpapi.pesquisar", return_value=resposta),
-        ):
-            resultado = await buscar_serpapi(
-                self.criar_request("/buscar-serpapi"),
-                api="google_images",
-                consentimento="on",
-                foto_id=0,
-                related_content_id="",
-                target_user_id=1,
-                image_file=None,
-            )
-
-        corpo = resultado.body.decode()
-        self.assertNotIn("Oficial", corpo)
-        self.assertIn("Novo", corpo)
+        self.assertIn("/valida?target_user_id=1", corpo)
+        self.assertNotIn("VAZADO!", corpo)
 
     async def test_cliente_nao_pode_escolher_outro_usuario_para_busca(self):
         with self.assertRaises(HTTPException) as erro:
@@ -451,82 +407,12 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                 pagina = pagina_busca_na_web(request)
 
                 for corpo in (saldo.body.decode(), pagina.body.decode()):
-                    self.assertIn("Novo", corpo)
+                    self.assertIn("foram enviados como candidatos", corpo)
                     self.assertIn("Free", corpo)
+                self.assertEqual(db.listar_candidatos(user_id)[0]["title"], "Novo")
                 with db.conexao() as conn:
                     total = conn.execute("SELECT COUNT(*) AS n FROM search_snapshots").fetchone()["n"]
                 self.assertEqual(total, 2)
-
-    async def test_cliente_nao_pode_marcar_resultado_para_outro_usuario(self):
-        request = self.criar_request("/resultados/vazado")
-        with self.assertRaises(HTTPException) as erro:
-            salvar_resultado_vazado(
-                request,
-                url="https://example.com/leak",
-                titulo="Resultado",
-                api="google_images",
-                target_user_id=2,
-            )
-
-        self.assertEqual(erro.exception.status_code, 403)
-
-    async def test_cliente_pode_salvar_site_oficial_e_relato_vazado_so_para_si(self):
-        with TemporaryDirectory() as diretorio:
-            with patch.object(db, "CAMINHO_DB", Path(diretorio) / "users.db"):
-                db.iniciar_banco()
-                user_id = db.criar_usuario(
-                    "cliente", "cliente@example.com", "hash"
-                )
-                request = self.criar_request("/resultados/vazado")
-                request.state.user = {
-                    "id": user_id,
-                    "username": "cliente",
-                    "role": "cliente",
-                }
-
-                site_response = salvar_site_oficial_resultado(
-                    request,
-                    url="https://example.com/profile/#about",
-                    nome="Perfil público",
-                    target_user_id=0,
-                )
-                report_response = salvar_resultado_vazado(
-                    request,
-                    url="https://example.com/leak",
-                    titulo="Página encontrada",
-                    origem="Example",
-                    resumo="Descrição encontrada no resultado",
-                    miniatura="https://example.com/image.jpg",
-                    data_resultado="Ontem",
-                    api="google_images",
-                    related_content_id="",
-                    target_user_id=0,
-                )
-                duplicate_response = salvar_resultado_vazado(
-                    request,
-                    url="https://example.com/leak",
-                    titulo="Página encontrada",
-                    api="google_images",
-                    origem="",
-                    resumo="",
-                    miniatura="",
-                    data_resultado="",
-                    related_content_id="",
-                    target_user_id=0,
-                )
-
-                self.assertEqual(site_response.status_code, 201)
-                self.assertEqual(
-                    db.listar_sites_oficiais_usuario(user_id)[0]["url"],
-                    "https://example.com/profile",
-                )
-                self.assertEqual(report_response.status_code, 201)
-                self.assertEqual(duplicate_response.status_code, 200)
-                reports = db.listar_sites_vazados(user_id)
-                self.assertEqual(len(reports), 1)
-                self.assertEqual(reports[0]["reported_by"], user_id)
-                self.assertEqual(reports[0]["title"], "Página encontrada")
-                self.assertIn("Ontem", reports[0]["metadata_json"])
 
     async def test_perfil_e_foto_sao_salvos_e_foto_existente_pode_ser_reusada(self):
         imagem_png = BytesIO()
@@ -578,7 +464,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                         target_user_id=user_id,
                     )
 
-                self.assertIn("Resultados: Google Lens API", primeira_busca.body.decode())
+                self.assertIn("Resultado da busca: Google Lens API", primeira_busca.body.decode())
                 foto = db.listar_fotos_busca(user_id)[0]
                 self.assertTrue((pasta_fotos / foto["arquivo"]).is_file())
 
