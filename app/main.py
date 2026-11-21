@@ -1218,6 +1218,8 @@ def validar_candidato(
             db.adicionar_hash_oficial(
                 alvo["id"], candidato["url"], candidato["phash"]
             )
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"mensagem": "Candidato atualizado."})
     return RedirectResponse(
         f"/valida?target_user_id={alvo['id']}"
         f"&mensagem={quote('Candidato atualizado.')}",
