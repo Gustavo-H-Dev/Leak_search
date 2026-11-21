@@ -170,22 +170,26 @@ Não há limite mensal de consultas por usuário. A autenticação impede acesso
 anônimo, mas qualquer usuário cadastrado pode consumir as APIs; proteja também
 a chave e monitore os custos.
 
-## Revisão de imagens candidatas
+## Fluxo de busca e validação (Valida)
 
-Nos resultados de Google Images e Google Images Light, a pessoa pode baixar uma
-imagem e enviá-la para comparação e revisão. O servidor não baixa imagens de
-URLs fornecidas pelo resultado e descarta o arquivo enviado após calcular
-SHA-256 e pHash. Somente esses hashes, a URL da página de origem, o título, a
-API e o estado da revisão ficam armazenados; SHA-256 ajuda a deduplicar arquivos
-idênticos e pHash aponta semelhanças visuais, mas nenhum deles confirma
-identidade.
-
-Páginas cadastradas como oficiais são excluídas, inclusive quando a associação
-é desconhecida ou pertence a outra pessoa. A comparação usa apenas imagens do
-catálogo vinculadas à conta selecionada; sem vínculo ou referências, não há
-comparação automática. A fila em `/candidatos-imagem` mostra possíveis
-correspondências para revisão humana e permite marcar os itens como revisados
-ou descartados. Os arquivos das imagens candidatas nunca são guardados.
+1. Em `/busca-web`, o administrador escolhe a criadora, o provedor (SerpApi ou
+   Google Cloud Vision) e o endpoint (por exemplo, Google Images ou Images Light).
+2. Os resultados da API não são listados ali. O servidor omite páginas oficiais
+   e páginas filhas de um site oficial (mesmo domínio e caminho abaixo da página
+   cadastrada; vale para qualquer dono, inclusive dono incerto), resultados já
+   marcados como "não sou eu" e repetições. A página mostra só o resumo.
+3. O restante vira **candidato** em `/valida`, inclusive o que já havia sido
+   marcado como vazado e o que nunca foi catalogado. O servidor baixa apenas a
+   miniatura do resultado, em memória e somente de destinos públicos, calcula o
+   pHash e descarta o arquivo: nenhuma imagem é guardada, só o hash.
+4. Cada candidato é comparado com as imagens do catálogo vinculadas à criadora,
+   as fotos enviadas no perfil e os hashes de imagens de sites oficiais
+   (capturados nas buscas ou ao marcar um candidato como oficial). A página
+   ordena em **Atenção** (muito parecido), **Possíveis** e **Diferentes**. A
+   semelhança é uma pista, não confirma identidade.
+5. A criadora (ou o administrador) valida cada candidato como **vazado**,
+   **não sou eu** ou **oficial**. Vazados entram na lista de relatos; oficiais
+   passam a ser omitidos nas próximas buscas.
 
 Na página SerpApi, o botão **Consultar saldo** busca o uso do mês, a cota e as
 consultas restantes pela
@@ -200,8 +204,8 @@ mesmo e-mail. Foto e site oficial são opcionais; sites e fotos já cadastrados
 ficam agrupados dentro do registro da criadora e também podem ser adicionados
 depois. As buscas do Google Vision,
 SerpApi e Instagram só marcam a URL exata da página cadastrada (sem considerar
-outras páginas do mesmo domínio). O resultado continua visível para revisão e
-a marcação identifica para qual criadora a página foi registrada. Endereços
+outras páginas do mesmo domínio); no fluxo Valida, páginas filhas da URL
+cadastrada também são tratadas como oficiais. Endereços
 globais cadastrados em versões anteriores são preservados como pendentes, sem
 serem considerados oficiais, até que sejam associados a uma criadora e
 revisados.

@@ -75,6 +75,20 @@ TABELAS = {
         "status",
         "created_at",
     ),
+    "search_candidates": (
+        "id",
+        "user_id",
+        "url",
+        "title",
+        "source",
+        "snippet",
+        "thumbnail",
+        "engine",
+        "phash",
+        "status",
+        "created_at",
+    ),
+    "official_image_hashes": ("id", "user_id", "url", "phash", "created_at"),
     "auth_tokens": (
         "token_hash",
         "user_id",
@@ -100,6 +114,8 @@ TABELAS_COM_ID = (
     "user_official_sites",
     "leak_reports",
     "image_candidates",
+    "search_candidates",
+    "official_image_hashes",
 )
 
 

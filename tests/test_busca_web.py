@@ -18,6 +18,10 @@ class BuscarNaWebTest(unittest.TestCase):
         pagina = SimpleNamespace(
             url="https://example.com/post/1",
             page_title="Página pública",
+            full_matching_images=[],
+            partial_matching_images=[
+                SimpleNamespace(url="https://cdn.example.com/parcial.png")
+            ],
         )
         resposta = SimpleNamespace(
             error=SimpleNamespace(message=""),
@@ -25,7 +29,12 @@ class BuscarNaWebTest(unittest.TestCase):
                 pages_with_matching_images=[
                     pagina,
                     pagina,
-                    SimpleNamespace(url="javascript:alert(1)", page_title="Inválida"),
+                    SimpleNamespace(
+                        url="javascript:alert(1)",
+                        page_title="Inválida",
+                        full_matching_images=[],
+                        partial_matching_images=[],
+                    ),
                 ],
                 full_matching_images=[
                     SimpleNamespace(url="https://cdn.example.com/image.png")
@@ -47,7 +56,13 @@ class BuscarNaWebTest(unittest.TestCase):
 
         self.assertEqual(
             paginas,
-            [{"url": "https://example.com/post/1", "titulo": "Página pública"}],
+            [
+                {
+                    "url": "https://example.com/post/1",
+                    "titulo": "Página pública",
+                    "miniatura": "https://cdn.example.com/parcial.png",
+                }
+            ],
         )
         self.assertEqual(
             imagens,
@@ -136,7 +151,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ainda não está integrado", resposta.body.decode())
         obter_conteudo.assert_not_called()
 
-    async def test_envia_imagem_selecionada_do_catalogo_apos_consentimento(self):
+    async def test_envia_imagem_do_catalogo_e_manda_paginas_para_valida(self):
         conteudo = BytesIO()
         Image.new("RGB", (16, 16), "#cc5599").save(conteudo, format="PNG")
         dados_imagem = conteudo.getvalue()
@@ -145,6 +160,11 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
             "criadora_id": 7,
             "arquivo": "catalogo.png",
             "nome_original": "catalogo.png",
+        }
+        pagina = {
+            "url": "https://example.com/post",
+            "titulo": "Página pública",
+            "miniatura": "https://cdn.example.com/parcial.png",
         }
 
         with TemporaryDirectory() as diretorio:
@@ -155,30 +175,25 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
                 patch("app.main.db.obter_conteudo", return_value=registro),
                 patch("app.main.PASTA_OFICIAIS", pasta),
                 patch(
-                    "app.main.busca_web.buscar_na_web",
-                    return_value=(
-                        [{"url": "https://example.com/post", "titulo": "Página pública"}],
-                        [],
-                    ),
+                    "app.main.busca_web.buscar_na_web", return_value=([pagina], [])
                 ) as buscar,
+                patch("app.main.db.listar_paginas_oficiais_com_donos", return_value=[]),
+                patch("app.main.db.listar_candidatos", return_value=[]),
+                patch("app.main.db.listar_hashes_oficiais", return_value=[]),
                 patch(
-                    "app.main.db.listar_sites_oficiais",
-                    return_value=[
-                        {
-                            "criadora_id": 7,
-                            "criadora": "Ana",
-                            "url": "https://example.com/post",
-                        }
-                    ],
+                    "app.main.candidatos_core.calcular_hashes",
+                    return_value={pagina["miniatura"]: "f" * 16},
                 ),
+                patch("app.main.db.adicionar_candidato") as adicionar,
             ):
                 resposta = await buscar_google_na_web(
                     self.criar_request(), 1, "on"
                 )
 
         buscar.assert_called_once_with(dados_imagem)
-        self.assertIn("Página pública", resposta.body.decode())
-        self.assertIn("Página oficial cadastrada para: Ana", resposta.body.decode())
+        adicionar.assert_called_once()
+        self.assertEqual(adicionar.call_args.args[-2:], ("google_vision", "f" * 16))
+        self.assertIn("foram enviados como candidatos", resposta.body.decode())
 
 
 if __name__ == "__main__":

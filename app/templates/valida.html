@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block titulo %}Valida{% endblock %}
+{% block conteudo %}
+{% set niveis = [("atencao", "Atenção — muito parecidos"), ("possivel", "Possíveis — mais ou menos parecidos"), ("diferente", "Diferentes — nada parecido")] %}
+<section class="search-page">
+  <span class="eyebrow">VALIDA</span>
+  <h1>Valida</h1>
+  <p>
+    Candidatos vindos da busca na web para
+    {{ target_user.public_name or target_user.username }}. Cada candidato é
+    comparado, por hash perceptual, com as imagens do catálogo, as fotos do
+    perfil e as imagens de sites oficiais. Nenhuma imagem é salva, apenas o
+    hash; a semelhança é uma pista e não confirma identidade.
+  </p>
+
+  {% if current_user.role == "admin" %}
+  <form class="search-form target-user-form" method="get" action="/valida">
+    <label class="field-label" for="valida-target">Criadora</label>
+    <select id="valida-target" name="target_user_id" required>
+      {% for usuario in target_users %}
+      <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
+        {{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}
+      </option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="status" value="{{ status_atual }}">
+    <button type="submit">Selecionar</button>
+  </form>
+  {% endif %}
+
+  {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
+  {% if not tem_referencias %}
+  <p class="api-status api-status-missing">
+    Não há imagens de referência (catálogo, fotos do perfil ou sites oficiais)
+    para esta criadora; os candidatos não podem ser comparados.
+  </p>
+  {% endif %}
+
+  <nav class="result-actions" aria-label="Estado dos candidatos">
+    {% for chave, nome in status_nomes.items() %}
+    <a {% if chave == status_atual %}aria-current="page"{% endif %} href="/valida?target_user_id={{ target_user_id }}&status={{ chave }}">
+      {{ nome }} ({{ contagens.get(chave, 0) }})
+    </a>
+    {% endfor %}
+  </nav>
+
+  {% for nivel, titulo in niveis %}
+    {% set grupo = candidatos|selectattr("nivel", "equalto", nivel)|list %}
+    {% if grupo %}
+    <section class="search-results">
+      <h2>{{ titulo }} ({{ grupo|length }})</h2>
+      <ul class="search-result-list">
+        {% for candidato in grupo %}
+        <li>
+          {% if candidato.thumbnail %}<img class="result-thumb" src="{{ candidato.thumbnail }}" alt="Miniatura de {{ candidato.title }}" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+          <a href="{{ candidato.url }}" target="_blank" rel="noopener noreferrer">{{ candidato.title }}</a>
+          <span>{{ candidato.url }}</span>
+          {% if candidato.source %}<span>{{ candidato.source }}</span>{% endif %}
+          {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
+          {% if candidato.distancia is not none %}
+          <span>Mais parecido com: {{ candidato.referencia }} · distância {{ candidato.distancia }} de 64</span>
+          {% elif not candidato.phash %}
+          <span>Sem imagem comparável para este resultado.</span>
+          {% endif %}
+          {% if candidato.status == "pending" %}
+          <div class="result-actions">
+            {% for novo, rotulo, classe in [("leaked", "VAZADO!", "button-danger"), ("not_me", "Não sou eu", "button-secondary"), ("official", "Oficial", "")] %}
+            <form method="post" action="/valida/{{ candidato.id }}/status">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+              <input type="hidden" name="status" value="{{ novo }}">
+              <button class="{{ classe }}" type="submit">{{ rotulo }}</button>
+            </form>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  {% endfor %}
+  {% if not candidatos %}<p>Nenhum candidato nesta lista.</p>{% endif %}
+</section>
+{% endblock %}

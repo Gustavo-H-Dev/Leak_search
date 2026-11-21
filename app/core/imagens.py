@@ -34,6 +34,15 @@ def classificar(dist: int) -> str:
     return "diferente"
 
 
+NIVEIS = ("atencao", "possivel", "diferente")
+
+
+def nivel_de_similaridade(dist: int | None) -> str:
+    if dist is None or dist > LIMITE_POSSIVEL:
+        return "diferente"
+    return "atencao" if dist <= LIMITE_PROVAVEL else "possivel"
+
+
 def melhores_correspondencias(phash_suspeito: str, hashes_catalogo, limite: int = 5):
     melhores = {}
     for linha in hashes_catalogo:

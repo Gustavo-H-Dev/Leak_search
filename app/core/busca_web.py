@@ -31,10 +31,22 @@ def buscar_na_web(
     urls_paginas = set()
     for pagina in deteccao.pages_with_matching_images:
         if pagina.url not in urls_paginas and _url_web_segura(pagina.url):
+            imagem_pagina = next(
+                (
+                    imagem.url
+                    for imagem in (
+                        *pagina.full_matching_images,
+                        *pagina.partial_matching_images,
+                    )
+                    if _url_web_segura(imagem.url)
+                ),
+                "",
+            )
             paginas.append(
                 {
                     "url": pagina.url,
                     "titulo": pagina.page_title or "Página com imagem correspondente",
+                    "miniatura": imagem_pagina,
                 }
             )
             urls_paginas.add(pagina.url)

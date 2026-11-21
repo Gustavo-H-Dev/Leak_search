@@ -148,13 +148,18 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                     "google_images",
                     {"date_resultado": "hoje"},
                 )
-                db.adicionar_candidato_imagem(
+                db.adicionar_candidato(
                     user_id,
                     "https://example.com/image-page",
                     "Imagem candidata",
+                    "",
+                    "",
+                    "",
                     "google_images",
-                    "a" * 64,
                     "b" * 16,
+                )
+                db.adicionar_hash_oficial(
+                    user_id, "https://example.com/perfil", "c" * 16
                 )
 
                 db.CAMINHO_DB = caminho_destino
@@ -176,8 +181,11 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                     "https://example.com/vazado",
                 )
                 self.assertEqual(
-                    db.listar_candidatos_imagem(user_id)[0]["title"],
+                    db.listar_candidatos(user_id)[0]["title"],
                     "Imagem candidata",
+                )
+                self.assertEqual(
+                    db.listar_hashes_oficiais(user_id)[0]["phash"], "c" * 16
                 )
             finally:
                 db.CAMINHO_DB = caminho_db_original
