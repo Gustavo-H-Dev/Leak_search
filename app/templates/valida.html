@@ -58,7 +58,11 @@
           {% if candidato.source %}<span>{{ candidato.source }}</span>{% endif %}
           {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
           {% if candidato.distancia is not none %}
+          {% if candidato.nivel == "diferente" %}
+          <span>Nada parecido nas referências (a mais próxima, {{ candidato.referencia }}, está a distância {{ candidato.distancia }} de 64).</span>
+          {% else %}
           <span>Mais parecido com: {{ candidato.referencia }} · distância {{ candidato.distancia }} de 64</span>
+          {% endif %}
           {% elif not candidato.phash %}
           <span>Sem imagem comparável para este resultado.</span>
           {% endif %}
