@@ -69,7 +69,7 @@
           {% if candidato.status == "pending" %}
           <div class="result-actions">
             {% for novo, rotulo, classe in [("leaked", "VAZADO!", "button-danger"), ("not_me", "Não sou eu", "button-secondary"), ("official", "Oficial", "")] %}
-            <form method="post" action="/valida/{{ candidato.id }}/status">
+            <form method="post" action="/valida/{{ candidato.id }}/status" data-validar>
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
               <input type="hidden" name="status" value="{{ novo }}">
@@ -78,6 +78,7 @@
             {% endfor %}
           </div>
           {% endif %}
+          <span class="result-action-status" aria-live="polite"></span>
         </li>
         {% endfor %}
       </ul>
@@ -86,4 +87,29 @@
   {% endfor %}
   {% if not candidatos %}<p>Nenhum candidato nesta lista.</p>{% endif %}
 </section>
+<script>
+  document.querySelectorAll("[data-validar]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const item = form.closest("li");
+      const status = item.querySelector(".result-action-status");
+      const botoes = item.querySelectorAll(".result-actions button");
+      botoes.forEach((b) => (b.disabled = true));
+      try {
+        const resposta = await fetch(form.action, {
+          method: "POST",
+          body: new FormData(form),
+          headers: { Accept: "application/json" },
+        });
+        if (!resposta.ok) throw new Error("Não foi possível salvar.");
+        const secao = item.closest("section");
+        item.remove();
+        if (!secao.querySelector("li")) secao.remove();
+      } catch (erro) {
+        status.textContent = erro.message;
+        botoes.forEach((b) => (b.disabled = false));
+      }
+    });
+  });
+</script>
 {% endblock %}
