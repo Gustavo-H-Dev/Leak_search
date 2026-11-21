@@ -170,6 +170,23 @@ Não há limite mensal de consultas por usuário. A autenticação impede acesso
 anônimo, mas qualquer usuário cadastrado pode consumir as APIs; proteja também
 a chave e monitore os custos.
 
+## Revisão de imagens candidatas
+
+Nos resultados de Google Images e Google Images Light, a pessoa pode baixar uma
+imagem e enviá-la para comparação e revisão. O servidor não baixa imagens de
+URLs fornecidas pelo resultado e descarta o arquivo enviado após calcular
+SHA-256 e pHash. Somente esses hashes, a URL da página de origem, o título, a
+API e o estado da revisão ficam armazenados; SHA-256 ajuda a deduplicar arquivos
+idênticos e pHash aponta semelhanças visuais, mas nenhum deles confirma
+identidade.
+
+Páginas cadastradas como oficiais são excluídas, inclusive quando a associação
+é desconhecida ou pertence a outra pessoa. A comparação usa apenas imagens do
+catálogo vinculadas à conta selecionada; sem vínculo ou referências, não há
+comparação automática. A fila em `/candidatos-imagem` mostra possíveis
+correspondências para revisão humana e permite marcar os itens como revisados
+ou descartados. Os arquivos das imagens candidatas nunca são guardados.
+
 Na página SerpApi, o botão **Consultar saldo** busca o uso do mês, a cota e as
 consultas restantes pela
 [Account API](https://serpapi.com/account-api). Essa é uma chamada HTTP separada

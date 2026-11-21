@@ -148,6 +148,14 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                     "google_images",
                     {"date_resultado": "hoje"},
                 )
+                db.adicionar_candidato_imagem(
+                    user_id,
+                    "https://example.com/image-page",
+                    "Imagem candidata",
+                    "google_images",
+                    "a" * 64,
+                    "b" * 16,
+                )
 
                 db.CAMINHO_DB = caminho_destino
                 db.iniciar_banco()
@@ -166,6 +174,10 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                 self.assertEqual(
                     db.listar_sites_vazados(user_id)[0]["url"],
                     "https://example.com/vazado",
+                )
+                self.assertEqual(
+                    db.listar_candidatos_imagem(user_id)[0]["title"],
+                    "Imagem candidata",
                 )
             finally:
                 db.CAMINHO_DB = caminho_db_original
