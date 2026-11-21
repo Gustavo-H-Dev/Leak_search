@@ -34,6 +34,15 @@ def classificar(dist: int) -> str:
     return "diferente"
 
 
+# Duas imagens sem relação ficam em torno de 32 de distância; vira 0 pontos.
+DISTANCIA_SEM_RELACAO = 32
+
+
+def pontuacao(dist: int) -> int:
+    """Semelhança de 0 a 100 (100 = idêntica)."""
+    return max(0, round(100 * (1 - dist / DISTANCIA_SEM_RELACAO)))
+
+
 NIVEIS = ("atencao", "possivel", "diferente")
 
 

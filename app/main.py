@@ -1150,6 +1150,9 @@ def valida(
             {
                 **candidato,
                 "distancia": distancia,
+                "pontuacao": (
+                    imagens.pontuacao(distancia) if distancia is not None else None
+                ),
                 "referencia": melhor["origem"] if melhor else "",
                 "nivel": imagens.nivel_de_similaridade(distancia),
             }
@@ -1167,6 +1170,8 @@ def valida(
                 else []
             ),
             "candidatos": candidatos,
+            "pontuacao_atencao": imagens.pontuacao(imagens.LIMITE_PROVAVEL),
+            "pontuacao_possivel": imagens.pontuacao(imagens.LIMITE_POSSIVEL),
             "status_atual": status,
             "status_nomes": STATUS_VALIDA,
             "contagens": db.contar_candidatos_por_status(alvo["id"]),
