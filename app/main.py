@@ -583,7 +583,7 @@ def logout(request: Request):
 
 
 async def _ler_imagem(arquivo: UploadFile) -> bytes:
-    dados = await arquivo.read()
+    dados = await arquivo.read(TAMANHO_MAXIMO + 1)
     if len(dados) > TAMANHO_MAXIMO:
         raise ValueError("O arquivo é maior que 20 MB.")
     return dados
@@ -1259,10 +1259,13 @@ async def adicionar_candidato_imagem(
         raise HTTPException(status_code=400, detail="Confirme o processamento da imagem.")
     try:
         source_url = sites_oficiais.normalizar_url_pagina(source_url)
-        dados = await _ler_imagem(arquivo)
-        phash = imagens.calcular_phash(dados)
     except ValueError as erro:
         raise HTTPException(status_code=400, detail=str(erro)) from erro
+    if len(source_url) > 2048:
+        raise HTTPException(status_code=400, detail="URL de origem muito longa.")
+    titulo = titulo.strip()
+    if not titulo or len(titulo) > 500:
+        raise HTTPException(status_code=400, detail="Título do resultado inválido.")
 
     proprietario = sites_oficiais.proprietario_pagina_oficial(
         source_url,
@@ -1278,9 +1281,11 @@ async def adicionar_candidato_imagem(
             ),
         )
 
-    titulo = titulo.strip()
-    if not titulo or len(titulo) > 500:
-        raise HTTPException(status_code=400, detail="Título do resultado inválido.")
+    try:
+        dados = await _ler_imagem(arquivo)
+        phash = imagens.calcular_phash(dados)
+    except ValueError as erro:
+        raise HTTPException(status_code=400, detail=str(erro)) from erro
     candidate_id = db.adicionar_candidato_imagem(
         alvo["id"],
         source_url,
