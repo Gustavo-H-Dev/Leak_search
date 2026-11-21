@@ -117,6 +117,23 @@ def marcar_sites_pessoais(resultados: list[dict], sites_oficiais) -> list[dict]:
     ]
 
 
+def proprietario_pagina_oficial(url: str, paginas_oficiais, user_id: int) -> str:
+    pagina_normalizada = _chave_oficial(url)
+    if not pagina_normalizada:
+        return "desconhecido"
+
+    donos = {
+        pagina.get("user_id")
+        for pagina in paginas_oficiais
+        if _chave_oficial(pagina["url"]) == pagina_normalizada
+    }
+    if not donos:
+        return "nao_oficial"
+    if donos == {user_id}:
+        return "proprio"
+    return "terceiro_ou_incerto"
+
+
 def filtrar_resultados_pessoais(resultados: list[dict], urls_vazadas) -> list[dict]:
     """Oculta sites oficiais; mantém novos resultados e os já marcados como vazados."""
     vazadas = {url_pagina_da_busca(url) for url in urls_vazadas}

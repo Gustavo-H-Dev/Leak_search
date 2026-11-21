@@ -410,6 +410,12 @@
   {% if pesquisa_realizada and fonte == "serpapi" %}
   <section class="search-results" aria-live="polite">
     <h2>Resultados: {{ nomes_apis[api_ativa] }}</h2>
+    {% if api_ativa in ['google_images', 'google_images_light'] %}
+    <p>
+      <a href="/candidatos-imagem?target_user_id={{ target_user_id }}">Revisar imagens candidatas salvas</a>.
+      Para comparar um resultado novo, baixe a imagem e envie pelo formulário abaixo.
+    </p>
+    {% endif %}
     {% if resultados %}
     <ul class="search-result-list">
       {% for resultado in resultados %}
@@ -423,6 +429,22 @@
         <span>{{ resultado.link }}</span>
         {% if resultado.resumo %}<span>{{ resultado.resumo }}</span>{% endif %}
         {% if resultado.data_resultado %}<span>Data informada pela busca: {{ resultado.data_resultado }}</span>{% endif %}
+        {% if api_ativa in ['google_images', 'google_images_light'] %}
+        <form class="search-form" method="post" action="/candidatos-imagem" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+          <input type="hidden" name="source_url" value="{{ resultado.link }}">
+          <input type="hidden" name="titulo" value="{{ resultado.titulo }}">
+          <input type="hidden" name="engine" value="{{ api_ativa }}">
+          <label class="field-label">Imagem baixada deste resultado</label>
+          <input type="file" name="arquivo" accept="image/jpeg,image/png,image/webp" required>
+          <label class="consent-control">
+            <input type="checkbox" name="consentimento" value="on" required>
+            <span>Autorizo comparar esta imagem e guardar somente hashes e dados do resultado; o arquivo enviado será descartado.</span>
+          </label>
+          <button type="submit">Comparar e enviar para revisão</button>
+        </form>
+        {% endif %}
         <div class="result-actions">
           {% if not resultado.site_oficial %}
           <form method="post" action="/resultados/site-oficial" data-result-action>

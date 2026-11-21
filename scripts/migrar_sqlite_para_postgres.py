@@ -64,6 +64,17 @@ TABELAS = {
         "metadata_json",
         "created_at",
     ),
+    "image_candidates": (
+        "id",
+        "user_id",
+        "source_url",
+        "title",
+        "engine",
+        "sha256",
+        "phash",
+        "status",
+        "created_at",
+    ),
     "auth_tokens": (
         "token_hash",
         "user_id",
@@ -88,6 +99,7 @@ TABELAS_COM_ID = (
     "user_search_photos",
     "user_official_sites",
     "leak_reports",
+    "image_candidates",
 )
 
 

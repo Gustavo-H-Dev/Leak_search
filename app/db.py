@@ -140,6 +140,18 @@ def iniciar_banco():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, url)
             );
+            CREATE TABLE IF NOT EXISTS image_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                source_url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                engine TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                phash TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, sha256)
+            );
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -259,6 +271,20 @@ def _iniciar_banco_postgresql():
             metadata_json TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, url)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS image_candidates (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            source_url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            engine TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            phash TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, sha256)
         )
         """,
         """
@@ -655,6 +681,66 @@ def listar_sites_oficiais_usuario(user_id):
             """,
             (user_id,),
         ).fetchall()
+
+
+def listar_paginas_oficiais_com_donos():
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT s.url, c.user_id AS user_id
+            FROM sites_oficiais s
+            LEFT JOIN criadoras c ON c.id = s.criadora_id
+            UNION ALL
+            SELECT url, user_id FROM user_official_sites
+            """
+        ).fetchall()
+
+
+def adicionar_candidato_imagem(
+    user_id, source_url, title, engine, sha256, phash
+):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO image_candidates (
+                user_id, source_url, title, engine, sha256, phash
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (user_id, sha256) DO NOTHING
+            RETURNING id
+            """,
+            (user_id, source_url, title, engine, sha256, phash),
+        )
+        registro = cur.fetchone()
+        return registro["id"] if registro else None
+
+
+def listar_candidatos_imagem(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, user_id, source_url, title, engine, sha256, phash,
+                   status, created_at
+            FROM image_candidates
+            WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+
+def atualizar_status_candidato_imagem(candidate_id, user_id, status):
+    if status not in {"reviewed", "dismissed"}:
+        raise ValueError("Status de candidato inválido.")
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE image_candidates SET status = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (status, candidate_id, user_id),
+        )
+        return cur.rowcount > 0
 
 
 def excluir_site_oficial_usuario(site_id, user_id):
@@ -1063,4 +1149,19 @@ def listar_hashes():
             JOIN conteudos c ON c.id = h.conteudo_id
             JOIN criadoras cr ON cr.id = c.criadora_id
             """
+        ).fetchall()
+
+
+def listar_hashes_criadora_do_usuario(user_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT h.phash, h.posicao, c.id AS conteudo_id, c.arquivo, c.tipo,
+                   cr.nome AS criadora
+            FROM hashes h
+            JOIN conteudos c ON c.id = h.conteudo_id
+            JOIN criadoras cr ON cr.id = c.criadora_id
+            WHERE cr.user_id = ?
+            """,
+            (user_id,),
         ).fetchall()

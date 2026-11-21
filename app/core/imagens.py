@@ -1,4 +1,5 @@
 import io
+import hashlib
 
 import imagehash
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -15,6 +16,10 @@ def calcular_phash(conteudo: bytes) -> str:
     except (UnidentifiedImageError, OSError) as erro:
         raise ValueError("O arquivo não é uma imagem válida.") from erro
     return str(imagehash.phash(imagem))
+
+
+def calcular_sha256(conteudo: bytes) -> str:
+    return hashlib.sha256(conteudo).hexdigest()
 
 
 def distancia(hash_a: str, hash_b: str) -> int:

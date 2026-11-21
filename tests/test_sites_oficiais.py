@@ -151,6 +151,38 @@ class PaginasOficiaisTest(unittest.TestCase):
         )
         self.assertNotIn("criadoras_oficiais", resultados[0])
 
+    def test_identifica_paginas_proprias_de_terceiros_e_de_dono_incerto(self):
+        paginas = [
+            {"user_id": 1, "url": "https://exemplo.com/perfil"},
+            {"user_id": 2, "url": "https://exemplo.com/terceiro"},
+            {"user_id": None, "url": "https://exemplo.com/legado"},
+        ]
+
+        self.assertEqual(
+            sites_oficiais.proprietario_pagina_oficial(
+                "http://exemplo.com/perfil/", paginas, 1
+            ),
+            "proprio",
+        )
+        self.assertEqual(
+            sites_oficiais.proprietario_pagina_oficial(
+                "https://exemplo.com/terceiro", paginas, 1
+            ),
+            "terceiro_ou_incerto",
+        )
+        self.assertEqual(
+            sites_oficiais.proprietario_pagina_oficial(
+                "https://exemplo.com/legado", paginas, 1
+            ),
+            "terceiro_ou_incerto",
+        )
+        self.assertEqual(
+            sites_oficiais.proprietario_pagina_oficial(
+                "https://exemplo.com/desconhecido", paginas, 1
+            ),
+            "nao_oficial",
+        )
+
     def test_persiste_atualiza_e_remove_pagina_oficial(self):
         with TemporaryDirectory() as diretorio:
             caminho_db = Path(diretorio) / "catalogo.db"
