@@ -236,3 +236,7 @@ Em `/busca-web` (SerpApi), o card "Busca de vazamentos" combina nome e arroba da
 ### Posts oficiais do Instagram
 
 Em `/busca-web` > Instagram, "Importar posts oficiais" consulta o perfil seguindo a paginação da SerpApi (`next_page_token`; 1 crédito por página, até o máximo informado, limite 30; usa o Instagram cadastrado como site oficial da criadora se o usuário não for informado), registra cada post como oficial (por código do post, então `/p/`, `/reel/` e `/usuario/p/` casam) e guarda só o hash da miniatura como referência. Esses posts deixam de aparecer na Valida, e candidatos pendentes iguais são marcados como oficiais. Se o limite de páginas for atingido, aumente o máximo de páginas e importe de novo (recomeça da primeira).
+
+### Análise dos dados
+
+`/analise` (só admin) resume, por criadora, candidatos por status e nível de semelhança, falta de hash/referências, domínios mais frequentes e alertas de calibração (ex.: vazados confirmados caindo em "Diferentes"). Serve para acompanhar a qualidade da busca sem acessar o banco.

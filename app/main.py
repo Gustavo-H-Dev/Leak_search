@@ -20,6 +20,7 @@ from app import db
 from app.core import (
     autenticacao,
     busca_web,
+    analise,
     candidatos as candidatos_core,
     consultas_vazamento,
     imagens,
@@ -1185,6 +1186,42 @@ def valida(
             "contagens": db.contar_candidatos_por_status(alvo["id"]),
             "tem_referencias": bool(referencias),
             "mensagem": mensagem,
+        },
+    )
+
+
+@app.get("/analise", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])
+def analise_dados(request: Request):
+    por_usuario = {}
+    for candidato in db.listar_todos_candidatos():
+        por_usuario.setdefault(candidato["user_id"], []).append(candidato)
+    vazados = db.contar_sites_vazados_por_usuario()
+    relatorios = []
+    for usuario in db.listar_usuarios_com_perfil_busca():
+        lista = por_usuario.get(usuario["id"], [])
+        if not lista and not vazados.get(usuario["id"]):
+            continue
+        referencias = _referencias_do_usuario(usuario)
+        relatorio = analise.analisar_usuario(
+            lista,
+            referencias,
+            sum(1 for h in db.listar_hashes_oficiais(usuario["id"]) if h["phash"]),
+        )
+        relatorios.append(
+            {
+                "usuario": usuario,
+                "vazados_registrados": vazados.get(usuario["id"], 0),
+                **relatorio,
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "analise.html",
+        {
+            "relatorios": relatorios,
+            "status_nomes": STATUS_VALIDA,
+            "pontuacao_atencao": imagens.pontuacao(imagens.LIMITE_PROVAVEL),
+            "pontuacao_possivel": imagens.pontuacao(imagens.LIMITE_POSSIVEL),
         },
     )
 
