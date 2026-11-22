@@ -644,14 +644,15 @@ def perfil_criadora_disponivel(nome, email):
         return mesma_email is not None and mesma_email["id"] == nome_existente["id"]
 
 
-def listar_usuarios_com_perfil_busca():
+def listar_usuarios_para_busca():
+    """Todas as contas são criadoras; as sem perfil de busca vêm por último."""
     with conexao() as conn:
         return conn.execute(
             """
             SELECT id, username, public_name, public_handle
             FROM users
-            WHERE public_name IS NOT NULL AND public_handle IS NOT NULL
-            ORDER BY public_name, username
+            ORDER BY (public_name IS NULL OR public_handle IS NULL),
+                     LOWER(COALESCE(public_name, username)), username
             """
         ).fetchall()
 

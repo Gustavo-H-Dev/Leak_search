@@ -135,6 +135,15 @@ def _usuario_alvo_busca(request: Request, usuario_id: int = 0):
     alvo = db.obter_usuario_por_id(usuario_id)
     if alvo is None:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    if atual["role"] == "admin" and not (
+        alvo["public_name"] and alvo["public_handle"]
+    ):
+        # Criadora sem perfil de busca: o admin pesquisa pelo nome de usuário.
+        alvo = {
+            **dict(alvo),
+            "public_name": alvo["public_name"] or alvo["username"],
+            "public_handle": alvo["public_handle"] or alvo["username"],
+        }
     return alvo
 
 
@@ -1176,7 +1185,7 @@ def valida(
             "target_user": alvo,
             "target_user_id": alvo["id"],
             "target_users": (
-                db.listar_usuarios_com_perfil_busca()
+                db.listar_usuarios_para_busca()
                 if request.state.user["role"] == "admin"
                 else []
             ),
@@ -1199,7 +1208,7 @@ def analise_dados(request: Request):
         por_usuario.setdefault(candidato["user_id"], []).append(candidato)
     vazados = db.contar_sites_vazados_por_usuario()
     relatorios = []
-    for usuario in db.listar_usuarios_com_perfil_busca():
+    for usuario in db.listar_usuarios_para_busca():
         lista = por_usuario.get(usuario["id"], [])
         if not lista and not vazados.get(usuario["id"]):
             continue
@@ -1553,7 +1562,7 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         "target_user": alvo,
         "target_user_id": target_user_id,
         "target_users": (
-            db.listar_usuarios_com_perfil_busca()
+            db.listar_usuarios_para_busca()
             if request.state.user["role"] == "admin"
             else []
         ),

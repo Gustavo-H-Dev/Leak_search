@@ -33,7 +33,7 @@
     <select id="valida-target" name="target_user_id" required>
       {% for usuario in target_users %}
       <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
-        {{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}
+        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — sem perfil de busca (usa o usuário){% endif %}
       </option>
       {% endfor %}
     </select>

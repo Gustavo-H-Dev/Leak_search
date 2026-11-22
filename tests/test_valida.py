@@ -236,3 +236,15 @@ def test_busca_de_vazamentos_ignora_consulta_sem_resultados(tmp_path):
         status = main._status_vazamento(uid)
         assert status["estado"] == "ok"
         assert [i["resultados"] for i in status["por_consulta"]] == [0, 1]
+
+
+def test_admin_ve_todas_as_criadoras_e_pesquisa_pelo_usuario(tmp_path):
+    from app import main
+
+    with patch.object(db, "CAMINHO_DB", tmp_path / "u.db"):
+        db.iniciar_banco()
+        admin = db.criar_usuario("adm", "adm@example.com", "h")
+        criadora = db.criar_usuario("bia", "bia@example.com", "h")
+        assert {u["username"] for u in db.listar_usuarios_para_busca()} == {"adm", "bia"}
+        alvo = main._usuario_alvo_busca(criar_request(admin, role="admin"), criadora)
+        assert (alvo["public_name"], alvo["public_handle"]) == ("bia", "bia")
