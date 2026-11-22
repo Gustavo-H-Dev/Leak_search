@@ -298,7 +298,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             )
 
         pesquisar.assert_called_once_with(
-            "google_images", q="BlackDragon @user875s", gl="br", hl="pt"
+            "google_images", q="BlackDragon @user875s", gl="br", hl="pt", safe="off"
         )
         adicionar.assert_called_once()
         self.assertEqual(adicionar.call_args.args[:2], (1, "https://example.com/image"))
@@ -348,7 +348,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             )
 
         pesquisar.assert_called_once_with(
-            "google_images", q="BlackDragon @user875s", gl="br", hl="pt"
+            "google_images", q="BlackDragon @user875s", gl="br", hl="pt", safe="off"
         )
 
     async def test_admin_nao_pode_usar_foto_de_outro_usuario_na_busca_visual(self):
