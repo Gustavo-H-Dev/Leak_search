@@ -140,6 +140,46 @@
 
   <div class="serpapi-sections">
     <h2 class="search-group-title">Google via SerpApi</h2>
+    <details class="serpapi-card search-option" id="busca-vazamentos">
+      <summary><span class="eyebrow">00 · BUSCA DE VAZAMENTOS</span><strong>Termos e sites conhecidos, em poucas consultas</strong></summary>
+      <p>
+        Combina nome e arroba com os termos e sites abaixo, agrupados com
+        <code>OR</code> para gastar poucos créditos. Os resultados vão para a
+        <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>.
+      </p>
+      <form class="search-form" method="post" action="/busca-vazamentos/config">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+        <label class="field-label" for="vaz-termos">Termos (um por linha)</label>
+        <textarea id="vaz-termos" name="termos" rows="4">{{ vazamento_termos|join("\n") }}</textarea>
+        <label class="field-label" for="vaz-sites">Sites (um domínio por linha, até 10 usados por busca)</label>
+        <textarea id="vaz-sites" name="sites" rows="4">{{ vazamento_sites|join("\n") }}</textarea>
+        <button type="submit" class="button-secondary">Salvar termos e sites</button>
+      </form>
+      {% if vazamento_consultas %}
+      <p><strong>Esta busca usa {{ vazamento_consultas|length }} crédito(s)</strong> da SerpApi:</p>
+      <ul>{% for consulta in vazamento_consultas %}<li><code>{{ consulta }}</code></li>{% endfor %}</ul>
+      {% endif %}
+      <form class="search-form" method="post" action="/buscar-vazamentos">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+        <label class="field-label" for="vaz-api">Endpoint</label>
+        <select id="vaz-api" name="api">
+          <option value="google_images_light">Google Images Light API</option>
+          <option value="google_images">Google Images API</option>
+        </select>
+        <label class="field-label" for="vaz-periodo">Período (opcional)</label>
+        <select id="vaz-periodo" name="periodo">
+          {% for chave, nome in vazamento_periodos.items() %}<option value="{{ chave }}">{{ nome }}</option>{% endfor %}
+        </select>
+        <label class="consent-control">
+          <input type="checkbox" name="consentimento" value="on" required>
+          <span>Autorizo o envio destas consultas à SerpApi.</span>
+        </label>
+        <button type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos</button>
+      </form>
+    </details>
+
     <details class="serpapi-card search-option" id="google-images" {% if api_ativa == 'google_images' %}open{% endif %}>
       <summary><span class="eyebrow">01 · BUSCA POR TEXTO</span><strong>Google Images API</strong></summary>
       <p class="doc-link"><a href="https://serpapi.com/google-images-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>

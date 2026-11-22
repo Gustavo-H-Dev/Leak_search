@@ -1088,6 +1088,25 @@ def obter_segredo_sessao():
         return segredo
 
 
+def obter_configuracao(nome, padrao=""):
+    with conexao() as conn:
+        linha = conn.execute(
+            "SELECT value FROM app_settings WHERE name = ?", (nome,)
+        ).fetchone()
+    return linha["value"] if linha else padrao
+
+
+def salvar_configuracao(nome, valor):
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (name, value) VALUES (?, ?)
+            ON CONFLICT (name) DO UPDATE SET value = excluded.value
+            """,
+            (nome, valor),
+        )
+
+
 def criar_criadora(nome):
     with conexao() as conn:
         if usando_postgresql():

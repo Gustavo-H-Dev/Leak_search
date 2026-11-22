@@ -21,6 +21,7 @@ from app.core import (
     autenticacao,
     busca_web,
     candidatos as candidatos_core,
+    consultas_vazamento,
     imagens,
     provedores_busca,
     serpapi,
@@ -1430,6 +1431,19 @@ SERPAPI_ENGINE_NAMES = {
 }
 
 
+def _config_vazamentos():
+    termos = db.obter_configuracao(
+        "vazamento_termos", "\n".join(consultas_vazamento.TERMOS_PADRAO)
+    )
+    sites = db.obter_configuracao(
+        "vazamento_sites", "\n".join(consultas_vazamento.SITES_PADRAO)
+    )
+    return (
+        consultas_vazamento.limpar_termos(termos),
+        consultas_vazamento.limpar_sites(sites),
+    )
+
+
 def _termos_busca(usuario):
     return f"{usuario['public_name']} @{usuario['public_handle']}"
 
@@ -1478,6 +1492,16 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         ),
         "fotos": fotos,
         "sites_vazados": db.listar_sites_vazados(target_user_id),
+        "vazamento_termos": _config_vazamentos()[0],
+        "vazamento_sites": _config_vazamentos()[1],
+        "vazamento_periodos": consultas_vazamento.PERIODOS,
+        "vazamento_consultas": (
+            consultas_vazamento.montar_consultas(
+                alvo["public_name"], alvo["public_handle"], *_config_vazamentos()
+            )
+            if alvo["public_name"] and alvo["public_handle"]
+            else []
+        ),
         "query_perfil": (
             _termos_busca(alvo)
             if alvo["public_name"] and alvo["public_handle"]
@@ -1745,6 +1769,88 @@ async def buscar_serpapi(
         query=query,
         api_ativa=api,
         related_options=related_options,
+    )
+
+
+@app.post(
+    "/busca-vazamentos/config",
+    response_class=HTMLResponse,
+    dependencies=_admin_csrf(),
+)
+def salvar_config_vazamentos(
+    request: Request,
+    termos: str = Form(""),
+    sites: str = Form(""),
+    target_user_id: int = Form(0),
+):
+    db.salvar_configuracao(
+        "vazamento_termos", "\n".join(consultas_vazamento.limpar_termos(termos))
+    )
+    db.salvar_configuracao(
+        "vazamento_sites", "\n".join(consultas_vazamento.limpar_sites(sites))
+    )
+    return _contexto_serpapi(
+        request, target_user_id, mensagem="Termos e sites salvos."
+    )
+
+
+@app.post(
+    "/buscar-vazamentos",
+    response_class=HTMLResponse,
+    dependencies=_admin_csrf(),
+)
+async def buscar_vazamentos(
+    request: Request,
+    consentimento: str = Form(""),
+    target_user_id: int = Form(0),
+    api: str = Form("google_images_light"),
+    periodo: str = Form(""),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    target_user_id = alvo["id"]
+    contexto = {"api_ativa": api}
+
+    def erro(mensagem):
+        return _contexto_serpapi(request, target_user_id, erro=mensagem, **contexto)
+
+    if api not in {"google_images", "google_images_light"}:
+        return erro("API selecionada inválida.")
+    if periodo not in consultas_vazamento.PERIODOS:
+        return erro("Período inválido.")
+    if consentimento != "on":
+        return erro("Confirme o envio das consultas à SerpApi.")
+    if not (alvo["public_name"] and alvo["public_handle"]):
+        return erro("Complete o nome público e a arroba no perfil de busca.")
+    consultas = consultas_vazamento.montar_consultas(
+        alvo["public_name"], alvo["public_handle"], *_config_vazamentos()
+    )
+    if not consultas:
+        return erro("Cadastre ao menos um termo ou site para pesquisar.")
+
+    parametros = {"gl": "br", "hl": "pt"}
+    if periodo:
+        parametros["tbs"] = f"qdr:{periodo}"
+    resultados = []
+    try:
+        for consulta in consultas:
+            dados = await run_in_threadpool(
+                serpapi.pesquisar, api, q=consulta, **parametros
+            )
+            resultados.extend(serpapi.normalizar_resultados(dados, api))
+    except serpapi.ErroSerpApi as e:
+        logger.exception("Falha na busca de vazamentos (%s)", api)
+        return erro(str(e))
+
+    resumo_busca = await run_in_threadpool(
+        _enviar_para_valida, alvo, resultados, api
+    )
+    return _contexto_serpapi(
+        request,
+        target_user_id,
+        pesquisa_realizada=True,
+        resumo_busca=resumo_busca,
+        api_ativa=api,
+        query=" | ".join(consultas),
     )
 
 
