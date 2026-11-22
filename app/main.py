@@ -1747,7 +1747,7 @@ async def buscar_serpapi(
     try:
         if api in {"google_images", "google_images_light"}:
             dados = await run_in_threadpool(
-                serpapi.pesquisar, api, q=query, gl="br", hl="pt"
+                serpapi.pesquisar, api, q=query, gl="br", hl="pt", safe="off"
             )
         elif api == "google_lens":
             if target_user_id != request.state.user["id"]:
@@ -1791,6 +1791,7 @@ async def buscar_serpapi(
                 related_content_id=contexto["related_content_id"],
                 gl="br",
                 hl="pt",
+                safe="off",
             )
     except ValueError as erro:
         return _contexto_serpapi(
@@ -1961,7 +1962,7 @@ async def buscar_vazamentos(
     ):
         return erro("Já existe uma busca de vazamentos em andamento para esta criadora.")
 
-    parametros = {"gl": "br", "hl": "pt"}
+    parametros = {"gl": "br", "hl": "pt", "safe": "off"}
     if periodo:
         parametros["tbs"] = f"qdr:{periodo}"
     _salvar_status_vazamento(
