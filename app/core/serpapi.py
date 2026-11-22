@@ -17,6 +17,10 @@ class ErroSerpApi(Exception):
     pass
 
 
+class SemResultados(ErroSerpApi):
+    pass
+
+
 class SerpApiNaoConfigurada(ErroSerpApi):
     pass
 
@@ -83,6 +87,8 @@ def _validar_resposta(resposta: httpx.Response) -> dict:
     if not isinstance(dados, dict):
         raise ErroSerpApi("A SerpApi retornou uma resposta inválida.")
     if dados.get("error"):
+        if "hasn't returned any results" in str(dados["error"]):
+            raise SemResultados(str(dados["error"]))
         raise ErroSerpApi(str(dados["error"]))
     return dados
 
