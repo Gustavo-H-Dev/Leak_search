@@ -281,3 +281,14 @@ def test_pagina_filha_de_site_oficial_e_oficial_mas_irma_nao():
     assert classificar("https://a.com/perfil/posts/9") == "proprio"
     assert classificar("https://a.com/perfil-falso") == "nao_oficial"
     assert classificar("https://b.com/perfil/posts/9") == "nao_oficial"
+
+
+def test_pagina_de_listagem_detecta_busca_e_tag_mas_nao_video():
+    from app.core import sites_oficiais
+
+    f = sites_oficiais.pagina_de_listagem
+    assert f("https://www.tiktok.com/search?q=ana")
+    assert f("https://www.tiktok.com/pt-BR/tag/ana")
+    assert f("https://www.youtube.com/results?search_query=ana")
+    assert not f("https://www.tiktok.com/@ana/video/1")
+    assert not f("https://www.youtube.com/watch?v=abc")

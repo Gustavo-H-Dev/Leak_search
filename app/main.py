@@ -1146,6 +1146,7 @@ def valida(
     for candidato in db.listar_candidatos(alvo["id"], status):
         melhor = candidatos_core.melhor_referencia(candidato["phash"], referencias)
         distancia = melhor["distancia"] if melhor else None
+        listagem = sites_oficiais.pagina_de_listagem(candidato["url"])
         candidatos.append(
             {
                 **candidato,
@@ -1154,7 +1155,12 @@ def valida(
                     imagens.pontuacao(distancia) if distancia is not None else None
                 ),
                 "referencia": melhor["origem"] if melhor else "",
-                "nivel": imagens.nivel_de_similaridade(distancia),
+                "listagem": listagem,
+                "nivel": (
+                    "diferente"
+                    if listagem
+                    else imagens.nivel_de_similaridade(distancia)
+                ),
             }
         )
     candidatos = candidatos_core.ordenar_por_atencao(candidatos)

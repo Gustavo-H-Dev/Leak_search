@@ -128,3 +128,27 @@ def proprietario_pagina_oficial(url: str, paginas_oficiais, user_id: int) -> str
     if donos == {user_id}:
         return "proprio"
     return "terceiro_ou_incerto"
+
+
+_LISTAGENS = {
+    ("tiktok.com", "search"), ("tiktok.com", "tag"), ("tiktok.com", "discover"),
+    ("tiktok.com", "explore"), ("tiktok.com", "music"),
+    ("instagram.com", "explore"), ("youtube.com", "results"),
+    ("youtube.com", "hashtag"), ("google.com", "search"),
+}
+
+
+def pagina_de_listagem(url: str) -> bool:
+    """True para páginas de busca/tag/descoberta, que mostram vários autores."""
+    normalizada = url_pagina_da_busca(url)
+    if not normalizada:
+        return False
+    partes = urlsplit(normalizada)
+    host = (partes.hostname or "").removeprefix("www.")
+    segmentos = [x for x in partes.path.split("/") if x]
+    if not segmentos:
+        return False
+    primeiro = segmentos[0].lower()
+    if host == "tiktok.com" and len(segmentos) > 1 and re.fullmatch(r"[a-z]{2}(-[A-Za-z]{2})?", primeiro):
+        primeiro = segmentos[1].lower()
+    return (host, primeiro) in _LISTAGENS
