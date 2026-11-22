@@ -220,6 +220,15 @@ def normalizar_perfil_instagram(dados: dict) -> tuple[dict, list[dict[str, str]]
                 "titulo": str(caption or "Publicação do perfil"),
                 "link": f"https://www.instagram.com/p/{shortcode}/",
                 "tipo": str(post.get("product_type") or ""),
+                "miniatura": next(
+                    (
+                        post[chave]
+                        for chave in ("thumbnail", "thumbnail_src", "display_url", "image")
+                        if isinstance(post.get(chave), str)
+                        and post[chave].startswith("https://")
+                    ),
+                    "",
+                ),
             }
         )
     return perfil, posts

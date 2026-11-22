@@ -152,3 +152,34 @@ def pagina_de_listagem(url: str) -> bool:
     if host == "tiktok.com" and len(segmentos) > 1 and re.fullmatch(r"[a-z]{2}(-[A-Za-z]{2})?", primeiro):
         primeiro = segmentos[1].lower()
     return (host, primeiro) in _LISTAGENS
+
+
+_RESERVADOS_INSTAGRAM = {"p", "reel", "reels", "tv", "explore", "stories", "accounts"}
+
+
+def _segmentos_instagram(url: str) -> list[str]:
+    normalizada = url_pagina_da_busca(url)
+    if not normalizada:
+        return []
+    partes = urlsplit(normalizada)
+    if partes.hostname not in {"instagram.com", "www.instagram.com"}:
+        return []
+    return [parte for parte in partes.path.split("/") if parte]
+
+
+def usuario_instagram(url: str) -> str:
+    """Retorna o usuário se a URL for o perfil (ou algo dentro dele) no Instagram."""
+    segmentos = _segmentos_instagram(url)
+    if segmentos and segmentos[0].lower() not in _RESERVADOS_INSTAGRAM:
+        return segmentos[0]
+    return ""
+
+
+def shortcode_instagram(url: str) -> str:
+    """Identifica um post/reel, com ou sem o usuário no caminho."""
+    segmentos = _segmentos_instagram(url)
+    if segmentos and segmentos[0].lower() not in {"p", "reel", "tv"}:
+        segmentos = segmentos[1:]
+    if len(segmentos) >= 2 and segmentos[0].lower() in {"p", "reel", "tv"}:
+        return segmentos[1]
+    return ""

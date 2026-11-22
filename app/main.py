@@ -1120,6 +1120,7 @@ def _referencias_do_usuario(alvo):
     referencias.extend(
         {"phash": linha["phash"], "origem": f"Site oficial — {linha['url']}"}
         for linha in db.listar_hashes_oficiais(alvo["id"])
+        if linha["phash"]
     )
     return referencias
 
@@ -1361,6 +1362,9 @@ def _enviar_para_valida(alvo, resultados, engine):
     paginas_oficiais = db.listar_paginas_oficiais_com_donos()
     existentes = {c["url"]: c["status"] for c in db.listar_candidatos(user_id)}
     hashes_oficiais = {h["url"] for h in db.listar_hashes_oficiais(user_id)}
+    posts_oficiais = {
+        sites_oficiais.shortcode_instagram(u) for u in hashes_oficiais
+    } - {""}
     resumo = {
         "total": len(resultados),
         "novos": 0,
@@ -1389,6 +1393,9 @@ def _enviar_para_valida(alvo, resultados, engine):
             resumo["oficiais"] += 1
             if dono == "proprio" and url not in hashes_oficiais:
                 oficiais_proprios.append((url, resultado))
+            continue
+        if sites_oficiais.shortcode_instagram(url) in posts_oficiais:
+            resumo["oficiais"] += 1
             continue
         status = existentes.get(url)
         if status == "not_me":
@@ -1860,6 +1867,8 @@ async def buscar_vazamentos(
     )
 
 
+MAXIMO_PAGINAS_INSTAGRAM = 30
+
 INSTAGRAM_ENGINE_NAMES = {
     "instagram_profile": "Instagram Profile API",
     "instagram_popular": "Instagram Popular API",
@@ -1877,6 +1886,106 @@ def _contexto_instagram(request: Request, **valores):
 )
 def buscar_instagram_formulario():
     return RedirectResponse("/busca-web", status_code=307)
+
+
+@app.post(
+    "/instagram/importar-oficiais",
+    response_class=HTMLResponse,
+    dependencies=_admin_csrf(),
+)
+async def importar_posts_oficiais_instagram(
+    request: Request,
+    consentimento: str = Form(""),
+    target_user_id: int = Form(0),
+    username: str = Form(""),
+    max_paginas: int = Form(MAXIMO_PAGINAS_INSTAGRAM),
+):
+    """Registra os posts do Instagram oficial da criadora (URL + hash)."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    target_user_id = alvo["id"]
+    contexto = {"api_ativa": "instagram_profile", "target_user_id": target_user_id}
+    if consentimento != "on":
+        return _contexto_instagram(
+            request, erro="Confirme o envio da consulta à SerpApi.", **contexto
+        )
+    posts, paginas, token = [], 0, ""
+    try:
+        usuario = username.strip() or next(
+            (
+                u
+                for u in (
+                    sites_oficiais.usuario_instagram(p["url"])
+                    for p in db.listar_paginas_oficiais_com_donos()
+                    if p["user_id"] == alvo["id"]
+                )
+                if u
+            ),
+            "",
+        )
+        if not usuario:
+            raise ValueError(
+                "Cadastre o Instagram oficial da criadora ou informe o usuário."
+            )
+        usuario = serpapi.validar_usuario_instagram(usuario)
+        max_paginas = max(1, min(max_paginas, MAXIMO_PAGINAS_INSTAGRAM))
+        vistos = set()
+        while paginas < max_paginas:
+            parametros = {"profile_id": usuario}
+            if token:
+                parametros["next_page_token"] = token
+            dados = await run_in_threadpool(
+                serpapi.pesquisar, "instagram_profile", **parametros
+            )
+            paginas += 1
+            _, da_pagina = serpapi.normalizar_perfil_instagram(dados)
+            novos = [p for p in da_pagina if p["link"] not in vistos]
+            vistos.update(p["link"] for p in novos)
+            posts.extend(novos)
+            paginacao = dados.get("serpapi_pagination")
+            proximo = paginacao.get("next_page_token") if isinstance(paginacao, dict) else ""
+            if not novos or not isinstance(proximo, str) or not proximo:
+                token = ""
+                break
+            token = proximo
+    except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
+        if not posts:
+            return _contexto_instagram(request, erro=str(erro), **contexto)
+        aviso_parcial = f"Importação interrompida: {erro}"
+    else:
+        aviso_parcial = ""
+
+    if not posts:
+        return _contexto_instagram(
+            request,
+            erro="A API não retornou publicações (o perfil pode ser privado).",
+            **contexto,
+        )
+    hashes = await run_in_threadpool(
+        candidatos_core.calcular_hashes,
+        [p["miniatura"] for p in posts if p["miniatura"]],
+    )
+    codigos = set()
+    for post in posts:
+        codigo = sites_oficiais.shortcode_instagram(post["link"])
+        codigos.add(codigo)
+        db.adicionar_hash_oficial(
+            alvo["id"], post["link"].rstrip("/"), hashes.get(post["miniatura"], "")
+        )
+    for candidato in db.listar_candidatos(alvo["id"], "pending"):
+        if sites_oficiais.shortcode_instagram(candidato["url"]) in codigos:
+            db.atualizar_status_candidato(candidato["id"], alvo["id"], "official")
+    return _contexto_instagram(
+        request,
+        mensagem=(
+            f"{len(posts)} publicações de @{usuario} registradas como oficiais "
+            f"({paginas} crédito(s)); candidatos pendentes iguais foram marcados "
+            "como oficiais."
+            + (" Ainda há mais páginas: aumente o máximo de páginas." if token else "")
+            + (f" {aviso_parcial}" if aviso_parcial else "")
+        ),
+        username=usuario,
+        **contexto,
+    )
 
 
 @app.post("/buscar-instagram", response_class=HTMLResponse, dependencies=_admin_csrf())
