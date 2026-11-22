@@ -75,6 +75,19 @@ class ValidaTest(unittest.TestCase):
         self.assertEqual([c["url"] for c in pendentes], ["https://outro.com/a"])
         self.assertEqual(pendentes[0]["phash"], "a" * 16)
 
+    def test_posts_oficiais_do_instagram_importados_nao_viram_candidatos(self):
+        user_id = self.user_id
+        db.adicionar_hash_oficial(user_id, "https://www.instagram.com/p/AbC", "")
+        resumo = _enviar_para_valida(
+            {"id": user_id},
+            [
+                {"link": "https://www.instagram.com/reel/AbC/", "titulo": "Meu post"},
+                {"link": "https://www.instagram.com/p/Outro/", "titulo": "Outro"},
+            ],
+            "google_images",
+        )
+        self.assertEqual((resumo["oficiais"], resumo["novos"]), (1, 1))
+
     def test_pagina_ordena_atencao_possiveis_e_diferentes(self):
         user_id = self.user_id
         referencia = imagens.calcular_phash(_png("#cc5599"))

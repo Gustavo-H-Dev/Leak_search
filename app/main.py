@@ -1120,6 +1120,7 @@ def _referencias_do_usuario(alvo):
     referencias.extend(
         {"phash": linha["phash"], "origem": f"Site oficial — {linha['url']}"}
         for linha in db.listar_hashes_oficiais(alvo["id"])
+        if linha["phash"]
     )
     return referencias
 
@@ -1361,6 +1362,9 @@ def _enviar_para_valida(alvo, resultados, engine):
     paginas_oficiais = db.listar_paginas_oficiais_com_donos()
     existentes = {c["url"]: c["status"] for c in db.listar_candidatos(user_id)}
     hashes_oficiais = {h["url"] for h in db.listar_hashes_oficiais(user_id)}
+    posts_oficiais = {
+        sites_oficiais.shortcode_instagram(u) for u in hashes_oficiais
+    } - {""}
     resumo = {
         "total": len(resultados),
         "novos": 0,
@@ -1389,6 +1393,9 @@ def _enviar_para_valida(alvo, resultados, engine):
             resumo["oficiais"] += 1
             if dono == "proprio" and url not in hashes_oficiais:
                 oficiais_proprios.append((url, resultado))
+            continue
+        if sites_oficiais.shortcode_instagram(url) in posts_oficiais:
+            resumo["oficiais"] += 1
             continue
         status = existentes.get(url)
         if status == "not_me":
@@ -1877,6 +1884,81 @@ def _contexto_instagram(request: Request, **valores):
 )
 def buscar_instagram_formulario():
     return RedirectResponse("/busca-web", status_code=307)
+
+
+@app.post(
+    "/instagram/importar-oficiais",
+    response_class=HTMLResponse,
+    dependencies=_admin_csrf(),
+)
+async def importar_posts_oficiais_instagram(
+    request: Request,
+    consentimento: str = Form(""),
+    target_user_id: int = Form(0),
+    username: str = Form(""),
+):
+    """Registra os posts do Instagram oficial da criadora (URL + hash)."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    target_user_id = alvo["id"]
+    contexto = {"api_ativa": "instagram_profile", "target_user_id": target_user_id}
+    if consentimento != "on":
+        return _contexto_instagram(
+            request, erro="Confirme o envio da consulta à SerpApi.", **contexto
+        )
+    try:
+        usuario = username.strip() or next(
+            (
+                u
+                for u in (
+                    sites_oficiais.usuario_instagram(p["url"])
+                    for p in db.listar_paginas_oficiais_com_donos()
+                    if p["user_id"] == alvo["id"]
+                )
+                if u
+            ),
+            "",
+        )
+        if not usuario:
+            raise ValueError(
+                "Cadastre o Instagram oficial da criadora ou informe o usuário."
+            )
+        usuario = serpapi.validar_usuario_instagram(usuario)
+        dados = await run_in_threadpool(
+            serpapi.pesquisar, "instagram_profile", profile_id=usuario
+        )
+    except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
+        return _contexto_instagram(request, erro=str(erro), **contexto)
+
+    perfil, posts = serpapi.normalizar_perfil_instagram(dados)
+    if not posts:
+        return _contexto_instagram(
+            request,
+            erro="A API não retornou publicações (o perfil pode ser privado).",
+            **contexto,
+        )
+    hashes = await run_in_threadpool(
+        candidatos_core.calcular_hashes,
+        [p["miniatura"] for p in posts if p["miniatura"]],
+    )
+    codigos = set()
+    for post in posts:
+        codigo = sites_oficiais.shortcode_instagram(post["link"])
+        codigos.add(codigo)
+        db.adicionar_hash_oficial(
+            alvo["id"], post["link"].rstrip("/"), hashes.get(post["miniatura"], "")
+        )
+    for candidato in db.listar_candidatos(alvo["id"], "pending"):
+        if sites_oficiais.shortcode_instagram(candidato["url"]) in codigos:
+            db.atualizar_status_candidato(candidato["id"], alvo["id"], "official")
+    return _contexto_instagram(
+        request,
+        mensagem=(
+            f"{len(posts)} publicações de @{usuario} registradas como oficiais; "
+            "candidatos pendentes iguais foram marcados como oficiais."
+        ),
+        username=usuario,
+        **contexto,
+    )
 
 
 @app.post("/buscar-instagram", response_class=HTMLResponse, dependencies=_admin_csrf())

@@ -292,3 +292,12 @@ def test_pagina_de_listagem_detecta_busca_e_tag_mas_nao_video():
     assert f("https://www.youtube.com/results?search_query=ana")
     assert not f("https://www.tiktok.com/@ana/video/1")
     assert not f("https://www.youtube.com/watch?v=abc")
+
+
+class InstagramOficialTests(unittest.TestCase):
+    def test_identifica_usuario_e_post(self):
+        self.assertEqual(sites_oficiais.usuario_instagram("https://www.instagram.com/ana/"), "ana")
+        self.assertEqual(sites_oficiais.usuario_instagram("https://www.instagram.com/p/AbC/"), "")
+        self.assertEqual(sites_oficiais.shortcode_instagram("https://www.instagram.com/p/AbC/"), "AbC")
+        self.assertEqual(sites_oficiais.shortcode_instagram("https://instagram.com/ana/reel/XyZ/"), "XyZ")
+        self.assertEqual(sites_oficiais.shortcode_instagram("https://www.instagram.com/ana/"), "")

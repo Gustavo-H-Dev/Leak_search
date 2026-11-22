@@ -232,3 +232,7 @@ podem consumir créditos da mesma conta SerpApi configurada para a página anter
 ### Busca de vazamentos
 
 Em `/busca-web` (SerpApi), o card "Busca de vazamentos" combina nome e arroba da criadora com termos (ex.: vazado, leaked, naked) e sites (ex.: erome.com) editáveis, agrupados com `OR` em 1 a 3 consultas (1 crédito cada, só a primeira página). O custo é exibido antes de rodar. O período (dia, semana, mês, ano) é opcional; o padrão é "Qualquer data". Os resultados seguem para a Valida.
+
+### Posts oficiais do Instagram
+
+Em `/busca-web` > Instagram, "Importar posts oficiais" consulta o perfil (1 crédito; usa o Instagram cadastrado como site oficial da criadora se o usuário não for informado), registra cada post como oficial (por código do post, então `/p/`, `/reel/` e `/usuario/p/` casam) e guarda só o hash da miniatura como referência. Esses posts deixam de aparecer na Valida, e candidatos pendentes iguais são marcados como oficiais. Vale o que a API retorna (normalmente as publicações mais recentes).
