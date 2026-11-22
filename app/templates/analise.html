@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block titulo %}Análise{% endblock %}
+{% block conteudo %}
+{% set nomes_nivel = {"atencao": "Atenção", "possivel": "Possíveis", "diferente": "Diferentes", "sem_referencia": "Sem referência"} %}
+<section class="search-page">
+  <span class="eyebrow">ANÁLISE</span>
+  <h1>Análise dos dados</h1>
+  <p>
+    Visão geral por criadora para saber se a busca e a Valida estão funcionando.
+    Os níveis dos candidatos já validados mostram se os limites de semelhança
+    (Atenção ≥ {{ pontuacao_atencao }}, Possíveis ≥ {{ pontuacao_possivel }}) estão calibrados:
+    vazados confirmados deveriam estar em Atenção/Possíveis e "não sou eu" em Diferentes.
+  </p>
+  {% for r in relatorios %}
+  <article class="serpapi-card">
+    <h2>{{ r.usuario.public_name or r.usuario.username }}</h2>
+    <p>
+      {{ r.total }} candidatos · {{ r.vazados_registrados }} vazados registrados ·
+      {{ r.referencias }} imagens de referência ({{ r.hashes_oficiais }} de sites/posts oficiais) ·
+      {{ r.sem_hash }} sem hash
+    </p>
+    {% if r.alertas %}
+    <ul>{% for a in r.alertas %}<li class="erro">{{ a }}</li>{% endfor %}</ul>
+    {% else %}
+    <p class="sucesso">Nenhum ponto de atenção encontrado.</p>
+    {% endif %}
+    <table>
+      <thead><tr><th>Status</th><th>Total</th><th>Atenção</th><th>Possíveis</th><th>Diferentes</th><th>Sem referência</th><th>Semelhança média (0–100)</th></tr></thead>
+      <tbody>
+      {% for chave, nome in status_nomes.items() %}
+        <tr>
+          <td>{{ nome }}</td>
+          <td>{{ r.por_status[chave] }}</td>
+          {% for nivel in ["atencao", "possivel", "diferente", "sem_referencia"] %}<td>{{ r.niveis[chave].get(nivel, 0) }}</td>{% endfor %}
+          <td>{{ r.media_pontuacao[chave] if r.media_pontuacao[chave] is not none else "—" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p><strong>Principais domínios vazados:</strong>
+      {% for dominio, qtd in r.dominios.leaked %}{{ dominio }} ({{ qtd }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}
+    </p>
+    <p><strong>Principais domínios pendentes:</strong>
+      {% for dominio, qtd in r.dominios.pending %}{{ dominio }} ({{ qtd }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}
+    </p>
+    <p><strong>Origem (API):</strong>
+      {% for motor, qtd in r.motores %}{{ motor }} ({{ qtd }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}
+    </p>
+  </article>
+  {% else %}
+  <p>Ainda não há dados de busca para analisar.</p>
+  {% endfor %}
+</section>
+{% endblock %}

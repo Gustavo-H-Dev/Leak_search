@@ -180,3 +180,17 @@ def _png(cor):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_analise_aponta_vazados_em_diferentes():
+    from app.core import analise
+
+    referencias = [{"phash": "0" * 16, "origem": "x"}]
+    lista = [
+        {"url": f"https://a.com/{i}", "engine": "g", "status": "leaked", "phash": "f" * 16}
+        for i in range(3)
+    ] + [{"url": "https://a.com/n", "engine": "g", "status": "pending", "phash": ""}]
+    relatorio = analise.analisar_usuario(lista, referencias, 0)
+    assert relatorio["niveis"]["leaked"] == {"diferente": 3}
+    assert relatorio["sem_hash"] == 1
+    assert any("Muitos vazados" in a for a in relatorio["alertas"])

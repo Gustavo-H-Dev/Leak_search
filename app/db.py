@@ -818,6 +818,26 @@ def atualizar_status_candidato(candidate_id, user_id, status):
         return cur.rowcount > 0
 
 
+def listar_todos_candidatos():
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, user_id, url, engine, phash, status
+            FROM search_candidates
+            """
+        ).fetchall()
+
+
+def contar_sites_vazados_por_usuario():
+    with conexao() as conn:
+        return {
+            linha["user_id"]: linha["total"]
+            for linha in conn.execute(
+                "SELECT user_id, COUNT(*) AS total FROM leak_reports GROUP BY user_id"
+            ).fetchall()
+        }
+
+
 def adicionar_hash_oficial(user_id, url, phash):
     with conexao() as conn:
         cur = conn.execute(
