@@ -1893,12 +1893,25 @@ def _executar_busca_vazamentos(alvo, api, consultas, parametros):
     base = {"iniciado": inicio, "consultas": consultas, "api": api}
     try:
         resultados = []
+        por_consulta = []
         for consulta in consultas:
-            dados = serpapi.pesquisar(api, q=consulta, **parametros)
-            resultados.extend(serpapi.normalizar_resultados(dados, api))
+            try:
+                dados = serpapi.pesquisar(api, q=consulta, **parametros)
+                encontrados = serpapi.normalizar_resultados(dados, api)
+            except serpapi.SemResultados:
+                encontrados = []
+            por_consulta.append({"consulta": consulta, "resultados": len(encontrados)})
+            resultados.extend(encontrados)
         resumo = _enviar_para_valida(alvo, resultados, api)
         _salvar_status_vazamento(
-            user_id, {**base, "estado": "ok", "resumo": resumo, "fim": time.time()}
+            user_id,
+            {
+                **base,
+                "estado": "ok",
+                "resumo": resumo,
+                "por_consulta": por_consulta,
+                "fim": time.time(),
+            },
         )
     except Exception as erro:
         logger.exception("Falha na busca de vazamentos (%s)", api)

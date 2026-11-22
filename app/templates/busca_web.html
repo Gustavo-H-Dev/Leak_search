@@ -168,6 +168,9 @@
           <strong>{{ vazamento_status.resumo.novos }} novo(s) na <a href="/valida?target_user_id={{ target_user_id }}">Valida</a></strong>;
           omitidos: {{ vazamento_status.resumo.oficiais }} oficiais, {{ vazamento_status.resumo.nao_sou_eu }} “não sou eu”, {{ vazamento_status.resumo.repetidos }} repetidos.
         </p>
+        {% if vazamento_status.por_consulta %}
+        <ul>{% for item in vazamento_status.por_consulta %}<li><code>{{ item.consulta }}</code>: {{ item.resultados }} resultado(s)</li>{% endfor %}</ul>
+        {% endif %}
         {% endif %}
       </div>
       {% endif %}

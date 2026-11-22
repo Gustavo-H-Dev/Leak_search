@@ -213,3 +213,26 @@ def test_busca_de_vazamentos_em_segundo_plano_registra_status(tmp_path):
         with patch("app.main.serpapi.pesquisar", side_effect=RuntimeError("falhou")):
             main._executar_busca_vazamentos({"id": uid}, "google_images_light", ["q1"], {})
         assert main._status_vazamento(uid)["estado"] == "erro"
+
+
+def test_busca_de_vazamentos_ignora_consulta_sem_resultados(tmp_path):
+    from app import main
+    from app.core import serpapi
+
+    falsa = {"images_results": [{"link": "https://x.com/a", "original": "https://x.com/a.jpg", "title": "t"}]}
+
+    def pesquisar(engine, q, **_):
+        if q == "vazia":
+            raise serpapi.SemResultados("Google Images Light hasn't returned any results for this query.")
+        return falsa
+
+    with patch.object(db, "CAMINHO_DB", tmp_path / "u.db"):
+        db.iniciar_banco()
+        uid = db.criar_usuario("ana", "ana@example.com", "hash")
+        with patch("app.main.serpapi.pesquisar", side_effect=pesquisar), patch(
+            "app.main.candidatos_core.calcular_hashes", return_value={}
+        ):
+            main._executar_busca_vazamentos({"id": uid}, "google_images_light", ["vazia", "ok"], {})
+        status = main._status_vazamento(uid)
+        assert status["estado"] == "ok"
+        assert [i["resultados"] for i in status["por_consulta"]] == [0, 1]
