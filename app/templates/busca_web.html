@@ -140,7 +140,7 @@
 
   <div class="serpapi-sections">
     <h2 class="search-group-title">Google via SerpApi</h2>
-    <details class="serpapi-card search-option" id="busca-vazamentos">
+    <details class="serpapi-card search-option" id="busca-vazamentos" {% if vazamento_status %}open{% endif %}>
       <summary><span class="eyebrow">00 · BUSCA DE VAZAMENTOS</span><strong>Termos e sites conhecidos, em poucas consultas</strong></summary>
       <p>
         Combina nome e arroba com os termos e sites abaixo, agrupados com
@@ -156,6 +156,21 @@
         <textarea id="vaz-sites" name="sites" rows="4">{{ vazamento_sites|join("\n") }}</textarea>
         <button type="submit" class="button-secondary">Salvar termos e sites</button>
       </form>
+      {% if vazamento_status %}
+      <div id="vazamento-status" data-estado="{{ vazamento_status.estado }}">
+        {% if vazamento_status.estado == "rodando" %}
+        <p role="status"><strong>Busca em andamento</strong> desde {{ vazamento_status.iniciado }}. Esta página atualiza sozinha.</p>
+        {% elif vazamento_status.estado == "erro" %}
+        <p class="erro" role="alert">A última busca falhou ({{ vazamento_status.iniciado }}): {{ vazamento_status.erro }}</p>
+        {% else %}
+        <p class="sucesso" role="status">
+          Última busca concluída em {{ vazamento_status.fim }}: {{ vazamento_status.resumo.total }} resultado(s),
+          <strong>{{ vazamento_status.resumo.novos }} novo(s) na <a href="/valida?target_user_id={{ target_user_id }}">Valida</a></strong>;
+          omitidos: {{ vazamento_status.resumo.oficiais }} oficiais, {{ vazamento_status.resumo.nao_sou_eu }} “não sou eu”, {{ vazamento_status.resumo.repetidos }} repetidos.
+        </p>
+        {% endif %}
+      </div>
+      {% endif %}
       {% if vazamento_consultas %}
       <p><strong>Esta busca usa {{ vazamento_consultas|length }} crédito(s)</strong> da SerpApi:</p>
       <ul>{% for consulta in vazamento_consultas %}<li><code>{{ consulta }}</code></li>{% endfor %}</ul>
@@ -479,4 +494,7 @@
     });
   });
 </script>
+{% if vazamento_status and vazamento_status.estado == "rodando" %}
+<script>setTimeout(function () { window.location.href = window.location.pathname + "?target_user_id={{ target_user_id }}"; }, 10000);</script>
+{% endif %}
 {% endblock %}

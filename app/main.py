@@ -1,8 +1,10 @@
+import json
 import logging
 import mimetypes
 import os
 import re
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,7 +12,7 @@ from urllib.parse import quote, urlencode
 
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -1481,6 +1483,24 @@ SERPAPI_ENGINE_NAMES = {
 }
 
 
+def _formatar_status_vazamento(status):
+    if not status:
+        return None
+    formatado = dict(status)
+    for chave in ("iniciado", "fim"):
+        if isinstance(status.get(chave), (int, float)):
+            formatado[chave] = datetime.fromtimestamp(
+                status[chave], timezone.utc
+            ).strftime("%d/%m/%Y %H:%M UTC")
+    if (
+        status.get("estado") == "rodando"
+        and time.time() - status.get("iniciado", 0) > TEMPO_MAXIMO_BUSCA_VAZAMENTO
+    ):
+        formatado["estado"] = "erro"
+        formatado["erro"] = "A busca não terminou (o servidor pode ter reiniciado)."
+    return formatado
+
+
 def _config_vazamentos():
     termos = db.obter_configuracao(
         "vazamento_termos", "\n".join(consultas_vazamento.TERMOS_PADRAO)
@@ -1545,6 +1565,9 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         "vazamento_termos": _config_vazamentos()[0],
         "vazamento_sites": _config_vazamentos()[1],
         "vazamento_periodos": consultas_vazamento.PERIODOS,
+        "vazamento_status": _formatar_status_vazamento(
+            _status_vazamento(target_user_id)
+        ),
         "vazamento_consultas": (
             consultas_vazamento.montar_consultas(
                 alvo["public_name"], alvo["public_handle"], *_config_vazamentos()
@@ -1844,6 +1867,47 @@ def salvar_config_vazamentos(
     )
 
 
+TEMPO_MAXIMO_BUSCA_VAZAMENTO = 900
+
+
+def _chave_status_vazamento(user_id):
+    return f"vazamento_status_{user_id}"
+
+
+def _status_vazamento(user_id):
+    try:
+        dados = json.loads(db.obter_configuracao(_chave_status_vazamento(user_id), "{}"))
+    except ValueError:
+        return {}
+    return dados if isinstance(dados, dict) else {}
+
+
+def _salvar_status_vazamento(user_id, dados):
+    db.salvar_configuracao(_chave_status_vazamento(user_id), json.dumps(dados))
+
+
+def _executar_busca_vazamentos(alvo, api, consultas, parametros):
+    """Roda as consultas fora da requisição (o plano gratuito é lento)."""
+    user_id = alvo["id"]
+    inicio = _status_vazamento(user_id).get("iniciado", time.time())
+    base = {"iniciado": inicio, "consultas": consultas, "api": api}
+    try:
+        resultados = []
+        for consulta in consultas:
+            dados = serpapi.pesquisar(api, q=consulta, **parametros)
+            resultados.extend(serpapi.normalizar_resultados(dados, api))
+        resumo = _enviar_para_valida(alvo, resultados, api)
+        _salvar_status_vazamento(
+            user_id, {**base, "estado": "ok", "resumo": resumo, "fim": time.time()}
+        )
+    except Exception as erro:
+        logger.exception("Falha na busca de vazamentos (%s)", api)
+        _salvar_status_vazamento(
+            user_id,
+            {**base, "estado": "erro", "erro": str(erro)[:300], "fim": time.time()},
+        )
+
+
 @app.post(
     "/buscar-vazamentos",
     response_class=HTMLResponse,
@@ -1851,6 +1915,7 @@ def salvar_config_vazamentos(
 )
 async def buscar_vazamentos(
     request: Request,
+    tarefas: BackgroundTasks,
     consentimento: str = Form(""),
     target_user_id: int = Form(0),
     api: str = Form("google_images_light"),
@@ -1877,30 +1942,30 @@ async def buscar_vazamentos(
     if not consultas:
         return erro("Cadastre ao menos um termo ou site para pesquisar.")
 
+    atual = _status_vazamento(target_user_id)
+    if atual.get("estado") == "rodando" and (
+        time.time() - atual.get("iniciado", 0) < TEMPO_MAXIMO_BUSCA_VAZAMENTO
+    ):
+        return erro("Já existe uma busca de vazamentos em andamento para esta criadora.")
+
     parametros = {"gl": "br", "hl": "pt"}
     if periodo:
         parametros["tbs"] = f"qdr:{periodo}"
-    resultados = []
-    try:
-        for consulta in consultas:
-            dados = await run_in_threadpool(
-                serpapi.pesquisar, api, q=consulta, **parametros
-            )
-            resultados.extend(serpapi.normalizar_resultados(dados, api))
-    except serpapi.ErroSerpApi as e:
-        logger.exception("Falha na busca de vazamentos (%s)", api)
-        return erro(str(e))
-
-    resumo_busca = await run_in_threadpool(
-        _enviar_para_valida, alvo, resultados, api
+    _salvar_status_vazamento(
+        target_user_id,
+        {"estado": "rodando", "iniciado": time.time(), "consultas": consultas, "api": api},
+    )
+    tarefas.add_task(
+        _executar_busca_vazamentos, alvo, api, consultas, parametros
     )
     return _contexto_serpapi(
         request,
         target_user_id,
-        pesquisa_realizada=True,
-        resumo_busca=resumo_busca,
+        mensagem=(
+            "Busca iniciada em segundo plano. Pode demorar alguns minutos; "
+            "esta página atualiza sozinha e os candidatos chegam à Valida."
+        ),
         api_ativa=api,
-        query=" | ".join(consultas),
     )
 
 
