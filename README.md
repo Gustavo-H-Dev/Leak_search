@@ -229,3 +229,6 @@ Consulte a documentação da
 [Instagram Profile API](https://serpapi.com/instagram-profile-api) e da
 [Instagram Popular API](https://serpapi.com/instagram-popular-api). As consultas
 podem consumir créditos da mesma conta SerpApi configurada para a página anterior.
+### Busca de vazamentos
+
+Em `/busca-web` (SerpApi), o card "Busca de vazamentos" combina nome e arroba da criadora com termos (ex.: vazado, leaked, naked) e sites (ex.: erome.com) editáveis, agrupados com `OR` em 1 a 3 consultas (1 crédito cada, só a primeira página). O custo é exibido antes de rodar. O período (dia, semana, mês, ano) é opcional; o padrão é "Qualquer data". Os resultados seguem para a Valida.
