@@ -24,19 +24,19 @@
     {% else %}
     <p class="sucesso">Nenhum ponto de atenção encontrado.</p>
     {% endif %}
-    <table>
-      <thead><tr><th>Status</th><th>Total</th><th>Atenção</th><th>Possíveis</th><th>Diferentes</th><th>Sem referência</th><th>Semelhança média (0–100)</th></tr></thead>
-      <tbody>
+    <div class="analise-status">
       {% for chave, nome in status_nomes.items() %}
-        <tr>
-          <td>{{ nome }}</td>
-          <td>{{ r.por_status[chave] }}</td>
-          {% for nivel in ["atencao", "possivel", "diferente", "sem_referencia"] %}<td>{{ r.niveis[chave].get(nivel, 0) }}</td>{% endfor %}
-          <td>{{ r.media_pontuacao[chave] if r.media_pontuacao[chave] is not none else "—" }}</td>
-        </tr>
+      <article>
+        <h3>{{ nome }} · {{ r.por_status[chave] }}</h3>
+        <dl>
+          {% for nivel, rotulo in [("atencao", "Atenção"), ("possivel", "Possíveis"), ("diferente", "Diferentes"), ("sem_referencia", "Sem referência")] %}
+          <div><dt>{{ rotulo }}</dt><dd>{{ r.niveis[chave].get(nivel, 0) }}</dd></div>
+          {% endfor %}
+          <div><dt>Semelhança média (0–100)</dt><dd>{{ r.media_pontuacao[chave] if r.media_pontuacao[chave] is not none else "—" }}</dd></div>
+        </dl>
+      </article>
       {% endfor %}
-      </tbody>
-    </table>
+    </div>
     <p><strong>Principais domínios vazados:</strong>
       {% for dominio, qtd in r.dominios.leaked %}{{ dominio }} ({{ qtd }}){% if not loop.last %}, {% endif %}{% else %}—{% endfor %}
     </p>
