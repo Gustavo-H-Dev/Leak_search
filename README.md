@@ -240,3 +240,5 @@ Em `/busca-web` > Instagram, "Importar posts oficiais" consulta o perfil seguind
 ### Análise dos dados
 
 `/analise` (só admin) resume, por criadora, candidatos por status e nível de semelhança, falta de hash/referências, domínios mais frequentes e alertas de calibração (ex.: vazados confirmados caindo em "Diferentes"). Serve para acompanhar a qualidade da busca sem acessar o banco.
+
+A busca de vazamentos roda em segundo plano (o plano gratuito do Render é lento e a requisição poderia expirar): o card mostra "em andamento", atualiza sozinho e exibe o resumo final ou o erro.

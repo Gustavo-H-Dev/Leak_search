@@ -194,3 +194,22 @@ def test_analise_aponta_vazados_em_diferentes():
     assert relatorio["niveis"]["leaked"] == {"diferente": 3}
     assert relatorio["sem_hash"] == 1
     assert any("Muitos vazados" in a for a in relatorio["alertas"])
+
+
+def test_busca_de_vazamentos_em_segundo_plano_registra_status(tmp_path):
+    from app import main
+
+    with patch.object(db, "CAMINHO_DB", tmp_path / "u.db"):
+        db.iniciar_banco()
+        uid = db.criar_usuario("ana", "ana@example.com", "hash")
+        falsa = {"images_results": [{"link": "https://x.com/a", "original": "https://x.com/a.jpg", "title": "t"}]}
+        with patch("app.main.serpapi.pesquisar", return_value=falsa), patch(
+            "app.main.candidatos_core.calcular_hashes", return_value={}
+        ):
+            main._executar_busca_vazamentos({"id": uid}, "google_images_light", ["q1", "q2"], {})
+        status = main._status_vazamento(uid)
+        assert status["estado"] == "ok" and status["resumo"]["novos"] == 1
+
+        with patch("app.main.serpapi.pesquisar", side_effect=RuntimeError("falhou")):
+            main._executar_busca_vazamentos({"id": uid}, "google_images_light", ["q1"], {})
+        assert main._status_vazamento(uid)["estado"] == "erro"
