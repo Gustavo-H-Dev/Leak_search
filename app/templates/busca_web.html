@@ -346,8 +346,10 @@
       <form class="search-form" method="post" action="/instagram/importar-oficiais">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <p><strong>Importar posts oficiais</strong> (1 crédito): registra as publicações retornadas pelo perfil como oficiais, para não aparecerem na Valida, e guarda só o hash das imagens como referência. Sem usuário, usa o Instagram cadastrado como site oficial da criadora.</p>
+        <p><strong>Importar posts oficiais</strong> (1 crédito por página): percorre as páginas do perfil e registra as publicações retornadas pelo perfil como oficiais, para não aparecerem na Valida, e guarda só o hash das imagens como referência. Sem usuário, usa o Instagram cadastrado como site oficial da criadora.</p>
         <input name="username" placeholder="Usuário (opcional)" maxlength="31">
+        <label class="field-label" for="instagram-paginas">Máximo de páginas (cada uma custa 1 crédito)</label>
+        <input id="instagram-paginas" type="number" name="max_paginas" value="30" min="1" max="30">
         <label class="consent-control">
           <input type="checkbox" name="consentimento" value="on" required>
           <span>Autorizo o envio do usuário à SerpApi.</span>

@@ -1867,6 +1867,8 @@ async def buscar_vazamentos(
     )
 
 
+MAXIMO_PAGINAS_INSTAGRAM = 30
+
 INSTAGRAM_ENGINE_NAMES = {
     "instagram_profile": "Instagram Profile API",
     "instagram_popular": "Instagram Popular API",
@@ -1896,6 +1898,7 @@ async def importar_posts_oficiais_instagram(
     consentimento: str = Form(""),
     target_user_id: int = Form(0),
     username: str = Form(""),
+    max_paginas: int = Form(MAXIMO_PAGINAS_INSTAGRAM),
 ):
     """Registra os posts do Instagram oficial da criadora (URL + hash)."""
     alvo = _usuario_alvo_busca(request, target_user_id)
@@ -1905,6 +1908,7 @@ async def importar_posts_oficiais_instagram(
         return _contexto_instagram(
             request, erro="Confirme o envio da consulta à SerpApi.", **contexto
         )
+    posts, paginas, token = [], 0, ""
     try:
         usuario = username.strip() or next(
             (
@@ -1923,13 +1927,33 @@ async def importar_posts_oficiais_instagram(
                 "Cadastre o Instagram oficial da criadora ou informe o usuário."
             )
         usuario = serpapi.validar_usuario_instagram(usuario)
-        dados = await run_in_threadpool(
-            serpapi.pesquisar, "instagram_profile", profile_id=usuario
-        )
+        max_paginas = max(1, min(max_paginas, MAXIMO_PAGINAS_INSTAGRAM))
+        vistos = set()
+        while paginas < max_paginas:
+            parametros = {"profile_id": usuario}
+            if token:
+                parametros["next_page_token"] = token
+            dados = await run_in_threadpool(
+                serpapi.pesquisar, "instagram_profile", **parametros
+            )
+            paginas += 1
+            _, da_pagina = serpapi.normalizar_perfil_instagram(dados)
+            novos = [p for p in da_pagina if p["link"] not in vistos]
+            vistos.update(p["link"] for p in novos)
+            posts.extend(novos)
+            paginacao = dados.get("serpapi_pagination")
+            proximo = paginacao.get("next_page_token") if isinstance(paginacao, dict) else ""
+            if not novos or not isinstance(proximo, str) or not proximo:
+                token = ""
+                break
+            token = proximo
     except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
-        return _contexto_instagram(request, erro=str(erro), **contexto)
+        if not posts:
+            return _contexto_instagram(request, erro=str(erro), **contexto)
+        aviso_parcial = f"Importação interrompida: {erro}"
+    else:
+        aviso_parcial = ""
 
-    perfil, posts = serpapi.normalizar_perfil_instagram(dados)
     if not posts:
         return _contexto_instagram(
             request,
@@ -1953,8 +1977,11 @@ async def importar_posts_oficiais_instagram(
     return _contexto_instagram(
         request,
         mensagem=(
-            f"{len(posts)} publicações de @{usuario} registradas como oficiais; "
-            "candidatos pendentes iguais foram marcados como oficiais."
+            f"{len(posts)} publicações de @{usuario} registradas como oficiais "
+            f"({paginas} crédito(s)); candidatos pendentes iguais foram marcados "
+            "como oficiais."
+            + (" Ainda há mais páginas: aumente o máximo de páginas." if token else "")
+            + (f" {aviso_parcial}" if aviso_parcial else "")
         ),
         username=usuario,
         **contexto,

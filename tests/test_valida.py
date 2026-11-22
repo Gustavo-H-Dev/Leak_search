@@ -88,6 +88,44 @@ class ValidaTest(unittest.TestCase):
         )
         self.assertEqual((resumo["oficiais"], resumo["novos"]), (1, 1))
 
+    def test_importacao_instagram_percorre_todas_as_paginas(self):
+        import asyncio
+        from app.main import importar_posts_oficiais_instagram
+
+        def pagina(codigo, proximo):
+            dados = {
+                "profile_results": {
+                    "username": "ana",
+                    "posts": [{"shortcode": codigo, "media_captions": ["x"]}],
+                }
+            }
+            if proximo:
+                dados["serpapi_pagination"] = {"next_page_token": proximo}
+            return dados
+
+        chamadas = []
+
+        def falsa(engine, **parametros):
+            chamadas.append(parametros)
+            return pagina("A1", "t2") if "next_page_token" not in parametros else pagina("B2", "")
+
+        request = criar_request(self.user_id, role="admin")
+        with patch("app.main.serpapi.pesquisar", side_effect=falsa), patch(
+            "app.main._contexto_instagram", side_effect=lambda r, **v: v
+        ):
+            resposta = asyncio.run(
+                importar_posts_oficiais_instagram(
+                    request, "on", self.user_id, "ana", 30
+                )
+            )
+        self.assertEqual(len(chamadas), 2)
+        self.assertEqual(chamadas[1]["next_page_token"], "t2")
+        self.assertEqual(
+            sorted(h["url"] for h in db.listar_hashes_oficiais(self.user_id)),
+            ["https://www.instagram.com/p/A1", "https://www.instagram.com/p/B2"],
+        )
+        self.assertIn("2 publicações", resposta["mensagem"])
+
     def test_pagina_ordena_atencao_possiveis_e_diferentes(self):
         user_id = self.user_id
         referencia = imagens.calcular_phash(_png("#cc5599"))
