@@ -97,7 +97,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
         }
         for alvo, retorno in {
             "obter_usuario_por_id": usuario,
-            "listar_usuarios_com_perfil_busca": [],
+            "listar_usuarios_para_busca": [],
             "listar_fotos_busca": [],
             "listar_sites_vazados": [],
             "listar_sites_oficiais_usuario": [],

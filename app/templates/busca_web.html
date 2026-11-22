@@ -16,11 +16,11 @@
     <select id="search-target" name="target_user_id" required>
       {% for usuario in target_users %}
       <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
-        {{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}
+        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — sem perfil de busca (usa o usuário){% endif %}
       </option>
       {% endfor %}
     </select>
-    {% if not target_users %}<p>Nenhum usuário completou o perfil de busca ainda.</p>{% endif %}
+    {% if not target_users %}<p>Nenhuma criadora cadastrada ainda.</p>{% endif %}
     <button type="submit">Selecionar usuário</button>
   </form>
   {% else %}
@@ -29,8 +29,12 @@
 
   {% if not perfil_busca_completo %}
   <p class="api-status api-status-missing">
+    {% if current_user.role == "admin" and target_user.id != current_user.id %}
+    Esta criadora ainda não preencheu nome público e arroba; a busca usará o nome de usuário.
+    {% else %}
     Complete seu nome público e arroba antes de pesquisar.
     <a href="/perfil-busca">Configurar perfil de busca</a>.
+    {% endif %}
   </p>
   {% else %}
   <p class="api-status api-status-ready">Termos da busca: <strong>{{ query_perfil }}</strong></p>

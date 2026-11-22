@@ -334,7 +334,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             patch("app.main.db.listar_fotos_busca", return_value=[]),
             patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
             patch("app.main.db.listar_sites_vazados", return_value=[]),
-            patch("app.main.db.listar_usuarios_com_perfil_busca", return_value=[]),
+            patch("app.main.db.listar_usuarios_para_busca", return_value=[]),
             patch("app.main.serpapi.pesquisar", return_value={"images_results": []}) as pesquisar,
         ):
             await buscar_serpapi(
