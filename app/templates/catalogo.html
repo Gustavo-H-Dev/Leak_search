@@ -31,28 +31,7 @@
 {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
 <section class="creator-create">
-  <details class="creator-create-details">
-    <summary class="button button-primary">Novo</summary>
-    <div class="creator-create-body">
-      <p>O nome é obrigatório. A criadora pode associar a conta durante o cadastro usando o mesmo e-mail.</p>
-      <form method="post" action="/criadoras" enctype="multipart/form-data">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="field-label" for="creator-name">Nome da criadora</label>
-        <input id="creator-name" name="nome" placeholder="Nome da criadora" required>
-        <label class="field-label" for="creator-email">E-mail da criadora (opcional)</label>
-        <input id="creator-email" name="email" type="email" placeholder="criadora@exemplo.com">
-        <label class="field-label" for="creator-handle">Instagram (@) (opcional)</label>
-        <input id="creator-handle" name="arroba" maxlength="31" placeholder="@usuario">
-        <label class="field-label" for="creator-site-name">Nome do site oficial (opcional)</label>
-        <input id="creator-site-name" name="site_nome" maxlength="80" placeholder="Site oficial">
-        <label class="field-label" for="creator-site-url">URL do site oficial (opcional)</label>
-        <input id="creator-site-url" name="site_url" type="url" placeholder="https://exemplo.com/perfil">
-        <label class="field-label" for="creator-photo">Foto (opcional)</label>
-        <input id="creator-photo" type="file" name="arquivo" accept="image/*">
-        <button type="submit">Cadastrar criadora</button>
-      </form>
-    </div>
-  </details>
+  <a class="button button-primary" href="/criadoras/nova">Novo</a>
 </section>
 
 <section class="creators-list">
@@ -77,108 +56,31 @@
       </div>
       <div class="creator-cell-name" role="cell">
         <h3>{{ criadora.nome }}</h3>
+        {% if criadora.email %}<p class="creator-email">{{ criadora.email }}</p>{% endif %}
+        {% if criadora.user_id %}
+        <p class="api-status api-status-ready">
+          Conta associada: {{ criadora.username }} ·
+          {{ "e-mail confirmado" if criadora.email_verified else "e-mail pendente" }}
+        </p>
+        {% else %}
+        <p class="api-status api-status-missing">
+          {{ "Aguardando a criadora criar a conta usando este e-mail." if criadora.email else "Perfil sem conta associada." }}
+        </p>
+        {% endif %}
       </div>
       <div class="creator-cell-handle" role="cell">
         {% if criadora.handle %}<a href="https://instagram.com/{{ criadora.handle }}">@{{ criadora.handle }}</a>{% else %}<span class="muted">—</span>{% endif %}
       </div>
       <div class="creator-cell-action" role="cell">
-        <details class="creator-details">
-          <summary class="button button-secondary">Detalhes</summary>
-          <div class="creator-details-body">
-            {% if criadora.email %}<p>E-mail de associação: {{ criadora.email }}</p>{% endif %}
-            {% if criadora.user_id %}
-            <p class="api-status api-status-ready">
-              Conta associada: {{ criadora.username }} ·
-              {{ "e-mail confirmado" if criadora.email_verified else "e-mail pendente" }}
-            </p>
-            {% if criadora.usuario %}{{ conta_usuario(criadora.usuario) }}{% endif %}
-            {% else %}
-            <p class="api-status api-status-missing">
-              {{ "Aguardando a criadora criar a conta usando este e-mail." if criadora.email else "Perfil sem conta associada." }}
-            </p>
-            <form class="creator-child-form" method="post" action="/criadoras/{{ criadora.id }}/editar">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <label class="field-label" for="edit-creator-name-{{ criadora.id }}">Nome</label>
-              <input id="edit-creator-name-{{ criadora.id }}" name="nome" value="{{ criadora.nome }}" maxlength="80" required>
-              <label class="field-label" for="edit-creator-email-{{ criadora.id }}">E-mail para associação</label>
-              <input id="edit-creator-email-{{ criadora.id }}" name="email" type="email" value="{{ criadora.email or '' }}">
-              <label class="field-label" for="edit-creator-handle-{{ criadora.id }}">Instagram (@)</label>
-              <input id="edit-creator-handle-{{ criadora.id }}" name="arroba" value="{{ criadora.handle or '' }}" maxlength="31">
-              <button type="submit">Atualizar perfil</button>
-            </form>
-            {% endif %}
-
-            <section class="creator-children">
-              <h4>Site oficial</h4>
-              {% if criadora.sites_oficiais %}
-              <div class="official-page-list">
-                {% for site in criadora.sites_oficiais %}
-                <article class="official-page-item">
-                  <form class="official-page-edit" method="post" action="/sites-oficiais/{{ site.id }}/editar">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <label class="field-label" for="site-creator-{{ site.id }}">Criadora</label>
-                    <select id="site-creator-{{ site.id }}" name="criadora_id" required>
-                      {% for outra in criadoras %}
-                      <option value="{{ outra.id }}" {% if site.criadora_id == outra.id %}selected{% endif %}>
-                        {{ outra.nome }}
-                      </option>
-                      {% endfor %}
-                    </select>
-                    <label class="field-label" for="site-name-{{ site.id }}">Nome da página</label>
-                    <input id="site-name-{{ site.id }}" name="nome" value="{{ site.nome }}" maxlength="80" required>
-                    <label class="field-label" for="site-url-{{ site.id }}">URL exata</label>
-                    <input id="site-url-{{ site.id }}" name="url" type="url" value="{{ site.url }}" required>
-                    <button type="submit">Salvar</button>
-                  </form>
-                  <form method="post" action="/sites-oficiais/{{ site.id }}/excluir" onsubmit="return confirm('Remover esta página oficial do catálogo?');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="button-danger" type="submit">Remover página</button>
-                  </form>
-                </article>
-                {% endfor %}
-              </div>
-              {% else %}
-              <p>Nenhum site oficial cadastrado.</p>
-              {% endif %}
-              <form class="creator-child-form" method="post" action="/sites-oficiais">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="criadora_id" value="{{ criadora.id }}">
-                <label class="field-label" for="new-site-name-{{ criadora.id }}">Adicionar site</label>
-                <input id="new-site-name-{{ criadora.id }}" name="nome" maxlength="80" value="Site oficial" required>
-                <label class="field-label" for="new-site-url-{{ criadora.id }}">URL</label>
-                <input id="new-site-url-{{ criadora.id }}" name="url" type="url" placeholder="https://exemplo.com/perfil" required>
-                <button type="submit">Adicionar site</button>
-              </form>
-            </section>
-
-            <section class="creator-children">
-              <h4>Cadastros e fotos ({{ criadora.conteudos|length }})</h4>
-              {% if criadora.conteudos %}
-              <ul class="creator-content-list">
-                {% for conteudo in criadora.conteudos %}
-                <li>
-                  <img class="mini" src="/arquivos/{{ conteudo.arquivo }}" alt="Foto de {{ criadora.nome }}">
-                  <span>{{ conteudo.nome_original or "Foto cadastrada" }} · {{ conteudo.criado_em }}</span>
-                  <form method="post" action="/conteudos/{{ conteudo.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir este conteúdo? Esta ação não pode ser desfeita.');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="button-danger" type="submit">Excluir</button>
-                  </form>
-                </li>
-                {% endfor %}
-              </ul>
-              {% else %}
-              <p>Nenhuma foto cadastrada.</p>
-              {% endif %}
-              <form class="creator-child-form" method="post" action="/conteudos" enctype="multipart/form-data">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="criadora_id" value="{{ criadora.id }}">
-                <label class="field-label" for="new-photo-{{ criadora.id }}">Adicionar foto (opcional)</label>
-                <input id="new-photo-{{ criadora.id }}" type="file" name="arquivo" accept="image/*" required>
-                <button type="submit">Enviar foto</button>
-              </form>
-            </section>
-          </div>
-        </details>
+        <div class="creator-actions">
+          <a class="button button-secondary" href="/criadoras/{{ criadora.id }}/editar">Editar</a>
+          {% if not criadora.user_id %}
+          <form method="post" action="/criadoras/{{ criadora.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir esta criadora e todo o seu conteúdo? Esta ação não pode ser desfeita.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-danger" type="submit">Excluir</button>
+          </form>
+          {% endif %}
+        </div>
       </div>
     </div>
     {% endfor %}

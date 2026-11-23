@@ -628,6 +628,19 @@ def _voltar_com_erro(mensagem: str):
     return RedirectResponse("/catalogo?erro=" + quote(mensagem), status_code=303)
 
 
+def _voltar_ao_formulario_nova(mensagem: str):
+    return RedirectResponse(
+        "/criadoras/nova?erro=" + quote(mensagem), status_code=303
+    )
+
+
+def _voltar_ao_formulario_edicao(criadora_id: int, mensagem: str):
+    return RedirectResponse(
+        "/criadoras/{}/editar?erro=".format(criadora_id) + quote(mensagem),
+        status_code=303,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(
@@ -935,45 +948,49 @@ async def nova_criadora(
 ):
     nome = nome.strip()
     if not nome:
-        return _voltar_com_erro("Informe o nome da criadora.")
+        return _voltar_ao_formulario_nova("Informe o nome da criadora.")
     if len(nome) > 80:
-        return _voltar_com_erro("O nome da criadora deve ter até 80 caracteres.")
+        return _voltar_ao_formulario_nova(
+            "O nome da criadora deve ter até 80 caracteres."
+        )
 
     email = email.strip() if isinstance(email, str) else ""
     if email:
         try:
             email = autenticacao.validar_email(email)
         except ValueError as erro:
-            return _voltar_com_erro(str(erro))
+            return _voltar_ao_formulario_nova(str(erro))
     handle = ""
     if isinstance(arroba, str) and arroba.strip():
         try:
             handle = serpapi.validar_usuario_instagram(arroba)
         except ValueError as erro:
-            return _voltar_com_erro(str(erro))
+            return _voltar_ao_formulario_nova(str(erro))
 
     url_oficial = None
     if site_url.strip():
         site_nome = site_nome.strip() or "Site oficial"
         if len(site_nome) > 80:
-            return _voltar_com_erro(
+            return _voltar_ao_formulario_nova(
                 "O nome do site deve ter entre 1 e 80 caracteres."
             )
         try:
             url_oficial = sites_oficiais.normalizar_url_pagina(site_url)
         except ValueError as erro:
-            return _voltar_com_erro(str(erro))
+            return _voltar_ao_formulario_nova(str(erro))
 
     imagem_nova = None
     if arquivo and arquivo.filename:
         extensao = Path(arquivo.filename).suffix.lower()
         if extensao not in EXTENSOES_PERMITIDAS:
-            return _voltar_com_erro("Formato não suportado. Use JPG, PNG ou WEBP.")
+            return _voltar_ao_formulario_nova(
+                "Formato não suportado. Use JPG, PNG ou WEBP."
+            )
         try:
             dados = await _ler_imagem(arquivo)
             phash = imagens.calcular_phash(dados)
         except ValueError as erro:
-            return _voltar_com_erro(str(erro))
+            return _voltar_ao_formulario_nova(str(erro))
         imagem_nova = (dados, phash, extensao, arquivo.filename)
 
     try:
@@ -982,14 +999,14 @@ async def nova_criadora(
         else:
             criadora_id = db.criar_criadora(nome)
     except db.INTEGRITY_ERRORS:
-        return _voltar_com_erro(
+        return _voltar_ao_formulario_nova(
             "Já existe um perfil de criadora com esse nome ou e-mail."
         )
     if url_oficial:
         try:
             db.adicionar_site_oficial(criadora_id, site_nome, url_oficial)
         except db.INTEGRITY_ERRORS:
-            return _voltar_com_erro(
+            return _voltar_ao_formulario_nova(
                 "Essa URL já está cadastrada para a criadora selecionada."
             )
     if imagem_nova:
@@ -999,7 +1016,10 @@ async def nova_criadora(
         db.adicionar_conteudo(
             criadora_id, "foto", nome_arquivo, nome_original, [phash]
         )
-    return RedirectResponse("/catalogo", status_code=303)
+    return RedirectResponse(
+        "/usuarios?mensagem=" + quote("Criadora cadastrada com sucesso."),
+        status_code=303,
+    )
 
 
 @app.post("/criadoras/{criadora_id}/editar", dependencies=_admin_csrf())
@@ -1011,33 +1031,96 @@ def editar_criadora(
 ):
     nome = nome.strip()
     if not nome or len(nome) > 80:
-        return _voltar_com_erro("O nome da criadora deve ter entre 1 e 80 caracteres.")
+        return _voltar_ao_formulario_edicao(
+            criadora_id, "O nome da criadora deve ter entre 1 e 80 caracteres."
+        )
     email = email.strip()
     if email:
         try:
             email = autenticacao.validar_email(email)
         except ValueError as erro:
-            return _voltar_com_erro(str(erro))
+            return _voltar_ao_formulario_edicao(criadora_id, str(erro))
     handle = ""
     if arroba.strip():
         try:
             handle = serpapi.validar_usuario_instagram(arroba)
         except ValueError as erro:
-            return _voltar_com_erro(str(erro))
+            return _voltar_ao_formulario_edicao(criadora_id, str(erro))
     try:
         atualizado = db.atualizar_criadora_contato(
             criadora_id, nome, email, handle
         )
     except db.INTEGRITY_ERRORS:
-        return _voltar_com_erro(
-            "Já existe um perfil de criadora com esse nome ou e-mail."
+        return _voltar_ao_formulario_edicao(
+            criadora_id, "Já existe um perfil de criadora com esse nome ou e-mail."
         )
     if not atualizado:
-        return _voltar_com_erro(
-            "Perfil não encontrado ou já associado a uma conta."
+        return _voltar_ao_formulario_edicao(
+            criadora_id, "Perfil não encontrado ou já associado a uma conta."
         )
     return RedirectResponse(
-        "/catalogo?mensagem=" + quote("Perfil de criadora atualizado."),
+        "/usuarios?mensagem=" + quote("Perfil de criadora atualizado."),
+        status_code=303,
+    )
+
+
+@app.get(
+    "/criadoras/nova",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def nova_criadora_formulario(request: Request, erro: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "criadora_form.html",
+        {"criadora": None, "erro": erro},
+    )
+
+
+@app.get(
+    "/criadoras/{criadora_id}/editar",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def editar_criadora_formulario(request: Request, criadora_id: int, erro: str = ""):
+    criadora = db.obter_criadora(criadora_id)
+    if criadora is None:
+        return RedirectResponse(
+            "/usuarios?erro=" + quote("Criadora não encontrada."), status_code=303
+        )
+    conteudos = db.listar_conteudos_criadora(criadora_id)
+    sites = db.listar_sites_oficiais_criadora(criadora_id)
+    criadora = dict(criadora)
+    criadora["conteudos"] = conteudos
+    criadora["sites_oficiais"] = sites
+    return templates.TemplateResponse(
+        request,
+        "criadora_form.html",
+        {"criadora": criadora, "erro": erro},
+    )
+
+
+@app.post("/criadoras/{criadora_id}/excluir", dependencies=_admin_csrf())
+def excluir_criadora(criadora_id: int):
+    try:
+        arquivos = db.excluir_criadora(criadora_id)
+    except ValueError:
+        return _voltar_com_erro(
+            "Criadora associada a uma conta não pode ser excluída."
+        )
+    if arquivos is None:
+        return _voltar_com_erro("Criadora não encontrada.")
+    for nome_arquivo in arquivos:
+        try:
+            (PASTA_OFICIAIS / nome_arquivo).unlink(missing_ok=True)
+        except OSError:
+            logger.exception(
+                "Criadora %s removida do banco, mas o arquivo %s não pôde ser excluído",
+                criadora_id,
+                nome_arquivo,
+            )
+    return RedirectResponse(
+        "/usuarios?mensagem=" + quote("Criadora excluída com sucesso."),
         status_code=303,
     )
 

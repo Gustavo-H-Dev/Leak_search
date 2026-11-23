@@ -1208,6 +1208,33 @@ def listar_sites_oficiais():
         ).fetchall()
 
 
+def listar_sites_oficiais_criadora(criadora_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, criadora_id, nome, url, criado_em
+            FROM sites_oficiais
+            WHERE criadora_id = ?
+            ORDER BY url
+            """,
+            (criadora_id,),
+        ).fetchall()
+
+
+def obter_criadora(criadora_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT c.id, c.nome, c.email, c.handle, c.user_id,
+                   u.username, u.email_verified
+            FROM criadoras c
+            LEFT JOIN users u ON u.id = c.user_id
+            WHERE c.id = ?
+            """,
+            (criadora_id,),
+        ).fetchone()
+
+
 def atualizar_site_oficial(site_id, criadora_id, nome, url):
     with conexao() as conn:
         cur = conn.execute(
@@ -1259,6 +1286,19 @@ def listar_conteudos(user_id=None):
         return conn.execute(consulta, parametros).fetchall()
 
 
+def listar_conteudos_criadora(criadora_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, criadora_id, tipo, arquivo, nome_original, criado_em
+            FROM conteudos
+            WHERE criadora_id = ?
+            ORDER BY id DESC
+            """,
+            (criadora_id,),
+        ).fetchall()
+
+
 def obter_conteudo(conteudo_id):
     with conexao() as conn:
         return conn.execute(
@@ -1281,6 +1321,37 @@ def excluir_conteudo(conteudo_id):
         conn.execute("DELETE FROM hashes WHERE conteudo_id = ?", (conteudo_id,))
         conn.execute("DELETE FROM conteudos WHERE id = ?", (conteudo_id,))
         return conteudo["arquivo"]
+
+
+def excluir_criadora(criadora_id):
+    """Remove a criadora e seus sub-recursos. Retorna os arquivos a excluir."""
+    with conexao() as conn:
+        criadora = conn.execute(
+            "SELECT id, user_id FROM criadoras WHERE id = ?", (criadora_id,)
+        ).fetchone()
+        if criadora is None:
+            return None
+        if criadora["user_id"] is not None:
+            raise ValueError("criadora associada a conta")
+
+        arquivos = [
+            linha["arquivo"]
+            for linha in conn.execute(
+                "SELECT arquivo FROM conteudos WHERE criadora_id = ?", (criadora_id,)
+            ).fetchall()
+        ]
+        conteudo_ids = [
+            linha["id"]
+            for linha in conn.execute(
+                "SELECT id FROM conteudos WHERE criadora_id = ?", (criadora_id,)
+            ).fetchall()
+        ]
+        for conteudo_id in conteudo_ids:
+            conn.execute("DELETE FROM hashes WHERE conteudo_id = ?", (conteudo_id,))
+        conn.execute("DELETE FROM conteudos WHERE criadora_id = ?", (criadora_id,))
+        conn.execute("DELETE FROM sites_oficiais WHERE criadora_id = ?", (criadora_id,))
+        conn.execute("DELETE FROM criadoras WHERE id = ?", (criadora_id,))
+        return arquivos
 
 
 def listar_hashes():
