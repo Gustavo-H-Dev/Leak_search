@@ -426,28 +426,50 @@
       background: var(--surface);
     }
     .creator-card h3 { margin: 0; font-size: 1.1rem; }
-    .creator-grid-header,
-    .creator-grid-row {
+    .creator-table {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .creator-table-head,
+    .creator-table-row {
       display: grid;
-      grid-template-columns: 80px minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-columns: 88px minmax(0, 1fr) minmax(0, 1fr) auto;
       align-items: center;
       gap: .8rem;
     }
-    .creator-grid-header {
-      padding: 0 .25rem .5rem;
+    .creator-table-head {
+      padding: .7rem 1.25rem;
+      background: var(--surface-raised, #151319);
       color: var(--muted);
-      font-size: .78rem;
-      font-weight: 600;
+      font-size: .76rem;
+      font-weight: 650;
       text-transform: uppercase;
       letter-spacing: .04em;
     }
-    .creator-photo-cell { display: flex; justify-content: flex-start; }
+    .creator-table-row {
+      padding: .9rem 1.25rem;
+      border-top: 1px solid var(--border);
+    }
+    .creator-table-row:hover { background: rgba(255, 255, 255, .015); }
+    .creator-table-row > div { min-width: 0; }
+    .creator-cell-name h3 {
+      margin: 0;
+      font-size: 1rem;
+      overflow-wrap: anywhere;
+    }
+    .creator-cell-handle { overflow-wrap: anywhere; }
+    .creator-cell-handle a { color: var(--pink); text-decoration: none; }
+    .creator-cell-handle a:hover { text-decoration: underline; }
+    .creator-cell-action { justify-self: end; }
     .creator-photo {
       width: 80px;
       height: 80px;
       object-fit: cover;
       border-radius: 10px;
       border: 1px solid var(--border);
+      display: block;
     }
     .creator-photo-placeholder {
       display: flex;
@@ -460,21 +482,21 @@
       color: var(--muted);
       background: #151319;
     }
-    .creator-handle-cell { overflow-wrap: anywhere; }
-    .creator-handle-cell a { color: var(--pink); text-decoration: none; }
-    .creator-handle-cell a:hover { text-decoration: underline; }
-    .creator-details { margin-top: .85rem; }
+    .creator-details { position: relative; }
     .creator-details > summary {
       cursor: pointer;
       list-style: none;
-      display: inline-block;
-      color: var(--muted);
-      font-size: .85rem;
-      font-weight: 600;
     }
     .creator-details > summary::-webkit-details-marker { display: none; }
     .creator-details > summary::marker { display: none; content: ""; }
-    .creator-details[open] > summary { margin-bottom: .5rem; color: var(--text); }
+    .creator-details-body {
+      margin-top: 1rem;
+      padding: 1.1rem;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #151319;
+    }
+    .creator-details-body > p:first-child { margin-top: 0; }
     .creator-children { margin-top: 1.25rem; }
     .creator-children h4 { margin: 0 0 .65rem; }
     .creator-child-form {
@@ -638,17 +660,22 @@
       .creator-content-list li { align-items: flex-start; flex-wrap: wrap; }
       .creator-content-list li span { flex-basis: calc(100% - 80px); }
       .creator-grid-header { display: none; }
-      .creator-grid-row {
-        grid-template-columns: 64px minmax(0, 1fr);
+      .creator-table-head { display: none; }
+      .creator-table-row {
+        grid-template-columns: 64px minmax(0, 1fr) auto;
         grid-template-areas:
-          "photo name"
-          "photo handle";
-        gap: .5rem .8rem;
+          "photo name action"
+          "photo handle action";
+        gap: .4rem .8rem;
+        padding: .9rem 1rem;
+        align-items: start;
       }
-      .creator-photo-cell { grid-area: photo; }
-      .creator-name-cell { grid-area: name; align-self: end; }
-      .creator-handle-cell { grid-area: handle; align-self: start; }
+      .creator-cell-photo { grid-area: photo; }
+      .creator-cell-name { grid-area: name; align-self: end; }
+      .creator-cell-handle { grid-area: handle; align-self: start; }
+      .creator-cell-action { grid-area: action; align-self: center; }
       .creator-photo, .creator-photo-placeholder { width: 64px; height: 64px; }
+      .creator-details-body { padding: .9rem; }
     }
 
     @media (max-width: 390px) {
