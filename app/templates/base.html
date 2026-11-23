@@ -71,7 +71,7 @@
       letter-spacing: .04em;
     }
 
-    .main-nav { display: flex; align-items: center; gap: .35rem; }
+    .main-nav { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: .35rem; min-width: 0; }
 
     .main-nav a {
       padding: .62rem .9rem;
@@ -439,6 +439,15 @@
     }
     .creator-content-list li span { flex: 1; overflow-wrap: anywhere; font-size: .85rem; }
     .creator-content-list form { margin: 0; }
+    .creator-card, .official-page-item { min-width: 0; overflow-wrap: anywhere; }
+    .user-details { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: #151319; }
+    .user-details dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: .75rem; margin: 0; }
+    .user-details dt { color: var(--muted); font-size: .75rem; }
+    .user-details dd { margin: .2rem 0 0; overflow-wrap: anywhere; font-size: .88rem; }
+    .user-details > p { margin: .8rem 0 0; }
+    .user-role-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; margin: 1rem 0 0; }
+    .user-role-form label { flex-basis: 100%; margin: 0; }
+    .user-role-form select, .user-role-form button { margin: 0; max-width: 100%; }
     .api-status { padding: .75rem 1rem; border: 1px solid var(--border); border-radius: 9px; font-size: .85rem; }
     .api-status-ready { border-color: #3d6652; color: #a9e3be; background: #192a21; }
     .api-status-missing { border-color: #765d34; color: #f0d7a4; background: #2e281b; }
@@ -504,12 +513,6 @@
     tr:last-child td { border-bottom: 0; }
     img.mini { height: 60px; border-radius: 6px; }
     form { margin: 1rem 0; }
-    .table-actions { white-space: nowrap; }
-    .table-actions form { margin: 0; }
-    .table-actions form { display: flex; align-items: center; gap: .5rem; }
-    .table-actions select { width: auto; margin: 0; }
-    .table-actions button { margin: 0; }
-    .users-table-wrap { overflow-x: auto; }
     .sr-only {
       position: absolute;
       width: 1px;
@@ -553,7 +556,8 @@
       .header-inner { min-height: 68px; gap: .5rem; }
       .brand { gap: .5rem; font-size: .84rem; }
       .brand-mark { width: 31px; height: 31px; }
-      .main-nav { gap: 0; }
+      .header-inner { flex-wrap: wrap; justify-content: center; padding: .75rem 0; }
+      .main-nav { width: 100%; justify-content: center; gap: 0; }
       .main-nav a { padding: .55rem .58rem; font-size: .78rem; }
       .nav-user { padding-inline: .35rem; font-size: .75rem; }
       .nav-logout button { padding-inline: .55rem; font-size: .75rem; }
@@ -629,13 +633,12 @@
         {% if current_user %}
           <a href="/">Início</a>
           {% if current_user.role == "admin" %}
-          <a href="/catalogo">Criadoras</a>
-          <a href="/comparar">Comparar</a>
+          <a href="/usuarios">Criadoras e usuários</a>
           <a href="/busca-web">Busca na web</a>
           {% endif %}
           <a href="/valida">Valida</a>
           <a href="/perfil-busca">Meu perfil</a>
-          {% if current_user.role == "admin" %}<a href="/analise">Análise</a><a href="/usuarios">Usuários</a>{% endif %}
+          {% if current_user.role == "admin" %}<a href="/analise">Análise</a>{% endif %}
           <a href="/alterar-senha">Senha</a>
           <span class="nav-user">{{ current_user.username }}</span>
           <form class="nav-logout" method="post" action="/logout">

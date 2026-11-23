@@ -9,6 +9,6 @@ app/
     catalogo.html    cadastro de criadoras e fotos
     perfil_busca.html perfil público e fotos privadas de busca
     busca_web.html   busca na web unificada (SerpApi, Google Vision, Instagram)
-    comparar.html    envio da imagem suspeita
+    serpapi.html     buscas pessoais e revisão dos resultados
 compose.yaml         (alterado)
 requirements.txt     (alterado)

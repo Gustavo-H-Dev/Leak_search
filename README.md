@@ -59,8 +59,10 @@ cp .env.example .env
   associada a um perfil existente com o mesmo e-mail, ou cria um perfil novo.
   Administradores também podem cadastrar perfis sem conta. Nome e arroba são
   autodeclarados.
-- A página `/usuarios` e o catálogo de criadoras são administrados por
-  administradores. Catálogo, comparação e buscas também são restritos a
+- A tela de criadoras e usuários, disponível em `/usuarios` e `/catalogo`,
+  é restrita a administradores. Ela reúne contas e perfis associados, incluindo
+  contas ou perfis ainda sem associação, e permite alterar o perfil de outras
+  contas para administrador ou criadora. Catálogo, comparação e buscas são restritos a
   administradores; contas de criadoras não têm acesso aos arquivos, catálogo ou
   ferramentas de busca.
 - Fotos de busca ficam em armazenamento privado, separadas dos arquivos

@@ -640,19 +640,6 @@ def saude():
     return {"status": "ok"}
 
 
-@app.get("/usuarios", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])
-def usuarios(request: Request, erro: str = "", mensagem: str = ""):
-    return templates.TemplateResponse(
-        request,
-        "usuarios.html",
-        {
-            "usuarios": db.listar_usuarios(),
-            "erro": erro,
-            "mensagem": mensagem,
-        },
-    )
-
-
 @app.post(
     "/usuarios/{usuario_id}/perfil",
     dependencies=[Depends(exigir_admin), *_csrf()],
@@ -833,12 +820,20 @@ def excluir_site_oficial_usuario(request: Request, site_id: int):
     response_class=HTMLResponse,
     dependencies=[Depends(exigir_admin)],
 )
+@app.get(
+    "/usuarios",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
 def catalogo(request: Request, erro: str = "", mensagem: str = ""):
     sites_oficiais_cadastrados = db.listar_sites_oficiais()
     conteudos_cadastrados = db.listar_conteudos()
+    usuarios = db.listar_usuarios()
+    usuarios_por_id = {usuario["id"]: usuario for usuario in usuarios}
     criadoras = []
     for registro in db.listar_criadoras():
         criadora = dict(registro)
+        criadora["usuario"] = usuarios_por_id.get(criadora.get("user_id"))
         criadora["sites_oficiais"] = [
             site
             for site in sites_oficiais_cadastrados
@@ -852,6 +847,9 @@ def catalogo(request: Request, erro: str = "", mensagem: str = ""):
         criadoras.append(criadora)
     contexto = {
         "criadoras": criadoras,
+        "usuarios_sem_criadora": [
+            usuario for usuario in usuarios if not usuario["criadora_id"]
+        ],
         "sites_sem_criadora": [
             site for site in sites_oficiais_cadastrados if not site["criadora_id"]
         ],
@@ -1081,34 +1079,6 @@ def excluir_conteudo(conteudo_id: int):
 
     mensagem = quote("Conteúdo excluído com sucesso.")
     return RedirectResponse("/catalogo?mensagem=" + mensagem, status_code=303)
-
-
-@app.get(
-    "/comparar",
-    response_class=HTMLResponse,
-    dependencies=[Depends(exigir_admin)],
-)
-def comparar_formulario(request: Request):
-    return templates.TemplateResponse(
-        request, "comparar.html", {"resultados": None, "erro": ""}
-    )
-
-
-@app.post("/comparar", response_class=HTMLResponse, dependencies=_admin_csrf())
-async def comparar(request: Request, arquivo: UploadFile = File(...)):
-    try:
-        dados = await _ler_imagem(arquivo)
-        phash = imagens.calcular_phash(dados)
-    except ValueError as erro:
-        return templates.TemplateResponse(
-            request, "comparar.html", {"resultados": None, "erro": str(erro)}
-        )
-    resultados = imagens.melhores_correspondencias(phash, db.listar_hashes())
-    return templates.TemplateResponse(
-        request,
-        "comparar.html",
-        {"resultados": resultados, "erro": "", "nome_arquivo": arquivo.filename},
-    )
 
 
 def _referencias_do_usuario(alvo):

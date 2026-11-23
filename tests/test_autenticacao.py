@@ -195,8 +195,18 @@ class AutenticacaoTest(unittest.TestCase):
                     "cliente_teste",
                     "cliente@example.com",
                     autenticacao.hash_senha("senha-cliente-teste-forte"),
+                    "Perfil Vinculado",
+                    "perfil_vinculado",
                 )
                 db.confirmar_email(cliente_id)
+                pendente_id = db.criar_usuario(
+                    "pendente",
+                    "pendente@example.com",
+                    autenticacao.hash_senha("senha-cliente-teste-forte"),
+                    "Perfil Pendente",
+                    "perfil_pendente",
+                )
+                db.criar_criadora_com_contato("Perfil sem conta", "semconta@example.com")
 
                 with TestClient(app) as cliente:
                     login = cliente.get("/login")
@@ -252,6 +262,7 @@ class AutenticacaoTest(unittest.TestCase):
                     )
                     self.assertEqual(resposta_login.status_code, 303)
                     pagina_usuarios = admin.get("/usuarios")
+                    pagina_catalogo = admin.get("/catalogo")
                     token_csrf = re.search(
                         rb'name="csrf_token" value="([^"]+)"',
                         pagina_usuarios.content,
@@ -266,14 +277,36 @@ class AutenticacaoTest(unittest.TestCase):
                         data={"role": "cliente", "csrf_token": token_csrf},
                         follow_redirects=False,
                     )
+                    sem_csrf = admin.post(
+                        f"/usuarios/{pendente_id}/perfil",
+                        data={"role": "admin"},
+                        follow_redirects=False,
+                    )
+                    pendente_atualizado = admin.post(
+                        f"/usuarios/{pendente_id}/perfil",
+                        data={"role": "admin", "csrf_token": token_csrf},
+                        follow_redirects=False,
+                    )
 
                 self.assertEqual(pagina_usuarios.status_code, 200)
                 self.assertIn(b'href="/usuarios"', pagina_usuarios.content)
                 self.assertIn(b"cliente@example.com", pagina_usuarios.content)
                 self.assertIn(b"Cadastro", pagina_usuarios.content)
+                self.assertEqual(pagina_catalogo.status_code, 200)
+                for pagina in (pagina_usuarios, pagina_catalogo):
+                    self.assertIn("Perfil Vinculado", pagina.text)
+                    self.assertIn("Perfil sem conta", pagina.text)
+                    self.assertIn("pendente@example.com", pagina.text)
+                    self.assertIn("Usuários sem perfil de criadora", pagina.text)
+                    self.assertIn(f'action="/usuarios/{cliente_id}/perfil"', pagina.text)
+                    self.assertIn(f'action="/usuarios/{pendente_id}/perfil"', pagina.text)
+                    self.assertNotIn("<table", pagina.text)
                 self.assertEqual(atualizado.status_code, 303)
                 self.assertEqual(auto_alteracao.status_code, 303)
+                self.assertEqual(sem_csrf.status_code, 403)
+                self.assertEqual(pendente_atualizado.status_code, 303)
                 self.assertEqual(db.obter_usuario_por_id(cliente_id)["role"], "admin")
+                self.assertEqual(db.obter_usuario_por_id(pendente_id)["role"], "admin")
                 self.assertEqual(
                     db.obter_usuario_por_login("admin_teste")["role"], "admin"
                 )

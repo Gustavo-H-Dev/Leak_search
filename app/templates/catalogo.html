@@ -1,8 +1,33 @@
 {% extends "base.html" %}
-{% block titulo %}Catálogo{% endblock %}
+{% block titulo %}Criadoras e usuários{% endblock %}
 {% block conteudo %}
-<h1>Catálogo de criadoras</h1>
-{% if erro %}<p class="erro">{{ erro }}</p>{% endif %}
+{% macro conta_usuario(usuario) %}
+<div class="user-details">
+  <dl>
+    <div><dt>Usuário</dt><dd>{{ usuario.username }}</dd></div>
+    <div><dt>E-mail</dt><dd>{{ usuario.email }}</dd></div>
+    <div><dt>Confirmação</dt><dd>{{ "Confirmado" if usuario.email_verified else "Pendente" }}</dd></div>
+    <div><dt>Cadastro</dt><dd>{{ usuario.created_at }}</dd></div>
+    <div><dt>Perfil</dt><dd>{{ "Administrador" if usuario.role == "admin" else "Criadora" }}</dd></div>
+  </dl>
+  {% if current_user and usuario.id == current_user.id %}
+  <p>Sua conta</p>
+  {% else %}
+  <form class="user-role-form" method="post" action="/usuarios/{{ usuario.id }}/perfil">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field-label" for="user-role-{{ usuario.id }}">Perfil de {{ usuario.username }}</label>
+    <select id="user-role-{{ usuario.id }}" name="role">
+      <option value="cliente" {% if usuario.role == "cliente" %}selected{% endif %}>Criadora</option>
+      <option value="admin" {% if usuario.role == "admin" %}selected{% endif %}>Administrador</option>
+    </select>
+    <button type="submit">Salvar perfil</button>
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}
+<h1>Criadoras e usuários</h1>
+<p>Gerencie contas, perfis de criadoras e conteúdo oficial em um só lugar.</p>
+{% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
 {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
 <section class="creator-create">
@@ -38,6 +63,7 @@
       Conta associada: {{ criadora.username }} ·
       {{ "e-mail confirmado" if criadora.email_verified else "e-mail pendente" }}
     </p>
+    {% if criadora.usuario %}{{ conta_usuario(criadora.usuario) }}{% endif %}
     {% else %}
     <p class="api-status api-status-missing">
       {{ "Aguardando a criadora criar a conta usando este e-mail." if criadora.email else "Perfil sem conta associada." }}
@@ -129,6 +155,19 @@
   <p>Nenhuma criadora cadastrada.</p>
   {% endif %}
 </section>
+
+{% if usuarios_sem_criadora %}
+<section class="creators-list">
+  <h2>Usuários sem perfil de criadora ({{ usuarios_sem_criadora|length }})</h2>
+  {% for usuario in usuarios_sem_criadora %}
+  <article class="creator-card">
+    <h3>{{ usuario.username }}</h3>
+    <p>Conta sem perfil de criadora associado.</p>
+    {{ conta_usuario(usuario) }}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
 
 {% if sites_sem_criadora %}
 <section class="official-sites">
