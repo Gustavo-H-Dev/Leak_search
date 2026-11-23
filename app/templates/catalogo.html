@@ -93,6 +93,7 @@
 {% if usuarios_sem_criadora %}
 <section class="creators-list">
   <h2>Usuários sem perfil de criadora ({{ usuarios_sem_criadora|length }})</h2>
+  <div class="creator-cards">
   {% for usuario in usuarios_sem_criadora %}
   <article class="creator-card">
     <details>
@@ -102,6 +103,7 @@
     </details>
   </article>
   {% endfor %}
+  </div>
 </section>
 {% endif %}
 
