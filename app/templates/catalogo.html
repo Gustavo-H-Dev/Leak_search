@@ -56,7 +56,8 @@
   {% if criadoras %}
   {% for criadora in criadoras %}
   <article class="creator-card">
-    <h3>{{ criadora.nome }}</h3>
+    <details>
+      <summary><h3 style="display:inline">{{ criadora.nome }}</h3></summary>
     {% if criadora.email %}<p>E-mail de associação: {{ criadora.email }}</p>{% endif %}
     {% if criadora.user_id %}
     <p class="api-status api-status-ready">
@@ -149,6 +150,7 @@
         <button type="submit">Enviar foto</button>
       </form>
     </section>
+    </details>
   </article>
   {% endfor %}
   {% else %}
@@ -161,9 +163,11 @@
   <h2>Usuários sem perfil de criadora ({{ usuarios_sem_criadora|length }})</h2>
   {% for usuario in usuarios_sem_criadora %}
   <article class="creator-card">
-    <h3>{{ usuario.username }}</h3>
-    <p>Conta sem perfil de criadora associado.</p>
-    {{ conta_usuario(usuario) }}
+    <details>
+      <summary><h3 style="display:inline">{{ usuario.username }}</h3></summary>
+      <p>Conta sem perfil de criadora associado.</p>
+      {{ conta_usuario(usuario) }}
+    </details>
   </article>
   {% endfor %}
 </section>
