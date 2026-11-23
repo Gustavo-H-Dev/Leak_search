@@ -31,24 +31,28 @@
 {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
 <section class="creator-create">
-  <h2>Nova criadora</h2>
-  <p>O nome é obrigatório. A criadora pode associar a conta durante o cadastro usando o mesmo e-mail.</p>
-  <form method="post" action="/criadoras" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="field-label" for="creator-name">Nome da criadora</label>
-    <input id="creator-name" name="nome" placeholder="Nome da criadora" required>
-    <label class="field-label" for="creator-email">E-mail da criadora (opcional)</label>
-    <input id="creator-email" name="email" type="email" placeholder="criadora@exemplo.com">
-    <label class="field-label" for="creator-handle">Instagram (@) (opcional)</label>
-    <input id="creator-handle" name="arroba" maxlength="31" placeholder="@usuario">
-    <label class="field-label" for="creator-site-name">Nome do site oficial (opcional)</label>
-    <input id="creator-site-name" name="site_nome" maxlength="80" placeholder="Site oficial">
-    <label class="field-label" for="creator-site-url">URL do site oficial (opcional)</label>
-    <input id="creator-site-url" name="site_url" type="url" placeholder="https://exemplo.com/perfil">
-    <label class="field-label" for="creator-photo">Foto (opcional)</label>
-    <input id="creator-photo" type="file" name="arquivo" accept="image/*">
-    <button type="submit">Cadastrar criadora</button>
-  </form>
+  <details class="creator-create-details">
+    <summary class="button button-primary">Novo</summary>
+    <div class="creator-create-body">
+      <p>O nome é obrigatório. A criadora pode associar a conta durante o cadastro usando o mesmo e-mail.</p>
+      <form method="post" action="/criadoras" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="field-label" for="creator-name">Nome da criadora</label>
+        <input id="creator-name" name="nome" placeholder="Nome da criadora" required>
+        <label class="field-label" for="creator-email">E-mail da criadora (opcional)</label>
+        <input id="creator-email" name="email" type="email" placeholder="criadora@exemplo.com">
+        <label class="field-label" for="creator-handle">Instagram (@) (opcional)</label>
+        <input id="creator-handle" name="arroba" maxlength="31" placeholder="@usuario">
+        <label class="field-label" for="creator-site-name">Nome do site oficial (opcional)</label>
+        <input id="creator-site-name" name="site_nome" maxlength="80" placeholder="Site oficial">
+        <label class="field-label" for="creator-site-url">URL do site oficial (opcional)</label>
+        <input id="creator-site-url" name="site_url" type="url" placeholder="https://exemplo.com/perfil">
+        <label class="field-label" for="creator-photo">Foto (opcional)</label>
+        <input id="creator-photo" type="file" name="arquivo" accept="image/*">
+        <button type="submit">Cadastrar criadora</button>
+      </form>
+    </div>
+  </details>
 </section>
 
 <section class="creators-list">

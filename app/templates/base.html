@@ -402,8 +402,19 @@
       border-radius: 14px;
       background: var(--surface);
     }
-    .creator-create > p, .creator-card p { color: var(--muted); font-size: .86rem; }
-    .creator-create form { display: grid; gap: .55rem; }
+    .creator-create-details > summary {
+      cursor: pointer;
+      list-style: none;
+      display: inline-flex;
+      width: fit-content;
+    }
+    .creator-create-details > summary::-webkit-details-marker { display: none; }
+    .creator-create-details > summary::marker { display: none; content: ""; }
+    .creator-create-details[open] > summary { margin-bottom: 1rem; }
+    .creator-create-body > p,
+    .creator-create-body > .creator-create > p,
+    .creator-card p { color: var(--muted); font-size: .86rem; }
+    .creator-create-body form { display: grid; gap: .55rem; }
     .creator-create .field-label { margin: .25rem 0 0; }
     .creator-create input[type="file"] { width: 100%; }
     .creator-create button { justify-self: start; margin-top: .5rem; }
