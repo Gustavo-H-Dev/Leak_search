@@ -2,38 +2,25 @@
 {% block titulo %}Usuários{% endblock %}
 {% block conteudo %}
 <h1>Usuários</h1>
-<p>Cadastre usuários e gerencie as permissões de administrador.</p>
 {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
 {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
 <p><a class="button button-primary" href="/usuarios/novo">Novo usuário</a></p>
 <section class="creators-list">
   <h2>Usuários cadastrados ({{ usuarios|length }})</h2>
-  {% for usuario in usuarios %}
-  <article class="creator-card">
-    <h3>{{ usuario.public_name or usuario.username }}</h3>
-    <dl>
-      <div><dt>Usuário</dt><dd>{{ usuario.username }}</dd></div>
-      <div><dt>E-mail</dt><dd>{{ usuario.email }}</dd></div>
-      <div><dt>Instagram</dt><dd>{% if usuario.public_handle %}@{{ usuario.public_handle }}{% else %}Não informado{% endif %}</dd></div>
-      <div><dt>Confirmação</dt><dd>{{ "Confirmado" if usuario.email_verified else "Pendente" }}</dd></div>
-      <div><dt>Cadastro</dt><dd>{{ usuario.created_at }}</dd></div>
-    </dl>
-    {% if usuario.id == current_user.id %}
-    <p>Sua conta: administrador.</p>
+  <div class="user-grid">
+    {% for usuario in usuarios %}
+    <article class="user-row">
+      <strong>{{ usuario.public_name or usuario.username }}</strong>
+      <span>{% if usuario.public_handle %}@{{ usuario.public_handle }}{% else %}—{% endif %}</span>
+      <a class="button button-secondary" href="/usuarios/{{ usuario.id }}/editar">Editar</a>
+      <form method="post" action="/usuarios/{{ usuario.id }}/excluir" onsubmit="return confirm('Excluir esta conta e todos os seus dados e fotos? Esta ação não pode ser desfeita.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-danger" type="submit">Excluir</button>
+      </form>
+    </article>
     {% else %}
-    <form class="user-role-form" method="post" action="/usuarios/{{ usuario.id }}/perfil">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="role" value="cliente">
-      <label class="consent-control">
-        <input type="checkbox" name="role" value="admin" {% if usuario.role == "admin" %}checked{% endif %}>
-        <span>Administrador</span>
-      </label>
-      <button type="submit">Salvar permissão</button>
-    </form>
-    {% endif %}
-  </article>
-  {% else %}
-  <p>Nenhum usuário cadastrado.</p>
-  {% endfor %}
+    <p>Nenhum usuário cadastrado.</p>
+    {% endfor %}
+  </div>
 </section>
 {% endblock %}

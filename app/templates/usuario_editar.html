@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block titulo %}Editar usuário{% endblock %}
+{% block conteudo %}
+<section class="auth-card">
+  <h1>Editar usuário</h1>
+  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+  <p>Cadastro: {{ usuario.created_at }} · E-mail {{ "confirmado" if usuario.email_verified else "pendente" }}</p>
+  <form method="post" action="/usuarios/{{ usuario.id }}/editar">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field-label" for="username">Usuário</label>
+    <input id="username" name="username" value="{{ usuario.username }}" minlength="3" maxlength="32" required>
+    <label class="field-label" for="email">E-mail</label>
+    <input id="email" name="email" type="email" value="{{ usuario.email }}" required>
+    <p>Alterar o e-mail encerra as sessões e exige nova confirmação quando configurada.</p>
+    <label class="field-label" for="nome-publico">Nome público</label>
+    <input id="nome-publico" name="nome_publico" value="{{ usuario.public_name or '' }}" maxlength="80" required>
+    <label class="field-label" for="arroba">Instagram (@)</label>
+    <input id="arroba" name="arroba" value="{{ usuario.public_handle or '' }}" maxlength="31" required>
+    <input type="hidden" name="role" value="cliente">
+    <label class="consent-control">
+      <input type="checkbox" name="role" value="admin" {% if usuario.role == "admin" %}checked{% endif %}>
+      <span>Administrador</span>
+    </label>
+    <label class="field-label" for="senha">Nova senha (opcional, mínimo 12 caracteres)</label>
+    <input id="senha" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password">
+    <label class="field-label" for="confirmar-senha">Confirme a nova senha</label>
+    <input id="confirmar-senha" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password">
+    <p>Alterar a senha encerra as sessões do usuário.</p>
+    <button type="submit">Salvar alterações</button>
+    <a class="button button-secondary" href="/usuarios">Cancelar</a>
+  </form>
+</section>
+{% endblock %}

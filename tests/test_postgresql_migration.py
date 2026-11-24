@@ -140,6 +140,28 @@ class MigracaoPostgresTest(unittest.TestCase):
         self.assertIsNone(db.obter_criadora(antiga))
         self.assertIsNotNone(db.obter_criadora(segunda))
 
+    def test_edicao_e_exclusao_de_usuario_preservam_outro_admin(self):
+        db.iniciar_banco()
+        db.criar_admin_se_ausente("admin", "admin@example.com", "hash")
+        primeiro = db.obter_usuario_por_login("admin")["id"]
+        outro = db.criar_usuario("bia", "bia@example.com", "hash", "Bia", "bia")
+        db.atualizar_perfil_usuario(outro, "admin")
+        self.assertTrue(db.editar_usuario(
+            outro, "bia", "nova@example.com", "Bia Nova", "bia", "admin"
+        ))
+        self.assertEqual(db.obter_usuario_por_id(outro)["email"], "nova@example.com")
+        db.adicionar_site_oficial_usuario(outro, primeiro, "Site", "https://example.com/bia")
+        db.adicionar_site_vazado(outro, primeiro, "https://example.com/v", "v", "", "", "", "serp", {})
+        self.assertTrue(db.salvar_status_busca_usuario(primeiro, f"vazamento_status_{primeiro}", "{}"))
+        self.assertEqual(db.excluir_usuario(primeiro), ([], []))
+        self.assertFalse(db.salvar_status_busca_usuario(primeiro, f"vazamento_status_{primeiro}", "{}"))
+        self.assertEqual(db.listar_sites_oficiais_usuario(outro)[0]["created_by"], outro)
+        self.assertEqual(db.listar_sites_vazados(outro)[0]["reported_by"], outro)
+        with self.assertRaisesRegex(ValueError, "pelo menos um administrador"):
+            db.excluir_usuario(outro)
+        with self.assertRaisesRegex(ValueError, "pelo menos um administrador"):
+            db.atualizar_perfil_usuario(outro, "cliente")
+
 
 class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
     def test_copia_perfil_fotos_sites_e_relatos_para_o_banco_destino(self):

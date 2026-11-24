@@ -62,6 +62,14 @@ cp .env.example .env
   a permissão de administrador de outras contas. Todos podem pesquisar e
   validar seus próprios resultados; somente administradores podem selecionar
   outra conta. A configuração global de termos e sites é restrita a admins.
+- Na lista, administradores podem editar ou excluir qualquer conta, inclusive a
+  própria, desde que permaneça ao menos um administrador. Alterar e-mail ou
+  senha encerra as sessões; um novo e-mail exige confirmação quando configurada.
+  A exclusão remove fotos, candidatos e demais dados da conta. Registros de
+  outras contas criados pelo usuário excluído são preservados e passam a
+  apontar para seus respectivos donos. Falhas ao apagar arquivos são informadas.
+- A conta inicial definida no ambiente só é criada quando não há administrador;
+  excluir ou renomeá-la não a recria enquanto houver outro administrador.
 - Ao iniciar esta versão, perfis antigos de criadoras sem conta vinculada são
   removidos junto com seus sites e conteúdos. Arquivos compartilhados com
   perfis vinculados são preservados; falhas na remoção de arquivos são

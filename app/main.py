@@ -226,7 +226,7 @@ def login_formulario(
             "mensagem": (
                 "Senha redefinida. Entre com sua nova senha."
                 if mensagem == "senha_alterada"
-                else ""
+                else mensagem
             ),
         },
     )
@@ -643,23 +643,23 @@ def atualizar_perfil_usuario(
     usuario_id: int,
     role: str = Form(...),
 ):
-    if usuario_id == request.state.user["id"]:
-        return RedirectResponse(
-            "/usuarios?erro=" + quote("Não é permitido alterar o próprio perfil."),
-            status_code=303,
-        )
     if role not in {"admin", "cliente"}:
         return RedirectResponse(
             "/usuarios?erro=" + quote("Perfil de usuário inválido."),
             status_code=303,
         )
-    if not db.atualizar_perfil_usuario(usuario_id, role):
+    try:
+        atualizado = db.atualizar_perfil_usuario(usuario_id, role)
+    except ValueError as erro:
+        return RedirectResponse("/usuarios?erro=" + quote(str(erro)), status_code=303)
+    if not atualizado:
         return RedirectResponse(
             "/usuarios?erro=" + quote("Usuário não encontrado."),
             status_code=303,
         )
     return RedirectResponse(
-        "/usuarios?mensagem=" + quote("Perfil atualizado."),
+        ("/" if usuario_id == request.state.user["id"] and role != "admin"
+         else "/usuarios?mensagem=" + quote("Perfil atualizado.")),
         status_code=303,
     )
 
@@ -875,6 +875,127 @@ async def novo_usuario(
     else:
         mensagem = "Usuário criado. Informe a senha inicial por um meio seguro."
     return RedirectResponse("/usuarios?mensagem=" + quote(mensagem), status_code=303)
+
+
+@app.get("/usuarios/{usuario_id}/editar", response_class=HTMLResponse,
+         dependencies=[Depends(exigir_admin)])
+def editar_usuario_formulario(request: Request, usuario_id: int, erro: str = ""):
+    usuario = db.obter_usuario_por_id(usuario_id)
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    return templates.TemplateResponse(
+        request, "usuario_editar.html", {"usuario": usuario, "erro": erro}
+    )
+
+
+@app.post("/usuarios/{usuario_id}/editar", response_class=HTMLResponse,
+          dependencies=_admin_csrf())
+async def editar_usuario(
+    request: Request,
+    usuario_id: int,
+    username: str = Form(...),
+    email: str = Form(...),
+    nome_publico: str = Form(...),
+    arroba: str = Form(...),
+    role: str = Form("cliente"),
+    senha: str = Form(""),
+    confirmar_senha: str = Form(""),
+):
+    usuario = db.obter_usuario_por_id(usuario_id)
+    if usuario is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    try:
+        username = autenticacao.validar_usuario(username)
+        if (username.casefold() == ADMIN_USERNAME.casefold()
+                and username.casefold() != usuario["username"].casefold()):
+            raise ValueError("Esse nome de usuário está reservado.")
+        email = autenticacao.validar_email(email)
+        nome_publico = nome_publico.strip()
+        if not nome_publico or len(nome_publico) > 80:
+            raise ValueError("Informe o nome público com até 80 caracteres.")
+        arroba = serpapi.validar_usuario_instagram(arroba)
+        if senha != confirmar_senha:
+            raise ValueError("As senhas não coincidem.")
+        password_hash = autenticacao.hash_senha(senha) if senha else None
+        if (email != usuario["email"] and autenticacao.confirmacao_email_obrigatoria()
+                and not autenticacao.email_configurado()):
+            raise ValueError("Configure o envio de e-mail antes de alterar o endereço.")
+        email_alterado = db.editar_usuario(
+            usuario_id, username, email, nome_publico, arroba, role, password_hash
+        )
+        if email_alterado is None:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    except ValueError as erro:
+        return templates.TemplateResponse(
+            request, "usuario_editar.html",
+            {"usuario": {**dict(usuario), "username": username, "email": email,
+                         "public_name": nome_publico, "public_handle": arroba,
+                         "role": role}, "erro": str(erro)}, status_code=400,
+        )
+    except db.INTEGRITY_ERRORS:
+        return templates.TemplateResponse(
+            request, "usuario_editar.html",
+            {"usuario": usuario, "erro": "Esse nome de usuário ou e-mail já está cadastrado."},
+            status_code=400,
+        )
+    mensagem = "Usuário atualizado."
+    falha_email = False
+    if email_alterado and autenticacao.confirmacao_email_obrigatoria():
+        try:
+            await _enviar_email_token(usuario_id, email, username, "confirmar_email")
+        except autenticacao.ErroEmail:
+            logger.exception("Falha ao enviar confirmação de e-mail alterado")
+            falha_email = True
+            mensagem = ("Usuário atualizado, mas o e-mail de confirmação não foi enviado. "
+                        "Solicite o reenvio na página de cadastro.")
+        else:
+            mensagem = "Usuário atualizado. Confirme o novo e-mail antes de entrar."
+    if usuario_id == request.state.user["id"] and (email_alterado or password_hash):
+        request.session.pop("auth_session", None)
+        return RedirectResponse(
+            "/login?" + ("erro=" if falha_email else "mensagem=") + quote(mensagem),
+            status_code=303,
+        )
+    if usuario_id == request.state.user["id"] and role != "admin":
+        return RedirectResponse("/", status_code=303)
+    return RedirectResponse(
+        "/usuarios?" + ("erro=" if falha_email else "mensagem=") + quote(mensagem),
+        status_code=303,
+    )
+
+
+@app.post("/usuarios/{usuario_id}/excluir", dependencies=_admin_csrf())
+def excluir_usuario(request: Request, usuario_id: int):
+    try:
+        arquivos = db.excluir_usuario(usuario_id)
+    except ValueError as erro:
+        return RedirectResponse("/usuarios?erro=" + quote(str(erro)), status_code=303)
+    if arquivos is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    falha = False
+    for pasta, nomes in ((PASTA_FOTOS_BUSCA, arquivos[0]), (PASTA_OFICIAIS, arquivos[1])):
+        for nome in nomes:
+            if Path(nome).name != nome:
+                logger.error("Arquivo de usuário com caminho inválido: %s", nome)
+                falha = True
+                continue
+            try:
+                (pasta / nome).unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Falha ao remover arquivo de usuário: %s", nome)
+                falha = True
+    mensagem = ("Usuário excluído, mas alguns arquivos não puderam ser removidos; consulte os logs."
+                if falha else "Usuário excluído.")
+    if usuario_id == request.state.user["id"]:
+        request.session.clear()
+        return RedirectResponse(
+            "/login?" + ("erro=" if falha else "mensagem=") + quote(mensagem),
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/usuarios?" + ("erro=" if falha else "mensagem=") + quote(mensagem),
+        status_code=303,
+    )
 
 
 @app.post("/sites-oficiais", dependencies=_admin_csrf())
@@ -1874,7 +1995,10 @@ def _status_vazamento(user_id):
 
 
 def _salvar_status_vazamento(user_id, dados):
-    db.salvar_configuracao(_chave_status_vazamento(user_id), json.dumps(dados))
+    if not db.salvar_status_busca_usuario(
+        user_id, _chave_status_vazamento(user_id), json.dumps(dados)
+    ):
+        logger.info("Status de busca descartado: usuário %s foi excluído", user_id)
 
 
 def _executar_busca_vazamentos(alvo, api, consultas, parametros):

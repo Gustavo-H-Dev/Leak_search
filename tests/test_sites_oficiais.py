@@ -39,8 +39,9 @@ class PaginasOficiaisTest(unittest.TestCase):
 
         corpo = resposta.body.decode()
         self.assertIn("Novo usuário", corpo)
-        self.assertIn("<h3>Ana</h3>", corpo)
-        self.assertIn("ana@example.com", corpo)
+        self.assertIn("<strong>Ana</strong>", corpo)
+        self.assertIn("@ana", corpo)
+        self.assertNotIn("ana@example.com", corpo)
 
     def test_normaliza_url_da_pagina_sem_ampliar_para_o_dominio(self):
         self.assertEqual(

@@ -428,6 +428,24 @@
     }
     .creator-edit-section h2 { margin-top: 0; }
     .creators-list { display: grid; gap: 1rem; }
+    .user-grid { display: grid; gap: .65rem; }
+    .user-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: .75rem;
+      padding: .8rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .user-row strong, .user-row span { overflow-wrap: anywhere; }
+    .user-row span { color: var(--muted); }
+    .user-row form { margin: 0; }
+    @media (max-width: 600px) {
+      .user-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .user-row form { justify-self: start; }
+    }
     .creator-card {
       padding: 1.25rem;
       border: 1px solid var(--border);

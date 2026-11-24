@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -10,6 +11,7 @@ import psycopg
 
 CAMINHO_DB = Path("data/catalogo.db")
 INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
+logger = logging.getLogger(__name__)
 
 
 class _PostgresConnection:
@@ -509,6 +511,8 @@ def _agora_utc():
 
 def criar_admin_se_ausente(username, email, password_hash):
     with conexao() as conn:
+        if conn.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1").fetchone():
+            return False
         existente = conn.execute(
             "SELECT id, role FROM users WHERE lower(username) = lower(?)",
             (username,),
@@ -574,7 +578,8 @@ def obter_usuario_por_id(user_id):
     with conexao() as conn:
         return conn.execute(
             """
-            SELECT id, username, email, role, public_name, public_handle
+            SELECT id, username, email, email_verified, role, public_name,
+                   public_handle, created_at
             FROM users WHERE id = ?
             """,
             (user_id,),
@@ -598,11 +603,125 @@ def atualizar_perfil_usuario(user_id, role):
     if role not in {"admin", "cliente"}:
         raise ValueError("Perfil de usuário inválido.")
     with conexao() as conn:
+        _bloquear_usuarios(conn)
+        _verificar_admin_restante(conn, user_id, role)
         cur = conn.execute(
             "UPDATE users SET role = ? WHERE id = ?",
             (role, user_id),
         )
         return cur.rowcount > 0
+
+
+def _bloquear_usuarios(conn):
+    if usando_postgresql():
+        conn.execute("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE")
+    else:
+        conn.execute("BEGIN IMMEDIATE")
+
+
+def _verificar_admin_restante(conn, user_id, nova_role):
+    usuario = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if usuario and usuario["role"] == "admin" and nova_role != "admin":
+        outro = conn.execute(
+            "SELECT id FROM users WHERE role = 'admin' AND id != ? LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if not outro:
+            raise ValueError("É necessário manter pelo menos um administrador.")
+
+
+def editar_usuario(user_id, username, email, public_name, public_handle, role,
+                   password_hash=None):
+    if role not in {"admin", "cliente"}:
+        raise ValueError("Perfil de usuário inválido.")
+    with conexao() as conn:
+        _bloquear_usuarios(conn)
+        usuario = conn.execute(
+            "SELECT email FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not usuario:
+            return None
+        _verificar_admin_restante(conn, user_id, role)
+        email_alterado = usuario["email"] != email
+        conn.execute(
+            """
+            UPDATE users SET username = ?, email = ?, public_name = ?,
+                public_handle = ?, role = ?,
+                email_verified = CASE WHEN ? THEN 0 ELSE email_verified END,
+                password_hash = COALESCE(?, password_hash)
+            WHERE id = ?
+            """,
+            (username, email, public_name, public_handle, role, email_alterado,
+             password_hash, user_id),
+        )
+        conn.execute(
+            """
+            UPDATE criadoras SET
+                nome = CASE WHEN EXISTS (
+                    SELECT 1 FROM criadoras outra
+                    WHERE outra.nome = ? AND outra.id != criadoras.id
+                ) THEN nome ELSE ? END,
+                handle = ?, email = ?
+            WHERE user_id = ?
+            """,
+            (public_name, public_name, public_handle, email, user_id),
+        )
+        if email_alterado:
+            conn.execute("DELETE FROM auth_tokens WHERE user_id = ?", (user_id,))
+        if email_alterado or password_hash:
+            conn.execute("DELETE FROM auth_sessions WHERE user_id = ?", (user_id,))
+        return email_alterado
+
+
+def excluir_usuario(user_id):
+    with conexao() as conn:
+        _bloquear_usuarios(conn)
+        if not conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone():
+            return None
+        _verificar_admin_restante(conn, user_id, None)
+        fotos = [linha["arquivo"] for linha in conn.execute(
+            "SELECT arquivo FROM user_search_photos WHERE user_id = ?", (user_id,)
+        ).fetchall()]
+        arquivos = [linha["arquivo"] for linha in conn.execute(
+            """
+            SELECT DISTINCT c.arquivo FROM conteudos c
+            JOIN criadoras cr ON cr.id = c.criadora_id
+            WHERE cr.user_id = ? AND NOT EXISTS (
+                SELECT 1 FROM conteudos outro
+                JOIN criadoras dona ON dona.id = outro.criadora_id
+                WHERE outro.arquivo = c.arquivo
+                  AND (dona.user_id IS NULL OR dona.user_id != ?)
+            )
+            """, (user_id, user_id)
+        ).fetchall()]
+        conn.execute(
+            """DELETE FROM hashes WHERE conteudo_id IN (
+                SELECT c.id FROM conteudos c JOIN criadoras cr ON cr.id = c.criadora_id
+                WHERE cr.user_id = ?
+            )""", (user_id,)
+        )
+        conn.execute("DELETE FROM conteudos WHERE criadora_id IN (SELECT id FROM criadoras WHERE user_id = ?)", (user_id,))
+        conn.execute("DELETE FROM sites_oficiais WHERE criadora_id IN (SELECT id FROM criadoras WHERE user_id = ?)", (user_id,))
+        conn.execute("DELETE FROM criadoras WHERE user_id = ?", (user_id,))
+        conn.execute("UPDATE user_official_sites SET created_by = user_id WHERE created_by = ? AND user_id != ?", (user_id, user_id))
+        conn.execute("UPDATE leak_reports SET reported_by = user_id WHERE reported_by = ? AND user_id != ?", (user_id, user_id))
+        for snapshot in conn.execute(
+            "SELECT user_id, payload_json FROM search_snapshots WHERE kind = 'busca' AND user_id != ?",
+            (user_id,),
+        ).fetchall():
+            try:
+                dados = json.loads(snapshot["payload_json"])
+            except ValueError:
+                logger.warning("Snapshot de busca inválido para usuário %s", snapshot["user_id"])
+                continue
+            if isinstance(dados, dict) and dados.get("target_user_id") == user_id:
+                conn.execute(
+                    "DELETE FROM search_snapshots WHERE user_id = ? AND kind = 'busca'",
+                    (snapshot["user_id"],),
+                )
+        conn.execute("DELETE FROM app_settings WHERE name = ?", (f"vazamento_status_{user_id}",))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return fotos, arquivos
 
 
 def atualizar_perfil_busca(user_id, public_name, public_handle):
@@ -1101,6 +1220,27 @@ def salvar_configuracao(nome, valor):
             """,
             (nome, valor),
         )
+
+
+def salvar_status_busca_usuario(user_id, nome, valor):
+    with conexao() as conn:
+        if usando_postgresql():
+            usuario = conn.execute(
+                "SELECT id FROM users WHERE id = ? FOR KEY SHARE", (user_id,)
+            ).fetchone()
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+            usuario = conn.execute(
+                "SELECT id FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+        if not usuario:
+            return False
+        conn.execute(
+            """INSERT INTO app_settings (name, value) VALUES (?, ?)
+               ON CONFLICT (name) DO UPDATE SET value = excluded.value""",
+            (nome, valor),
+        )
+        return True
 
 
 def criar_criadora(nome):
