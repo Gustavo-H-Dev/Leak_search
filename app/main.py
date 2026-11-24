@@ -47,6 +47,20 @@ PASTA_OFICIAIS.mkdir(parents=True, exist_ok=True)
 PASTA_FOTOS_BUSCA.mkdir(parents=True, exist_ok=True)
 db.iniciar_banco()
 
+
+def _remover_criadoras_antigas():
+    for arquivo_antigo in db.remover_criadoras_sem_conta():
+        if Path(arquivo_antigo).name != arquivo_antigo:
+            logger.error("Arquivo antigo com caminho inválido não foi removido: %s", arquivo_antigo)
+            continue
+        try:
+            (PASTA_OFICIAIS / arquivo_antigo).unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Não foi possível remover arquivo antigo: %s", arquivo_antigo)
+
+
+_remover_criadoras_antigas()
+
 app = FastAPI(title="Monitoramento de Vazamentos")
 session_secret = db.obter_segredo_sessao()
 app.add_middleware(AutenticacaoMiddleware)
@@ -135,15 +149,6 @@ def _usuario_alvo_busca(request: Request, usuario_id: int = 0):
     alvo = db.obter_usuario_por_id(usuario_id)
     if alvo is None:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    if atual["role"] == "admin" and not (
-        alvo["public_name"] and alvo["public_handle"]
-    ):
-        # Criadora sem perfil de busca: o admin pesquisa pelo nome de usuário.
-        alvo = {
-            **dict(alvo),
-            "public_name": alvo["public_name"] or alvo["username"],
-            "public_handle": alvo["public_handle"] or alvo["username"],
-        }
     return alvo
 
 
@@ -291,37 +296,10 @@ async def cadastrar(
     confirmar_senha: str = Form(...),
 ):
     try:
-        username = autenticacao.validar_usuario(username)
-        email = autenticacao.validar_email(email)
-        nome_publico = nome_publico.strip()
-        if not nome_publico or len(nome_publico) > 80:
-            raise ValueError("Informe seu nome público com até 80 caracteres.")
-        arroba = serpapi.validar_usuario_instagram(arroba)
-        if not db.perfil_criadora_disponivel(nome_publico, email):
-            raise ValueError(
-                "Esse nome já está no catálogo com outro e-mail. "
-                "Peça ao administrador para atualizar o e-mail do perfil."
-            )
-        autenticacao.validar_senha(senha)
-        if senha != confirmar_senha:
-            raise ValueError("As senhas não coincidem.")
-        if username.casefold() == ADMIN_USERNAME.casefold():
-            raise ValueError("Esse nome de usuário está reservado.")
-        if (
-            autenticacao.confirmacao_email_obrigatoria()
-            and not autenticacao.email_configurado()
-        ):
-            raise ValueError("O envio de e-mail ainda não está configurado.")
-        user_id = db.criar_usuario(
-            username,
-            email,
-            autenticacao.hash_senha(senha),
-            nome_publico,
-            arroba,
+        user_id, username, email = _criar_conta(
+            username, email, nome_publico, arroba, senha, confirmar_senha
         )
         confirmacao_email_obrigatoria = autenticacao.confirmacao_email_obrigatoria()
-        if not confirmacao_email_obrigatoria:
-            db.confirmar_email(user_id)
     except ValueError as erro:
         return templates.TemplateResponse(
             request,
@@ -382,6 +360,28 @@ async def cadastrar(
             "confirmacao_email_obrigatoria": confirmacao_email_obrigatoria,
         },
     )
+
+
+def _criar_conta(username, email, nome_publico, arroba, senha, confirmar_senha):
+    username = autenticacao.validar_usuario(username)
+    email = autenticacao.validar_email(email)
+    nome_publico = nome_publico.strip()
+    if not nome_publico or len(nome_publico) > 80:
+        raise ValueError("Informe seu nome público com até 80 caracteres.")
+    arroba = serpapi.validar_usuario_instagram(arroba)
+    autenticacao.validar_senha(senha)
+    if senha != confirmar_senha:
+        raise ValueError("As senhas não coincidem.")
+    if username.casefold() == ADMIN_USERNAME.casefold():
+        raise ValueError("Esse nome de usuário está reservado.")
+    if autenticacao.confirmacao_email_obrigatoria() and not autenticacao.email_configurado():
+        raise ValueError("O envio de e-mail ainda não está configurado.")
+    user_id = db.criar_usuario(
+        username, email, autenticacao.hash_senha(senha), nome_publico, arroba
+    )
+    if not autenticacao.confirmacao_email_obrigatoria():
+        db.confirmar_email(user_id)
+    return user_id, username, email
 
 
 @app.get("/confirmar-email", response_class=HTMLResponse)
@@ -615,12 +615,6 @@ def _voltar_com_erro(mensagem: str):
     return RedirectResponse("/catalogo?erro=" + quote(mensagem), status_code=303)
 
 
-def _voltar_ao_formulario_nova(mensagem: str):
-    return RedirectResponse(
-        "/criadoras/nova?erro=" + quote(mensagem), status_code=303
-    )
-
-
 def _voltar_ao_formulario_edicao(criadora_id: int, mensagem: str):
     return RedirectResponse(
         "/criadoras/{}/editar?erro=".format(criadora_id) + quote(mensagem),
@@ -826,37 +820,61 @@ def excluir_site_oficial_usuario(request: Request, site_id: int):
     dependencies=[Depends(exigir_admin)],
 )
 def catalogo(request: Request, erro: str = "", mensagem: str = ""):
-    sites_oficiais_cadastrados = db.listar_sites_oficiais()
-    conteudos_cadastrados = db.listar_conteudos()
-    usuarios = db.listar_usuarios()
-    usuarios_por_id = {usuario["id"]: usuario for usuario in usuarios}
-    criadoras = []
-    for registro in db.listar_criadoras():
-        criadora = dict(registro)
-        criadora["usuario"] = usuarios_por_id.get(criadora.get("user_id"))
-        criadora["sites_oficiais"] = [
-            site
-            for site in sites_oficiais_cadastrados
-            if site["criadora_id"] == criadora["id"]
-        ]
-        criadora["conteudos"] = [
-            conteudo
-            for conteudo in conteudos_cadastrados
-            if conteudo["criadora_id"] == criadora["id"]
-        ]
-        criadoras.append(criadora)
     contexto = {
-        "criadoras": criadoras,
-        "usuarios_sem_criadora": [
-            usuario for usuario in usuarios if not usuario["criadora_id"]
-        ],
-        "sites_sem_criadora": [
-            site for site in sites_oficiais_cadastrados if not site["criadora_id"]
-        ],
+        "usuarios": db.listar_usuarios(),
         "erro": erro,
         "mensagem": mensagem,
     }
     return templates.TemplateResponse(request, "catalogo.html", contexto)
+
+
+@app.get("/usuarios/novo", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])
+def novo_usuario_formulario(request: Request, erro: str = ""):
+    return templates.TemplateResponse(
+        request, "usuario_form.html", {"erro": erro}
+    )
+
+
+@app.post("/usuarios", response_class=HTMLResponse, dependencies=_admin_csrf())
+async def novo_usuario(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(...),
+    nome_publico: str = Form(...),
+    arroba: str = Form(...),
+    senha: str = Form(...),
+    confirmar_senha: str = Form(...),
+):
+    try:
+        user_id, username, email = _criar_conta(
+            username, email, nome_publico, arroba, senha, confirmar_senha
+        )
+    except ValueError as erro:
+        return templates.TemplateResponse(
+            request, "usuario_form.html", {"erro": str(erro)}, status_code=400
+        )
+    except db.INTEGRITY_ERRORS:
+        return templates.TemplateResponse(
+            request, "usuario_form.html",
+            {"erro": "Esse nome de usuário ou e-mail já está cadastrado."},
+            status_code=400,
+        )
+    if autenticacao.confirmacao_email_obrigatoria():
+        try:
+            await _enviar_email_token(user_id, email, username, "confirmar_email")
+        except autenticacao.ErroEmail:
+            logger.exception("Falha ao enviar confirmação de e-mail para novo usuário")
+            return RedirectResponse(
+                "/usuarios?erro=" + quote(
+                    "Conta criada, mas o e-mail de confirmação não foi enviado. "
+                    "Use a opção de reenviar confirmação no cadastro."
+                ),
+                status_code=303,
+            )
+        mensagem = "Usuário criado. Enviamos um link para confirmar o e-mail."
+    else:
+        mensagem = "Usuário criado. Informe a senha inicial por um meio seguro."
+    return RedirectResponse("/usuarios?mensagem=" + quote(mensagem), status_code=303)
 
 
 @app.post("/sites-oficiais", dependencies=_admin_csrf())
@@ -924,91 +942,6 @@ def excluir_site_oficial(site_id: int):
     )
 
 
-@app.post("/criadoras", dependencies=_admin_csrf())
-async def nova_criadora(
-    nome: str = Form(...),
-    site_nome: str = Form("Site oficial"),
-    site_url: str = Form(""),
-    arquivo: UploadFile | None = File(None),
-    email: str = Form(""),
-    arroba: str = Form(""),
-):
-    nome = nome.strip()
-    if not nome:
-        return _voltar_ao_formulario_nova("Informe o nome da criadora.")
-    if len(nome) > 80:
-        return _voltar_ao_formulario_nova(
-            "O nome da criadora deve ter até 80 caracteres."
-        )
-
-    email = email.strip() if isinstance(email, str) else ""
-    if email:
-        try:
-            email = autenticacao.validar_email(email)
-        except ValueError as erro:
-            return _voltar_ao_formulario_nova(str(erro))
-    handle = ""
-    if isinstance(arroba, str) and arroba.strip():
-        try:
-            handle = serpapi.validar_usuario_instagram(arroba)
-        except ValueError as erro:
-            return _voltar_ao_formulario_nova(str(erro))
-
-    url_oficial = None
-    if site_url.strip():
-        site_nome = site_nome.strip() or "Site oficial"
-        if len(site_nome) > 80:
-            return _voltar_ao_formulario_nova(
-                "O nome do site deve ter entre 1 e 80 caracteres."
-            )
-        try:
-            url_oficial = sites_oficiais.normalizar_url_pagina(site_url)
-        except ValueError as erro:
-            return _voltar_ao_formulario_nova(str(erro))
-
-    imagem_nova = None
-    if arquivo and arquivo.filename:
-        extensao = Path(arquivo.filename).suffix.lower()
-        if extensao not in EXTENSOES_PERMITIDAS:
-            return _voltar_ao_formulario_nova(
-                "Formato não suportado. Use JPG, PNG ou WEBP."
-            )
-        try:
-            dados = await _ler_imagem(arquivo)
-            phash = imagens.calcular_phash(dados)
-        except ValueError as erro:
-            return _voltar_ao_formulario_nova(str(erro))
-        imagem_nova = (dados, phash, extensao, arquivo.filename)
-
-    try:
-        if email or handle:
-            criadora_id = db.criar_criadora_com_contato(nome, email, handle)
-        else:
-            criadora_id = db.criar_criadora(nome)
-    except db.INTEGRITY_ERRORS:
-        return _voltar_ao_formulario_nova(
-            "Já existe um perfil de criadora com esse nome ou e-mail."
-        )
-    if url_oficial:
-        try:
-            db.adicionar_site_oficial(criadora_id, site_nome, url_oficial)
-        except db.INTEGRITY_ERRORS:
-            return _voltar_ao_formulario_nova(
-                "Essa URL já está cadastrada para a criadora selecionada."
-            )
-    if imagem_nova:
-        dados, phash, extensao, nome_original = imagem_nova
-        nome_arquivo = f"{uuid.uuid4().hex}{extensao}"
-        (PASTA_OFICIAIS / nome_arquivo).write_bytes(dados)
-        db.adicionar_conteudo(
-            criadora_id, "foto", nome_arquivo, nome_original, [phash]
-        )
-    return RedirectResponse(
-        "/usuarios?mensagem=" + quote("Criadora cadastrada com sucesso."),
-        status_code=303,
-    )
-
-
 @app.post("/criadoras/{criadora_id}/editar", dependencies=_admin_csrf())
 def editar_criadora(
     criadora_id: int,
@@ -1057,11 +990,7 @@ def editar_criadora(
     dependencies=[Depends(exigir_admin)],
 )
 def nova_criadora_formulario(request: Request, erro: str = ""):
-    return templates.TemplateResponse(
-        request,
-        "criadora_form.html",
-        {"criadora": None, "erro": erro},
-    )
+    return RedirectResponse("/usuarios/novo", status_code=303)
 
 
 @app.get(
@@ -1153,8 +1082,9 @@ def excluir_conteudo(conteudo_id: int):
 
 def _referencias_do_usuario(alvo):
     """Hashes de referência: catálogo, fotos do perfil e sites oficiais."""
+    nome = dict(alvo).get("public_name")
     referencias = [
-        {"phash": linha["phash"], "origem": f"Catálogo — {linha['criadora']}"}
+        {"phash": linha["phash"], "origem": f"Catálogo — {nome or linha['criadora']}"}
         for linha in db.listar_hashes_criadora_do_usuario(alvo["id"])
     ]
     for foto in db.listar_fotos_busca(alvo["id"]):
@@ -1691,7 +1621,6 @@ def _contexto_google(request: Request, **valores):
 @app.get(
     "/buscar-serpapi",
     response_class=HTMLResponse,
-    dependencies=[Depends(exigir_admin)],
 )
 def buscar_serpapi_formulario():
     return RedirectResponse("/busca-web", status_code=307)
@@ -1700,11 +1629,10 @@ def buscar_serpapi_formulario():
 @app.get(
     "/busca-web",
     response_class=HTMLResponse,
-    dependencies=[Depends(exigir_admin)],
 )
 def pagina_busca_na_web(request: Request, target_user_id: int = 0):
     _usuario_alvo_busca(request, target_user_id)
-    if not os.getenv("SERPAPI_API_KEY", "").strip():
+    if request.state.user["role"] != "admin" or not os.getenv("SERPAPI_API_KEY", "").strip():
         return _contexto_serpapi(request, target_user_id=target_user_id)
     return _consultar_status_serpapi(request, target_user_id)
 
@@ -1748,7 +1676,7 @@ async def status_serpapi(request: Request, target_user_id: int = Form(0)):
     return await run_in_threadpool(_consultar_status_serpapi, request, target_user_id)
 
 
-@app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_admin_csrf())
+@app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_csrf())
 async def buscar_serpapi(
     request: Request,
     api: str = Form(...),
@@ -1992,7 +1920,7 @@ def _executar_busca_vazamentos(alvo, api, consultas, parametros):
 @app.post(
     "/buscar-vazamentos",
     response_class=HTMLResponse,
-    dependencies=_admin_csrf(),
+    dependencies=_csrf(),
 )
 async def buscar_vazamentos(
     request: Request,

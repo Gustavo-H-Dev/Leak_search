@@ -762,9 +762,9 @@
         {% if current_user %}
           <a href="/">Início</a>
           {% if current_user.role == "admin" %}
-          <a href="/usuarios">Criadoras e usuários</a>
-          <a href="/busca-web">Busca na web</a>
+          <a href="/usuarios">Usuários</a>
           {% endif %}
+          <a href="/busca-web">Busca na web</a>
           <a href="/valida">Valida</a>
           <a href="/perfil-busca">Meu perfil</a>
           {% if current_user.role == "admin" %}<a href="/analise">Análise</a>{% endif %}

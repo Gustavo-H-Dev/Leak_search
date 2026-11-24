@@ -1,4 +1,3 @@
-import asyncio
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,11 +8,11 @@ from starlette.requests import Request
 
 from app import db
 from app.core import sites_oficiais
-from app.main import app, catalogo, nova_criadora
+from app.main import app, catalogo
 
 
 class PaginasOficiaisTest(unittest.TestCase):
-    def test_catalogo_exibe_criadora_com_sites_e_fotos_nos_registros_pais(self):
+    def test_catalogo_exibe_contas(self):
         request = Request(
             {
                 "type": "http",
@@ -28,70 +27,20 @@ class PaginasOficiaisTest(unittest.TestCase):
                 "root_path": "",
                 "app": app,
                 "session": {"csrf_token": "teste"},
+                "state": {"user": {"id": 9, "role": "admin"}},
             }
         )
-        with (
-            patch("app.main.db.listar_criadoras", return_value=[{"id": 1, "nome": "Ana"}]),
-            patch(
-                "app.main.db.listar_sites_oficiais",
-                return_value=[
-                    {
-                        "id": 1,
-                        "criadora_id": 1,
-                        "criadora": "Ana",
-                        "nome": "Perfil oficial",
-                        "url": "https://exemplo.com/perfil/ana",
-                    }
-                ],
-            ),
-            patch(
-                "app.main.db.listar_conteudos",
-                return_value=[
-                    {
-                        "id": 2,
-                        "criadora_id": 1,
-                        "arquivo": "ana.png",
-                        "nome_original": "ana-original.png",
-                        "criado_em": "2025-01-01",
-                    }
-                ],
-            ),
-        ):
+        with patch("app.main.db.listar_usuarios", return_value=[{
+            "id": 1, "username": "ana", "email": "ana@example.com",
+            "public_name": "Ana", "public_handle": "ana", "role": "cliente",
+            "email_verified": 1, "created_at": "2025-01-01",
+        }]):
             resposta = catalogo(request)
 
         corpo = resposta.body.decode()
-        self.assertIn("Nova criadora", corpo)
-        self.assertIn('name="site_url"', corpo)
-        self.assertIn('name="arquivo"', corpo)
+        self.assertIn("Novo usuário", corpo)
         self.assertIn("<h3>Ana</h3>", corpo)
-        self.assertIn('name="criadora_id"', corpo)
-        self.assertIn("https://exemplo.com/perfil/ana", corpo)
-        self.assertIn("ana-original.png", corpo)
-
-    def test_cadastro_de_criadora_inclui_site_opcional_quando_informado(self):
-        with (
-            patch("app.main.db.criar_criadora", return_value=7) as criar,
-            patch("app.main.db.adicionar_site_oficial") as adicionar_site,
-        ):
-            resposta = asyncio.run(
-                nova_criadora(" Ana ", "Site oficial", "exemplo.com/ana", None)
-            )
-
-        criar.assert_called_once_with("Ana")
-        adicionar_site.assert_called_once_with(
-            7, "Site oficial", "https://exemplo.com/ana"
-        )
-        self.assertEqual(resposta.status_code, 303)
-
-    def test_cadastro_de_criadora_nao_exige_site(self):
-        with (
-            patch("app.main.db.criar_criadora", return_value=7),
-            patch("app.main.db.adicionar_site_oficial") as adicionar_site,
-        ):
-            resposta = asyncio.run(nova_criadora("Ana", "Site oficial", "", None))
-
-        adicionar_site.assert_not_called()
-        self.assertEqual(resposta.status_code, 303)
+        self.assertIn("ana@example.com", corpo)
 
     def test_normaliza_url_da_pagina_sem_ampliar_para_o_dominio(self):
         self.assertEqual(

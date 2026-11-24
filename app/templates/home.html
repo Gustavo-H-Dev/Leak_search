@@ -10,7 +10,7 @@
       com um fluxo simples e direto.
     </p>
     <div class="hero-actions">
-      <a class="button button-primary" href="/catalogo">Abrir catálogo</a>
+      <a class="button button-primary" href="/busca-web">Abrir busca</a>
     </div>
   </div>
 
@@ -51,18 +51,20 @@
   </div>
 
   <div class="workflow-grid">
-    <a class="workflow-card" href="/catalogo">
+    {% if current_user and current_user.role == "admin" %}
+    <a class="workflow-card" href="/usuarios">
       <span class="card-icon" aria-hidden="true">01</span>
       <span class="card-link" aria-hidden="true">↗</span>
-      <h3>Catálogo oficial</h3>
-      <p>Cadastre criadoras e mantenha as imagens oficiais organizadas para consulta.</p>
-      <span class="card-action">Gerenciar catálogo <span aria-hidden="true">→</span></span>
+      <h3>Usuários</h3>
+      <p>Cadastre usuários e gerencie suas permissões.</p>
+      <span class="card-action">Gerenciar usuários <span aria-hidden="true">→</span></span>
     </a>
+    {% endif %}
     <a class="workflow-card" href="/busca-web">
       <span class="card-icon" aria-hidden="true">02</span>
       <span class="card-link" aria-hidden="true">↗</span>
       <h3>Busca na web</h3>
-      <p>Pesquise por nome, foto ou perfil usando SerpApi, Google Cloud Vision e Instagram em um só lugar.</p>
+      <p>Pesquise por nome ou foto usando SerpApi.</p>
       <span class="card-action">Abrir busca na web <span aria-hidden="true">→</span></span>
     </a>
   </div>

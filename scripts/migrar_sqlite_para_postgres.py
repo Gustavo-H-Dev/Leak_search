@@ -8,7 +8,7 @@ from app import db
 
 
 TABELAS = {
-    "criadoras": ("id", "nome", "criado_em"),
+    "criadoras": ("id", "nome", "email", "handle", "user_id", "criado_em"),
     "conteudos": (
         "id",
         "criadora_id",

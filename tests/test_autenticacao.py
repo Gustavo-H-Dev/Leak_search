@@ -132,7 +132,7 @@ class AutenticacaoTest(unittest.TestCase):
                     db.obter_usuario_por_id(user_id)["role"], "cliente"
                 )
 
-    def test_email_confirmado_associa_conta_ao_perfil_pre_cadastrado(self):
+    def test_email_confirmado_nao_reivindica_perfil_antigo(self):
         with TemporaryDirectory() as diretorio:
             with patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"):
                 db.iniciar_banco()
@@ -156,10 +156,10 @@ class AutenticacaoTest(unittest.TestCase):
                     for item in db.listar_criadoras()
                     if item["id"] == criadora_id
                 )
-                self.assertEqual(criadora["user_id"], user_id)
-                self.assertEqual(criadora["username"], "criadora")
+                self.assertIsNone(criadora["user_id"])
+                self.assertTrue(db.obter_usuario_por_login("criadora")["email_verified"])
 
-    def test_email_confirmado_cria_perfil_para_novo_cadastro(self):
+    def test_email_confirmado_nao_cria_perfil_separado(self):
         with TemporaryDirectory() as diretorio:
             with patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"):
                 db.iniciar_banco()
@@ -173,13 +173,8 @@ class AutenticacaoTest(unittest.TestCase):
 
                 db.confirmar_email(user_id)
 
-                criadora = next(
-                    item
-                    for item in db.listar_criadoras()
-                    if item["user_id"] == user_id
-                )
-                self.assertEqual(criadora["nome"], "Novo Perfil")
-                self.assertEqual(criadora["handle"], "novo_perfil")
+                self.assertFalse(db.listar_criadoras())
+                self.assertTrue(db.obter_usuario_por_login("nova_criadora")["email_verified"])
 
     def test_pagina_e_alteracao_de_perfis_sao_restritas_a_admin(self):
         with TemporaryDirectory() as diretorio:
@@ -239,7 +234,7 @@ class AutenticacaoTest(unittest.TestCase):
 
                 self.assertEqual(pagina_restrita.status_code, 403)
                 self.assertEqual(catalogo_cliente.status_code, 403)
-                self.assertEqual(busca_cliente.status_code, 403)
+                self.assertEqual(busca_cliente.status_code, 200)
                 self.assertEqual(arquivo_catalogo_cliente.status_code, 403)
                 self.assertNotIn(b'href="/usuarios"', pagina_cliente.content)
                 self.assertEqual(tentativa_alteracao.status_code, 403)
@@ -295,9 +290,9 @@ class AutenticacaoTest(unittest.TestCase):
                 self.assertEqual(pagina_catalogo.status_code, 200)
                 for pagina in (pagina_usuarios, pagina_catalogo):
                     self.assertIn("Perfil Vinculado", pagina.text)
-                    self.assertIn("Perfil sem conta", pagina.text)
+                    self.assertNotIn("Perfil sem conta", pagina.text)
                     self.assertIn("pendente@example.com", pagina.text)
-                    self.assertIn("Usuários sem perfil de criadora", pagina.text)
+                    self.assertIn("Usuários cadastrados", pagina.text)
                     self.assertIn(f'action="/usuarios/{cliente_id}/perfil"', pagina.text)
                     self.assertIn(f'action="/usuarios/{pendente_id}/perfil"', pagina.text)
                     self.assertNotIn("<table", pagina.text)
@@ -310,6 +305,194 @@ class AutenticacaoTest(unittest.TestCase):
                 self.assertEqual(
                     db.obter_usuario_por_login("admin_teste")["role"], "admin"
                 )
+
+    def test_admin_cria_conta_real_e_altera_permissao_por_checkbox(self):
+        with (
+            TemporaryDirectory() as diretorio,
+            patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"),
+            patch.dict(os.environ, {"EMAIL_VERIFICATION_REQUIRED": "false"}),
+        ):
+            db.iniciar_banco()
+            db.criar_admin_se_ausente(
+                "admin_teste", "admin@example.com",
+                autenticacao.hash_senha("senha-admin-teste-forte"),
+            )
+            with TestClient(app) as admin:
+                token = re.search(r'name="csrf_token" value="([^"]+)"', admin.get("/login").text).group(1)
+                admin.post("/login", data={
+                    "username": "admin_teste", "senha": "senha-admin-teste-forte",
+                    "csrf_token": token,
+                })
+                token = re.search(r'name="csrf_token" value="([^"]+)"', admin.get("/usuarios/novo").text).group(1)
+                dados = {
+                    "csrf_token": token, "username": "ana", "email": "ana@example.com",
+                    "nome_publico": "Ana", "arroba": "ana",
+                    "senha": "senha-inicial-segura", "confirmar_senha": "senha-inicial-segura",
+                    "role": "admin",
+                }
+                resposta = admin.post("/usuarios", data=dados, follow_redirects=False)
+                usuario = db.obter_usuario_por_login("ana")
+                self.assertEqual(resposta.status_code, 303)
+                self.assertEqual(usuario["role"], "cliente")
+                self.assertTrue(usuario["email_verified"])
+                self.assertTrue(autenticacao.verificar_senha(usuario["password_hash"], dados["senha"]))
+                self.assertNotEqual(usuario["password_hash"], dados["senha"])
+                self.assertEqual(admin.post("/usuarios", data=dados).status_code, 400)
+                usuario_id = usuario["id"]
+                admin.post(f"/usuarios/{usuario_id}/perfil",
+                           data={"csrf_token": token, "role": ["cliente", "admin"]})
+                self.assertEqual(db.obter_usuario_por_id(usuario_id)["role"], "admin")
+                admin.post(f"/usuarios/{usuario_id}/perfil",
+                           data={"csrf_token": token, "role": "cliente"})
+                self.assertEqual(db.obter_usuario_por_id(usuario_id)["role"], "cliente")
+
+            with TestClient(app) as usuario_client:
+                token = re.search(r'name="csrf_token" value="([^"]+)"', usuario_client.get("/login").text).group(1)
+                login = usuario_client.post("/login", data={
+                    "csrf_token": token, "username": "ana", "senha": dados["senha"],
+                }, follow_redirects=False)
+                self.assertEqual(login.status_code, 303)
+                self.assertEqual(usuario_client.get("/usuarios").status_code, 403)
+                self.assertEqual(usuario_client.post("/usuarios", data=dados).status_code, 403)
+
+    def test_busca_usuario_e_restrita_ao_proprio_alvo(self):
+        with (
+            TemporaryDirectory() as diretorio,
+            patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"),
+            patch.dict(os.environ, {"EMAIL_VERIFICATION_REQUIRED": "false", "SERPAPI_API_KEY": ""}),
+        ):
+            db.iniciar_banco()
+            senha_hash = autenticacao.hash_senha("senha-cliente-teste-forte")
+            primeiro = db.criar_usuario("ana", "ana@example.com", senha_hash, "Ana", "ana")
+            segundo = db.criar_usuario("bia", "bia@example.com", senha_hash, "Bia", "bia")
+            db.criar_admin_se_ausente(
+                "admin_teste", "admin@example.com",
+                autenticacao.hash_senha("senha-admin-teste-forte"),
+            )
+            db.confirmar_email(primeiro)
+            db.confirmar_email(segundo)
+            with TestClient(app) as cliente:
+                token = re.search(r'name="csrf_token" value="([^"]+)"', cliente.get("/login").text).group(1)
+                cliente.post("/login", data={"username": "ana", "senha": "senha-cliente-teste-forte", "csrf_token": token})
+                pagina = cliente.get("/busca-web")
+                token = re.search(r'name="csrf_token" value="([^"]+)"', pagina.text).group(1)
+                self.assertEqual(pagina.status_code, 200)
+                self.assertNotIn('id="search-target"', pagina.text)
+                self.assertNotIn("Uso da conta SerpApi", pagina.text)
+                self.assertEqual(cliente.get(f"/busca-web?target_user_id={segundo}").status_code, 403)
+                self.assertEqual(cliente.get(f"/valida?target_user_id={segundo}").status_code, 403)
+                for endpoint in ("/buscar-vazamentos", "/buscar-serpapi"):
+                    resposta = cliente.post(endpoint, data={
+                        "csrf_token": token, "target_user_id": segundo,
+                        "api": "google_images_light", "consentimento": "on",
+                    })
+                    self.assertEqual(resposta.status_code, 403)
+                self.assertEqual(cliente.post("/busca-vazamentos/config", data={
+                    "csrf_token": token, "termos": "alterado", "sites": "exemplo.com",
+                }).status_code, 403)
+                with patch("app.main._executar_busca_vazamentos") as executar:
+                    resposta = cliente.post("/buscar-vazamentos", data={
+                        "csrf_token": token, "api": "google_images_light", "consentimento": "on",
+                    })
+                self.assertEqual(resposta.status_code, 200)
+                self.assertEqual(executar.call_args.args[0]["id"], primeiro)
+                self.assertIn('"Ana"', executar.call_args.args[2][0])
+            with TestClient(app) as admin:
+                token = re.search(r'name="csrf_token" value="([^"]+)"', admin.get("/login").text).group(1)
+                admin.post("/login", data={
+                    "username": "admin_teste", "senha": "senha-admin-teste-forte",
+                    "csrf_token": token,
+                })
+                pagina = admin.get(f"/busca-web?target_user_id={segundo}")
+                self.assertIn("Bia (@bia)", pagina.text)
+                token = re.search(r'name="csrf_token" value="([^"]+)"', pagina.text).group(1)
+                with patch("app.main._executar_busca_vazamentos") as executar:
+                    resposta = admin.post("/buscar-vazamentos", data={
+                        "csrf_token": token, "target_user_id": segundo,
+                        "api": "google_images_light", "consentimento": "on",
+                    })
+                self.assertEqual(resposta.status_code, 200)
+                self.assertEqual(executar.call_args.args[0]["id"], segundo)
+                self.assertIn('"Bia"', executar.call_args.args[2][0])
+
+    def test_usuario_criado_pelo_admin_respeita_confirmacao_de_email(self):
+        with (
+            TemporaryDirectory() as diretorio,
+            patch.object(db, "CAMINHO_DB", Path(diretorio) / "auth.db"),
+            patch.dict(os.environ, {"EMAIL_VERIFICATION_REQUIRED": "true"}),
+            patch("app.main.autenticacao.email_configurado", return_value=True),
+            patch("app.main._enviar_email_token") as enviar,
+        ):
+            db.iniciar_banco()
+            db.criar_admin_se_ausente(
+                "admin_teste", "admin@example.com",
+                autenticacao.hash_senha("senha-admin-teste-forte"),
+            )
+            with TestClient(app) as admin:
+                token = re.search(r'name="csrf_token" value="([^"]+)"', admin.get("/login").text).group(1)
+                admin.post("/login", data={
+                    "username": "admin_teste", "senha": "senha-admin-teste-forte", "csrf_token": token,
+                })
+                token = re.search(r'name="csrf_token" value="([^"]+)"', admin.get("/usuarios/novo").text).group(1)
+                resposta = admin.post("/usuarios", data={
+                    "csrf_token": token, "username": "ana", "email": "ana@example.com",
+                    "nome_publico": "Ana", "arroba": "ana",
+                    "senha": "senha-inicial-segura", "confirmar_senha": "senha-inicial-segura",
+                }, follow_redirects=False)
+                self.assertEqual(resposta.status_code, 303)
+            usuario = db.obter_usuario_por_login("ana")
+            self.assertFalse(usuario["email_verified"])
+            enviar.assert_awaited_once_with(usuario["id"], "ana@example.com", "ana", "confirmar_email")
+            with TestClient(app) as cliente:
+                token = re.search(r'name="csrf_token" value="([^"]+)"', cliente.get("/login").text).group(1)
+                resposta = cliente.post("/login", data={
+                    "csrf_token": token, "username": "ana", "senha": "senha-inicial-segura",
+                })
+                self.assertEqual(resposta.status_code, 403)
+
+    def test_remocao_de_perfis_sem_conta_preserva_conteudo_de_usuario(self):
+        from app.main import _remover_criadoras_antigas
+
+        with TemporaryDirectory() as diretorio:
+            pasta = Path(diretorio)
+            with (
+                patch.object(db, "CAMINHO_DB", pasta / "auth.db"),
+                patch("app.main.PASTA_OFICIAIS", pasta),
+            ):
+                db.iniciar_banco()
+                usuario = db.criar_usuario("ana", "ana@example.com", "hash", "Ana", "ana")
+                sem_conta = db.criar_criadora_com_contato("Antiga", "antiga@example.com")
+                vinculada = db.criar_criadora_com_contato("Ana", "ana@example.com")
+                with db.conexao() as conn:
+                    conn.execute("UPDATE criadoras SET user_id = ? WHERE id = ?", (usuario, vinculada))
+                for arquivo in ("antiga.png", "compartilhada.png"):
+                    (pasta / arquivo).write_bytes(b"foto")
+                    db.adicionar_conteudo(sem_conta, "foto", arquivo, arquivo, ["a" * 16])
+                db.adicionar_conteudo(vinculada, "foto", "compartilhada.png", "foto", ["b" * 16])
+                db.adicionar_site_oficial(sem_conta, "Site", "https://example.com/antiga")
+                _remover_criadoras_antigas()
+                _remover_criadoras_antigas()
+                self.assertIsNone(db.obter_criadora(sem_conta))
+                self.assertIsNotNone(db.obter_criadora(vinculada))
+                self.assertFalse((pasta / "antiga.png").exists())
+                self.assertTrue((pasta / "compartilhada.png").exists())
+                self.assertEqual(len(db.listar_hashes_criadora_do_usuario(usuario)), 1)
+
+    def test_usuario_com_catalogo_antigo_pode_usar_nome_publico_repetido(self):
+        with TemporaryDirectory() as diretorio, patch.object(
+            db, "CAMINHO_DB", Path(diretorio) / "auth.db"
+        ):
+            db.iniciar_banco()
+            primeiro = db.criar_usuario("ana", "ana@example.com", "hash", "Ana", "ana")
+            segundo = db.criar_usuario("bia", "bia@example.com", "hash", "Bia", "bia")
+            primeira = db.criar_criadora_com_contato("Ana", "ana@example.com")
+            segunda = db.criar_criadora_com_contato("Bia", "bia@example.com")
+            with db.conexao() as conn:
+                conn.execute("UPDATE criadoras SET user_id = ? WHERE id = ?", (primeiro, primeira))
+                conn.execute("UPDATE criadoras SET user_id = ? WHERE id = ?", (segundo, segunda))
+            db.atualizar_perfil_busca(segundo, "Ana", "nova_bia")
+            self.assertEqual(db.obter_usuario_por_id(segundo)["public_name"], "Ana")
+            self.assertEqual(db.obter_criadora(segunda)["handle"], "nova_bia")
 
     def test_hash_de_senha_verifica_sem_armazenar_senha_em_texto(self):
         senha = "uma-senha-forte-de-teste"

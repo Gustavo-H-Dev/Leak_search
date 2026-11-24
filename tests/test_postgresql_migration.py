@@ -54,6 +54,11 @@ class MigracaoPostgresTest(unittest.TestCase):
             "hash-de-senha",
         )
         usuario = db.obter_usuario_por_login("admin")
+        with db.conexao() as conn:
+            conn.execute(
+                "UPDATE criadoras SET user_id = ?, email = ?, handle = ? WHERE id = ?",
+                (usuario["id"], "admin@example.com", "admin", self.criadora_id),
+            )
         db.salvar_token_auth(
             "token-hash",
             usuario["id"],
@@ -90,6 +95,8 @@ class MigracaoPostgresTest(unittest.TestCase):
         migrar_sqlite_para_postgres._ajustar_sequencias()
 
         self.assertEqual(db.listar_criadoras()[0]["nome"], "Ana")
+        self.assertEqual(db.obter_criadora(self.criadora_id)["user_id"], 1)
+        self.assertEqual(db.remover_criadoras_sem_conta(), [])
         self.assertEqual(
             db.listar_sites_oficiais()[0]["url"],
             "https://exemplo.com/perfil/ana",
@@ -116,6 +123,23 @@ class MigracaoPostgresTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "já contém registros"):
             migrar_sqlite_para_postgres._validar_destino_vazio()
 
+    def test_remocao_de_perfis_antigos_e_nome_repetido(self):
+        db.iniciar_banco()
+        primeiro = db.criar_usuario("ana", "ana@example.com", "hash", "Ana", "ana")
+        segundo = db.criar_usuario("bia", "bia@example.com", "hash", "Bia", "bia")
+        primeira = db.criar_criadora_com_contato("Ana", "ana@example.com")
+        segunda = db.criar_criadora_com_contato("Bia", "bia@example.com")
+        antiga = db.criar_criadora_com_contato("Antiga", "antiga@example.com")
+        with db.conexao() as conn:
+            conn.execute("UPDATE criadoras SET user_id = ? WHERE id = ?", (primeiro, primeira))
+            conn.execute("UPDATE criadoras SET user_id = ? WHERE id = ?", (segundo, segunda))
+        db.adicionar_conteudo(antiga, "foto", "antiga.png", "antiga.png", ["a" * 16])
+        db.atualizar_perfil_busca(segundo, "Ana", "nova_bia")
+        self.assertEqual(db.obter_usuario_por_id(segundo)["public_name"], "Ana")
+        self.assertEqual(db.remover_criadoras_sem_conta(), ["antiga.png"])
+        self.assertIsNone(db.obter_criadora(antiga))
+        self.assertIsNotNone(db.obter_criadora(segunda))
+
 
 class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
     def test_copia_perfil_fotos_sites_e_relatos_para_o_banco_destino(self):
@@ -130,6 +154,17 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                     "cliente", "cliente@example.com", "password-hash"
                 )
                 db.atualizar_perfil_busca(user_id, "BlackDragon", "user875s")
+                criadora_id = db.criar_criadora_com_contato(
+                    "BlackDragon", "cliente@example.com", "user875s"
+                )
+                with db.conexao() as conn:
+                    conn.execute(
+                        "UPDATE criadoras SET user_id = ? WHERE id = ?",
+                        (user_id, criadora_id),
+                    )
+                db.adicionar_conteudo(
+                    criadora_id, "foto", "catalogo.png", "catalogo.png", ["a" * 16]
+                )
                 db.adicionar_foto_busca(user_id, "foto.png", "foto original.png")
                 db.adicionar_site_oficial_usuario(
                     user_id,
@@ -168,6 +203,11 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
 
                 usuario = db.obter_usuario_por_id(user_id)
                 self.assertEqual(usuario["public_name"], "BlackDragon")
+                criadora = db.obter_criadora(criadora_id)
+                self.assertEqual(criadora["user_id"], user_id)
+                self.assertEqual(criadora["handle"], "user875s")
+                self.assertEqual(db.remover_criadoras_sem_conta(), [])
+                self.assertEqual(len(db.listar_hashes_criadora_do_usuario(user_id)), 1)
                 self.assertEqual(
                     db.listar_fotos_busca(user_id)[0]["nome_original"],
                     "foto original.png",

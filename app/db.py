@@ -618,34 +618,21 @@ def atualizar_perfil_busca(user_id, public_name, public_handle):
         atualizado = cur.rowcount > 0
         conn.execute(
             """
-            UPDATE criadoras SET nome = ?, handle = ?
+            UPDATE criadoras
+            SET nome = CASE
+                WHEN EXISTS (SELECT 1 FROM criadoras outra
+                             WHERE outra.nome = ? AND outra.id != criadoras.id)
+                THEN nome ELSE ? END,
+                handle = ?
             WHERE user_id = ?
             """,
-            (public_name, public_handle, user_id),
+            (public_name, public_name, public_handle, user_id),
         )
         return atualizado
 
 
-def perfil_criadora_disponivel(nome, email):
-    with conexao() as conn:
-        mesma_email = conn.execute(
-            """
-            SELECT id FROM criadoras
-            WHERE lower(email) = lower(?) AND user_id IS NULL
-            """,
-            (email,),
-        ).fetchone()
-        nome_existente = conn.execute(
-            "SELECT id FROM criadoras WHERE lower(nome) = lower(?)",
-            (nome,),
-        ).fetchone()
-        if nome_existente is None:
-            return True
-        return mesma_email is not None and mesma_email["id"] == nome_existente["id"]
-
-
 def listar_usuarios_para_busca():
-    """Todas as contas são criadoras; as sem perfil de busca vêm por último."""
+    """Lista contas, deixando as sem perfil de busca por último."""
     with conexao() as conn:
         return conn.execute(
             """
@@ -978,50 +965,38 @@ def atualizar_senha(user_id, password_hash):
 def confirmar_email(user_id):
     with conexao() as conn:
         conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
-        usuario = conn.execute(
-            """
-            SELECT email, public_name, public_handle
-            FROM users WHERE id = ?
-            """,
-            (user_id,),
-        ).fetchone()
-        if not usuario or not usuario["public_name"] or not usuario["public_handle"]:
-            return
 
-        criadora = conn.execute(
-            """
-            SELECT id FROM criadoras
-            WHERE lower(email) = lower(?) AND user_id IS NULL
-            """,
-            (usuario["email"],),
-        ).fetchone()
-        if criadora:
-            conn.execute(
+
+def remover_criadoras_sem_conta():
+    """Remove registros antigos sem conta e retorna arquivos não compartilhados."""
+    with conexao() as conn:
+        arquivos = [
+            linha["arquivo"] for linha in conn.execute(
                 """
-                UPDATE criadoras SET user_id = ?, nome = ?, handle = ?
-                WHERE id = ? AND user_id IS NULL
-                """,
-                (
-                    user_id,
-                    usuario["public_name"],
-                    usuario["public_handle"],
-                    criadora["id"],
-                ),
-            )
-            return
-
+                SELECT DISTINCT c.arquivo FROM conteudos c
+                JOIN criadoras cr ON cr.id = c.criadora_id
+                WHERE cr.user_id IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM conteudos outro
+                    JOIN criadoras dona ON dona.id = outro.criadora_id
+                    WHERE outro.arquivo = c.arquivo AND dona.user_id IS NOT NULL
+                )
+                """
+            ).fetchall()
+        ]
         conn.execute(
-            """
-            INSERT INTO criadoras (nome, email, handle, user_id)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                usuario["public_name"],
-                usuario["email"],
-                usuario["public_handle"],
-                user_id,
-            ),
+            """DELETE FROM hashes WHERE conteudo_id IN (
+                SELECT c.id FROM conteudos c JOIN criadoras cr ON cr.id = c.criadora_id
+                WHERE cr.user_id IS NULL
+            )"""
         )
+        conn.execute(
+            "DELETE FROM conteudos WHERE criadora_id IN (SELECT id FROM criadoras WHERE user_id IS NULL)"
+        )
+        conn.execute(
+            "DELETE FROM sites_oficiais WHERE criadora_id IN (SELECT id FROM criadoras WHERE user_id IS NULL)"
+        )
+        conn.execute("DELETE FROM criadoras WHERE user_id IS NULL")
+        return arquivos
 
 
 def salvar_token_auth(token_hash, user_id, purpose, expires_at):

@@ -390,7 +390,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                 user_id = db.criar_usuario("cliente", "c@example.com", "hash")
                 db.atualizar_perfil_busca(user_id, "Ana", "ana")
                 request = self.criar_request("/buscar-serpapi")
-                request.state.user = {"id": user_id, "username": "cliente", "role": "cliente"}
+                request.state.user = {"id": user_id, "username": "cliente", "role": "admin"}
                 for patcher in self.patchers_snapshot:
                     patcher.stop()
                 with patch("app.main.serpapi.pesquisar", return_value=resposta):
@@ -554,7 +554,9 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             }) as status,
             patch("app.main.serpapi.pesquisar") as pesquisar,
         ):
-            corpo = pagina_busca_na_web(self.criar_request("/busca-web")).body.decode()
+            request = self.criar_request("/busca-web")
+            request.state.user["role"] = "admin"
+            corpo = pagina_busca_na_web(request).body.decode()
         status.assert_called_once_with()
         pesquisar.assert_not_called()
         self.assertIn("Atualizar saldo", corpo)
@@ -580,7 +582,9 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             patch("app.main.db.listar_sites_vazados", return_value=[]),
             patch("app.main.serpapi.obter_status_conta", side_effect=serpapi.ErroSerpApi("erro")),
         ):
-            corpo = pagina_busca_na_web(self.criar_request("/busca-web")).body.decode()
+            request = self.criar_request("/busca-web")
+            request.state.user["role"] = "admin"
+            corpo = pagina_busca_na_web(request).body.decode()
         self.assertIn("Não foi possível consultar a conta SerpApi", corpo)
 
     async def test_instagram_profile_envia_apenas_profile_id(self):

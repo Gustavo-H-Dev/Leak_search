@@ -1,142 +1,39 @@
 {% extends "base.html" %}
-{% block titulo %}Criadoras e usuários{% endblock %}
+{% block titulo %}Usuários{% endblock %}
 {% block conteudo %}
-{% macro conta_usuario(usuario) %}
-<div class="user-details">
-  <dl>
-    <div><dt>Usuário</dt><dd>{{ usuario.username }}</dd></div>
-    <div><dt>E-mail</dt><dd>{{ usuario.email }}</dd></div>
-    <div><dt>Confirmação</dt><dd>{{ "Confirmado" if usuario.email_verified else "Pendente" }}</dd></div>
-    <div><dt>Cadastro</dt><dd>{{ usuario.created_at }}</dd></div>
-    <div><dt>Perfil</dt><dd>{{ "Administrador" if usuario.role == "admin" else "Criadora" }}</dd></div>
-  </dl>
-  {% if current_user and usuario.id == current_user.id %}
-  <p>Sua conta</p>
-  {% else %}
-  <form class="user-role-form" method="post" action="/usuarios/{{ usuario.id }}/perfil">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="field-label" for="user-role-{{ usuario.id }}">Perfil de {{ usuario.username }}</label>
-    <select id="user-role-{{ usuario.id }}" name="role">
-      <option value="cliente" {% if usuario.role == "cliente" %}selected{% endif %}>Criadora</option>
-      <option value="admin" {% if usuario.role == "admin" %}selected{% endif %}>Administrador</option>
-    </select>
-    <button type="submit">Salvar perfil</button>
-  </form>
-  {% endif %}
-</div>
-{% endmacro %}
-<h1>Criadoras e usuários</h1>
-<p>Gerencie contas, perfis de criadoras e conteúdo oficial em um só lugar.</p>
+<h1>Usuários</h1>
+<p>Cadastre usuários e gerencie as permissões de administrador.</p>
 {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
-{% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
-
-<section class="creator-create">
-  <a class="button button-primary" href="/criadoras/nova">Novo</a>
-</section>
-
+{% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
+<p><a class="button button-primary" href="/usuarios/novo">Novo usuário</a></p>
 <section class="creators-list">
-  <h2>Criadoras cadastradas ({{ criadoras|length }})</h2>
-  {% if criadoras %}
-  <div class="creator-table" role="table">
-    <div class="creator-table-head" role="row">
-      <span role="columnheader">Foto da criadora</span>
-      <span role="columnheader">Nome da criadora</span>
-      <span role="columnheader">Instagram da criadora</span>
-      <span role="columnheader" aria-hidden="true"></span>
-    </div>
-    {% for criadora in criadoras %}
-    <div class="creator-table-row" role="row">
-      <div class="creator-cell-photo" role="cell">
-        {% set foto = criadora.conteudos[0] if criadora.conteudos else None %}
-        {% if foto %}
-        <img class="creator-photo" src="/arquivos/{{ foto.arquivo }}" alt="Foto de {{ criadora.nome }}">
-        {% else %}
-        <div class="creator-photo-placeholder" aria-hidden="true">—</div>
-        {% endif %}
-      </div>
-      <div class="creator-cell-name" role="cell">
-        <h3>{{ criadora.nome }}</h3>
-        {% if criadora.email %}<p class="creator-email">{{ criadora.email }}</p>{% endif %}
-        {% if criadora.user_id %}
-        <p class="api-status api-status-ready">
-          Conta associada: {{ criadora.username }} ·
-          {{ "e-mail confirmado" if criadora.email_verified else "e-mail pendente" }}
-        </p>
-        {% else %}
-        <p class="api-status api-status-missing">
-          {{ "Aguardando a criadora criar a conta usando este e-mail." if criadora.email else "Perfil sem conta associada." }}
-        </p>
-        {% endif %}
-      </div>
-      <div class="creator-cell-handle" role="cell">
-        {% if criadora.handle %}<a href="https://instagram.com/{{ criadora.handle }}">@{{ criadora.handle }}</a>{% else %}<span class="muted">—</span>{% endif %}
-      </div>
-      <div class="creator-cell-action" role="cell">
-        <div class="creator-actions">
-          <a class="button button-secondary" href="/criadoras/{{ criadora.id }}/editar">Editar</a>
-          {% if not criadora.user_id %}
-          <form method="post" action="/criadoras/{{ criadora.id }}/excluir" onsubmit="return confirm('Tem certeza que deseja excluir esta criadora e todo o seu conteúdo? Esta ação não pode ser desfeita.');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-danger" type="submit">Excluir</button>
-          </form>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}
-  <p>Nenhuma criadora cadastrada.</p>
-  {% endif %}
-</section>
-
-{% if usuarios_sem_criadora %}
-<section class="creators-list">
-  <h2>Usuários sem perfil de criadora ({{ usuarios_sem_criadora|length }})</h2>
-  <div class="creator-cards">
-  {% for usuario in usuarios_sem_criadora %}
+  <h2>Usuários cadastrados ({{ usuarios|length }})</h2>
+  {% for usuario in usuarios %}
   <article class="creator-card">
-    <details>
-      <summary><h3 style="display:inline">{{ usuario.username }}</h3></summary>
-      <p>Conta sem perfil de criadora associado.</p>
-      {{ conta_usuario(usuario) }}
-    </details>
-  </article>
-  {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-{% if sites_sem_criadora %}
-<section class="official-sites">
-  <h2>Sites sem criadora vinculada</h2>
-  <p>Associe os registros antigos a uma criadora para incluí-los no catálogo.</p>
-  {% for site in sites_sem_criadora %}
-  <article class="official-page-item">
-    <p class="api-status api-status-missing">
-      Registro anterior sem criadora vinculada. Confira a URL antes de associá-lo.
-    </p>
-    {% if criadoras %}
-    <form class="official-page-edit" method="post" action="/sites-oficiais/{{ site.id }}/editar">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label class="field-label" for="legacy-site-creator-{{ site.id }}">Criadora</label>
-      <select id="legacy-site-creator-{{ site.id }}" name="criadora_id" required>
-        <option value="">Selecione</option>
-        {% for criadora in criadoras %}
-        <option value="{{ criadora.id }}">{{ criadora.nome }}</option>
-        {% endfor %}
-      </select>
-      <label class="field-label" for="legacy-site-name-{{ site.id }}">Nome da página</label>
-      <input id="legacy-site-name-{{ site.id }}" name="nome" value="{{ site.nome }}" maxlength="80" required>
-      <label class="field-label" for="legacy-site-url-{{ site.id }}">URL exata</label>
-      <input id="legacy-site-url-{{ site.id }}" name="url" type="url" value="{{ site.url }}" required>
-      <button type="submit">Associar à criadora</button>
-    </form>
+    <h3>{{ usuario.public_name or usuario.username }}</h3>
+    <dl>
+      <div><dt>Usuário</dt><dd>{{ usuario.username }}</dd></div>
+      <div><dt>E-mail</dt><dd>{{ usuario.email }}</dd></div>
+      <div><dt>Instagram</dt><dd>{% if usuario.public_handle %}@{{ usuario.public_handle }}{% else %}Não informado{% endif %}</dd></div>
+      <div><dt>Confirmação</dt><dd>{{ "Confirmado" if usuario.email_verified else "Pendente" }}</dd></div>
+      <div><dt>Cadastro</dt><dd>{{ usuario.created_at }}</dd></div>
+    </dl>
+    {% if usuario.id == current_user.id %}
+    <p>Sua conta: administrador.</p>
     {% else %}
-    <p>Cadastre uma criadora antes de associar este site.</p>
+    <form class="user-role-form" method="post" action="/usuarios/{{ usuario.id }}/perfil">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="role" value="cliente">
+      <label class="consent-control">
+        <input type="checkbox" name="role" value="admin" {% if usuario.role == "admin" %}checked{% endif %}>
+        <span>Administrador</span>
+      </label>
+      <button type="submit">Salvar permissão</button>
+    </form>
     {% endif %}
   </article>
+  {% else %}
+  <p>Nenhum usuário cadastrado.</p>
   {% endfor %}
 </section>
-{% endif %}
 {% endblock %}

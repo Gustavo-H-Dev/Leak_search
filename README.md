@@ -1,6 +1,6 @@
 ## Busca de imagens na web
 
-A seção Google Cloud Vision da página `/busca-web` usa o recurso Web Detection do Google Cloud Vision para
+A rota legada de Google Cloud Vision usa o recurso Web Detection para
 procurar páginas públicas com imagens correspondentes. A imagem só é enviada
 depois que a pessoa marca a confirmação no formulário; o aplicativo não a grava
 no catálogo nem no disco durante essa busca. Consulte as
@@ -17,7 +17,8 @@ Para habilitar a busca:
    ou produção, forneça credenciais ao processo de forma segura e defina
    `GOOGLE_APPLICATION_CREDENTIALS` para o caminho dessas credenciais dentro do
    contêiner. Não versione chaves ou arquivos de credenciais.
-3. Acesse `/busca-web` e confirme o envio da imagem em cada busca.
+3. A rota legada exige administrador e confirmação para cada busca; ela não é
+   apresentada na página `/busca-web`.
 
 Os resultados são páginas e imagens públicas que o serviço conseguiu indexar;
 não garantem cobertura total nem identificam com certeza quem publicou.
@@ -27,11 +28,8 @@ disponibilizar o site publicamente para controlar custos de APIs externas.
 
 ## Provedores de busca
 
-As telas de busca mostram um catálogo de provedores separado por tipo. Google
-Cloud Vision e SerpApi continuam sendo as integrações disponíveis nos fluxos
-atuais; Brave Search, TinEye, DataForSEO e SearXNG aparecem como opções futuras,
-mas ficam desabilitados e não recebem consultas. A seleção de um provedor ainda
-não integrado retorna uma mensagem explícita, sem simular uma busca.
+A página de busca usa SerpApi. Google Cloud Vision continua disponível somente
+pela rota legada de administrador; os demais provedores não estão integrados.
 
 As variáveis `BRAVE_SEARCH_API_KEY`, `TINEYE_API_KEY`, `DATAFORSEO_LOGIN`,
 `DATAFORSEO_PASSWORD` e `SEARXNG_BASE_URL` podem ser preparadas no `.env`, mas
@@ -54,17 +52,20 @@ cp .env.example .env
   primeiro início do aplicativo. Use a senha desejada somente no `.env`; senhas
   são armazenadas no banco como hashes Argon2. A conta existente não é
   sobrescrita em inicializações posteriores.
-- O cadastro público cria uma conta de criadora e solicita nome público e
-  arroba. Com `EMAIL_VERIFICATION_REQUIRED=false`, a conta é ativada na hora e
-  associada a um perfil existente com o mesmo e-mail, ou cria um perfil novo.
-  Administradores também podem cadastrar perfis sem conta. Nome e arroba são
+- O cadastro público cria uma conta e solicita nome público e arroba. Com
+  `EMAIL_VERIFICATION_REQUIRED=false`, ela é ativada na hora. Nome e arroba são
   autodeclarados.
-- A tela de criadoras e usuários, disponível em `/usuarios` e `/catalogo`,
-  é restrita a administradores. Ela reúne contas e perfis associados, incluindo
-  contas ou perfis ainda sem associação, e permite alterar o perfil de outras
-  contas para administrador ou criadora. Catálogo, comparação e buscas são restritos a
-  administradores; contas de criadoras não têm acesso aos arquivos, catálogo ou
-  ferramentas de busca.
+- Administradores podem criar contas em `/usuarios`, definindo uma senha
+  inicial a ser comunicada ao usuário por um meio seguro. A mesma configuração
+  de confirmação de e-mail vale para os dois tipos de cadastro.
+- Apenas administradores acessam a lista de usuários e podem conceder ou retirar
+  a permissão de administrador de outras contas. Todos podem pesquisar e
+  validar seus próprios resultados; somente administradores podem selecionar
+  outra conta. A configuração global de termos e sites é restrita a admins.
+- Ao iniciar esta versão, perfis antigos de criadoras sem conta vinculada são
+  removidos junto com seus sites e conteúdos. Arquivos compartilhados com
+  perfis vinculados são preservados; falhas na remoção de arquivos são
+  registradas no log. Contas e seus dados vinculados não são apagados.
 - Fotos de busca ficam em armazenamento privado, separadas dos arquivos
   públicos do catálogo. `USER_SEARCH_MEDIA_DIR` pode apontar para uma pasta
   persistente; por padrão, o app usa `fotos_busca` ao lado de `MEDIA_DIR`.
@@ -134,8 +135,7 @@ administradores, o usuário selecionado. Os resultados podem ser marcados como
 site oficial, ocultados localmente com “Não sou eu” ou registrados como
 relatos de possível vazamento. Os relatos armazenam URL, data do registro,
 título, origem, resumo e outros dados retornados pela API; não são uma
-verificação automática do conteúdo. Criadoras cadastradas sem conta vinculada
-ainda não estão disponíveis no seletor de busca.
+verificação automática do conteúdo.
 
 A página reúne quatro mecanismos no seletor de endpoint do card de busca:
 
@@ -176,8 +176,8 @@ a chave e monitore os custos.
 
 ## Fluxo de busca e validação (Valida)
 
-1. Em `/busca-web`, o administrador escolhe a conta pesquisada e o endpoint
-   SerpApi (por exemplo, Google Images ou Images Light).
+1. Em `/busca-web`, escolha o endpoint SerpApi (por exemplo, Google Images ou
+   Images Light). O administrador também pode escolher outra conta.
 2. Os resultados da API não são listados ali. O servidor omite páginas oficiais
    e páginas filhas de um site oficial (mesmo domínio e caminho abaixo da página
    cadastrada; vale para qualquer dono, inclusive dono incerto), resultados já
@@ -195,28 +195,20 @@ a chave e monitore os custos.
    **não sou eu** ou **oficial**. Vazados entram na lista de relatos; oficiais
    passam a ser omitidos nas próximas buscas.
 
-Ao carregar a página, o uso do mês, a cota e as consultas restantes são
+Para administradores, ao carregar a página, o uso do mês, a cota e as consultas restantes são
 consultados automaticamente; o botão **Atualizar saldo** repete a consulta pela
 [Account API](https://serpapi.com/account-api). Essa é uma chamada HTTP separada
 da busca, mas a SerpApi informa que a Account API é gratuita e não consome a
 cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; sem
 uma conta e chave SerpApi, não há saldo que o site possa consultar.
 
-No catálogo, a criadora é o cadastro principal. Um perfil pode existir sem
-conta; no cadastro público, a conta é associada a um perfil existente com o
-mesmo e-mail. Foto e site oficial são opcionais; sites e fotos já cadastrados
-ficam agrupados dentro do registro da criadora e também podem ser adicionados
-depois. As buscas do Google Vision,
-SerpApi e Instagram só marcam a URL exata da página cadastrada (sem considerar
-outras páginas do mesmo domínio); no fluxo Valida, páginas filhas da URL
-cadastrada também são tratadas como oficiais. Endereços
-globais cadastrados em versões anteriores são preservados como pendentes, sem
-serem considerados oficiais, até que sejam associados a uma criadora e
-revisados.
+Fotos e sites oficiais podem ser adicionados em `/perfil-busca`. Referências
+antigas já vinculadas a contas continuam disponíveis para comparação na Valida.
 
 ## Testes com APIs do Instagram
 
-A seção Instagram da página `/busca-web` usa a mesma `SERPAPI_API_KEY` e mantém as duas
+As rotas legadas de Instagram usam a mesma `SERPAPI_API_KEY`, são restritas a
+administradores e não aparecem na página `/busca-web`. Elas mantêm duas
 consultas independentes:
 
 - **Instagram Profile API** recebe o nome de usuário (sem precisar do `@`) e
@@ -239,7 +231,8 @@ Em `/busca-web` (SerpApi), o card "Busca de vazamentos" combina nome e arroba da
 
 ### Posts oficiais do Instagram
 
-Em `/busca-web` > Instagram, "Importar posts oficiais" consulta o perfil seguindo a paginação da SerpApi (`next_page_token`; 1 crédito por página, até o máximo informado, limite 30; usa o Instagram cadastrado como site oficial da criadora se o usuário não for informado), registra cada post como oficial (por código do post, então `/p/`, `/reel/` e `/usuario/p/` casam) e guarda só o hash da miniatura como referência. Esses posts deixam de aparecer na Valida, e candidatos pendentes iguais são marcados como oficiais. Se o limite de páginas for atingido, aumente o máximo de páginas e importe de novo (recomeça da primeira).
+A rota legada de importação de posts oficiais do Instagram percorre páginas do
+perfil e guarda os hashes das miniaturas como referência.
 
 ### Análise dos dados
 

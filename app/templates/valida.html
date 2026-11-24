@@ -29,11 +29,11 @@
 
   {% if current_user.role == "admin" %}
   <form class="search-form target-user-form" method="get" action="/valida">
-    <label class="field-label" for="valida-target">Criadora</label>
+    <label class="field-label" for="valida-target">Usuário</label>
     <select id="valida-target" name="target_user_id" required>
       {% for usuario in target_users %}
       <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
-        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — sem perfil de busca (usa o usuário){% endif %}
+        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — perfil de busca incompleto{% endif %}
       </option>
       {% endfor %}
     </select>

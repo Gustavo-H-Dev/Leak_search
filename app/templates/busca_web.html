@@ -5,30 +5,33 @@
   <span class="eyebrow">BUSCA NA WEB</span>
   <h1>Busca na web</h1>
   <p class="search-intro">
-    Escolha a criadora e o endpoint. Os resultados são filtrados e os candidatos seguem
+    Escolha o endpoint. Os resultados são filtrados e os candidatos seguem
     para a página <a href="/valida">Valida</a>, onde são comparados por hash e validados.
   </p>
 
   {% if current_user.role == "admin" %}
   <form class="search-form target-user-form" method="get" action="/busca-web">
-    <label class="field-label" for="search-target">Criadora pesquisada</label>
+    <label class="field-label" for="search-target">Usuário pesquisado</label>
     <select id="search-target" name="target_user_id" required>
       {% for usuario in target_users %}
       <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}>
-        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — sem perfil de busca (usa o usuário){% endif %}
+        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — perfil de busca incompleto{% endif %}
       </option>
       {% endfor %}
     </select>
-    {% if not target_users %}<p>Nenhuma criadora cadastrada ainda.</p>{% endif %}
+    {% if not target_users %}<p>Nenhum usuário cadastrado ainda.</p>{% endif %}
     <button type="submit">Selecionar usuário</button>
-    <p>Criadoras sem conta vinculada ainda não aparecem neste seletor.</p>
   </form>
   {% endif %}
 
   {% if not perfil_busca_completo %}
   <p class="api-status api-status-missing">
+    {% if current_user.role == "admin" and target_user_id != current_user.id %}
+    Este usuário precisa completar o nome público e a arroba no perfil antes da busca.
+    {% else %}
     Complete o nome público e a arroba antes de pesquisar.
     <a href="/perfil-busca">Configurar perfil de busca</a>.
+    {% endif %}
   </p>
   {% endif %}
   {% if not api_key_configurada %}
@@ -37,6 +40,7 @@
   </p>
   {% endif %}
 
+  {% if current_user.role == "admin" %}
   <section class="account-usage" aria-labelledby="account-usage-title">
     <h2 id="account-usage-title">Uso da conta SerpApi</h2>
     {% if api_key_configurada %}
@@ -91,6 +95,7 @@
       <p class="account-usage-summary">Configure a chave no servidor para consultar o consumo e o saldo.</p>
     {% endif %}
   </section>
+  {% endif %}
 
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
@@ -100,6 +105,7 @@
     <details class="serpapi-card search-option" id="busca-vazamentos" {% if vazamento_status or api_ativa %}open{% endif %}>
       <summary><span class="eyebrow">00 · BUSCA DE VAZAMENTOS</span><strong>Termos e sites conhecidos, em poucas consultas</strong></summary>
       <p>Os resultados vão para a <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>.</p>
+      {% if current_user.role == "admin" %}
       <form class="search-form" method="post" action="/busca-vazamentos/config">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
@@ -109,6 +115,7 @@
         <textarea id="vaz-sites" name="sites" rows="4">{{ vazamento_sites|join("\n") }}</textarea>
         <button type="submit" class="button-secondary">Salvar termos e sites</button>
       </form>
+      {% endif %}
       {% if vazamento_status %}
       <div id="vazamento-status" data-estado="{{ vazamento_status.estado }}">
         {% if vazamento_status.estado == "rodando" %}
