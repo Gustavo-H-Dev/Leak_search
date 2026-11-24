@@ -768,7 +768,6 @@
           <a href="/valida">Valida</a>
           <a href="/perfil-busca">Meu perfil</a>
           {% if current_user.role == "admin" %}<a href="/analise">Análise</a>{% endif %}
-          <a href="/alterar-senha">Senha</a>
           <span class="nav-user">{{ current_user.username }}</span>
           <form class="nav-logout" method="post" action="/logout">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

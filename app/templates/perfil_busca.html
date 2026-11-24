@@ -18,6 +18,21 @@
   </form>
 
   <section class="profile-section">
+    <h2>Alterar senha</h2>
+    <form class="search-form profile-search-form" method="post" action="/perfil-busca/alterar-senha">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
+      <label class="field-label" for="current-password">Senha atual</label>
+      <input id="current-password" name="senha_atual" type="password" autocomplete="current-password" required>
+      <label class="field-label" for="new-password">Nova senha (mínimo 12 caracteres)</label>
+      <input id="new-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <label class="field-label" for="new-password-confirm">Confirme a nova senha</label>
+      <input id="new-password-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <button type="submit">Alterar senha</button>
+    </form>
+  </section>
+
+  <section class="profile-section">
     <h2>Fotos para suas buscas</h2>
     <p>Você pode salvar várias fotos e escolher uma delas ao fazer uma busca visual.</p>
     <form class="search-form profile-search-form" method="post" action="/perfil-busca/fotos" enctype="multipart/form-data">

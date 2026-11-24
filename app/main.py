@@ -542,17 +542,8 @@ def redefinir_senha(
     return RedirectResponse("/login?mensagem=senha_alterada", status_code=303)
 
 
-@app.get("/alterar-senha", response_class=HTMLResponse)
-def alterar_senha_formulario(request: Request, erro: str = "", mensagem: str = ""):
-    return templates.TemplateResponse(
-        request,
-        "alterar_senha.html",
-        {"erro": erro, "mensagem": mensagem},
-    )
-
-
-@app.post("/alterar-senha", response_class=HTMLResponse, dependencies=_csrf())
-def alterar_senha(
+@app.post("/perfil-busca/alterar-senha", dependencies=_csrf())
+def alterar_senha_perfil_busca(
     request: Request,
     senha_atual: str = Form(...),
     senha: str = Form(...),
@@ -562,22 +553,18 @@ def alterar_senha(
     if not usuario or not autenticacao.verificar_senha(
         usuario["password_hash"], senha_atual
     ):
-        return templates.TemplateResponse(
-            request,
-            "alterar_senha.html",
-            {"erro": "A senha atual está incorreta.", "mensagem": ""},
-            status_code=400,
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote("A senha atual está incorreta."),
+            status_code=303,
         )
     try:
         autenticacao.validar_senha(senha)
         if senha != confirmar_senha:
             raise ValueError("As senhas não coincidem.")
     except ValueError as erro:
-        return templates.TemplateResponse(
-            request,
-            "alterar_senha.html",
-            {"erro": str(erro), "mensagem": ""},
-            status_code=400,
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote(str(erro)),
+            status_code=303,
         )
     user_id = request.state.user["id"]
     db.atualizar_senha(user_id, autenticacao.hash_senha(senha))
