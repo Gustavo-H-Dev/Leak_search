@@ -134,12 +134,14 @@ administradores, o usuário selecionado. Os resultados podem ser marcados como
 site oficial, ocultados localmente com “Não sou eu” ou registrados como
 relatos de possível vazamento. Os relatos armazenam URL, data do registro,
 título, origem, resumo e outros dados retornados pela API; não são uma
-verificação automática do conteúdo.
+verificação automática do conteúdo. Criadoras cadastradas sem conta vinculada
+ainda não estão disponíveis no seletor de busca.
 
-A página separa quatro mecanismos e faz somente a chamada selecionada em cada
-envio:
+A página reúne quatro mecanismos no seletor de endpoint do card de busca:
 
 - **Google Images** e **Google Images Light**: buscas por texto, não por imagem.
+  A busca combina nome e arroba com os termos e sites configurados e pode
+  executar mais de uma consulta.
 - **Google Lens**: envia à SerpApi uma foto privada salva no perfil ou uma nova
   foto do próprio usuário, que fica salva para buscas futuras. Administradores
   podem pesquisar outros usuários por texto, mas não enviar as fotos deles.
@@ -174,8 +176,8 @@ a chave e monitore os custos.
 
 ## Fluxo de busca e validação (Valida)
 
-1. Em `/busca-web`, o administrador escolhe a criadora, o provedor (SerpApi ou
-   Google Cloud Vision) e o endpoint (por exemplo, Google Images ou Images Light).
+1. Em `/busca-web`, o administrador escolhe a conta pesquisada e o endpoint
+   SerpApi (por exemplo, Google Images ou Images Light).
 2. Os resultados da API não são listados ali. O servidor omite páginas oficiais
    e páginas filhas de um site oficial (mesmo domínio e caminho abaixo da página
    cadastrada; vale para qualquer dono, inclusive dono incerto), resultados já
@@ -193,8 +195,8 @@ a chave e monitore os custos.
    **não sou eu** ou **oficial**. Vazados entram na lista de relatos; oficiais
    passam a ser omitidos nas próximas buscas.
 
-Na página SerpApi, o botão **Consultar saldo** busca o uso do mês, a cota e as
-consultas restantes pela
+Ao carregar a página, o uso do mês, a cota e as consultas restantes são
+consultados automaticamente; o botão **Atualizar saldo** repete a consulta pela
 [Account API](https://serpapi.com/account-api). Essa é uma chamada HTTP separada
 da busca, mas a SerpApi informa que a Account API é gratuita e não consome a
 cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; sem

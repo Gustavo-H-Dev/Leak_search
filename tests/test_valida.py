@@ -75,6 +75,22 @@ class ValidaTest(unittest.TestCase):
         self.assertEqual([c["url"] for c in pendentes], ["https://outro.com/a"])
         self.assertEqual(pendentes[0]["phash"], "a" * 16)
 
+    def test_busca_google_images_guarda_opcoes_relacionadas(self):
+        from app import main
+
+        resposta = {"images_results": [
+            {"link": "https://x.com/1", "title": "Primeiro", "related_content_id": "abc"},
+            {"link": "https://x.com/2", "title": "Segundo", "related_content_id": "abc"},
+        ]}
+        with patch("app.main.serpapi.pesquisar", return_value=resposta):
+            main._executar_busca_vazamentos(
+                {"id": self.user_id}, "google_images", ["q"], {}
+            )
+        self.assertEqual(
+            main._status_vazamento(self.user_id)["related_options"],
+            [{"id": "abc", "title": "Primeiro"}],
+        )
+
     def test_posts_oficiais_do_instagram_importados_nao_viram_candidatos(self):
         user_id = self.user_id
         db.adicionar_hash_oficial(user_id, "https://www.instagram.com/p/AbC", "")

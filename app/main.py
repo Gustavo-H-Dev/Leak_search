@@ -1632,6 +1632,10 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
     }
     contexto.update(valores)
     _persistir_ou_restaurar_busca(request, contexto, valores)
+    if not contexto["related_options"] and contexto["vazamento_status"]:
+        contexto["related_options"] = contexto["vazamento_status"].get(
+            "related_options", []
+        )
     return templates.TemplateResponse(request, "busca_web.html", contexto)
 
 
@@ -1699,23 +1703,15 @@ def buscar_serpapi_formulario():
     dependencies=[Depends(exigir_admin)],
 )
 def pagina_busca_na_web(request: Request, target_user_id: int = 0):
-    return _contexto_serpapi(request, target_user_id=target_user_id)
-
-
-@app.post(
-    "/status-serpapi",
-    response_class=HTMLResponse,
-    dependencies=_admin_csrf(),
-)
-async def status_serpapi(request: Request, target_user_id: int = Form(0)):
+    _usuario_alvo_busca(request, target_user_id)
     if not os.getenv("SERPAPI_API_KEY", "").strip():
-        return _contexto_serpapi(
-            request,
-            target_user_id,
-            erro="Configure SERPAPI_API_KEY para consultar o uso da conta.",
-        )
+        return _contexto_serpapi(request, target_user_id=target_user_id)
+    return _consultar_status_serpapi(request, target_user_id)
+
+
+def _consultar_status_serpapi(request: Request, target_user_id: int):
     try:
-        status_conta = await run_in_threadpool(serpapi.obter_status_conta)
+        status_conta = serpapi.obter_status_conta()
     except serpapi.SerpApiNaoConfigurada as erro:
         return _contexto_serpapi(request, target_user_id, erro=str(erro))
     except serpapi.ErroSerpApi:
@@ -1734,6 +1730,22 @@ async def status_serpapi(request: Request, target_user_id: int = Form(0)):
         status_conta=status_conta,
         status_conta_atualizado=True,
     )
+
+
+@app.post(
+    "/status-serpapi",
+    response_class=HTMLResponse,
+    dependencies=_admin_csrf(),
+)
+async def status_serpapi(request: Request, target_user_id: int = Form(0)):
+    if not os.getenv("SERPAPI_API_KEY", "").strip():
+        return _contexto_serpapi(
+            request,
+            target_user_id,
+            erro="Configure SERPAPI_API_KEY para consultar o uso da conta.",
+        )
+    _usuario_alvo_busca(request, target_user_id)
+    return await run_in_threadpool(_consultar_status_serpapi, request, target_user_id)
 
 
 @app.post("/buscar-serpapi", response_class=HTMLResponse, dependencies=_admin_csrf())
@@ -1868,21 +1880,7 @@ async def buscar_serpapi(
     resumo_busca = await run_in_threadpool(
         _enviar_para_valida, alvo, resultados, api
     )
-    related_options = []
-    if api == "google_images":
-        ids_vistos = set()
-        for item in dados.get("images_results", []):
-            if not isinstance(item, dict):
-                continue
-            related_id = item.get("related_content_id")
-            if isinstance(related_id, str) and related_id and related_id not in ids_vistos:
-                related_options.append(
-                    {
-                        "id": related_id,
-                        "title": str(item.get("title") or "Resultado de imagem"),
-                    }
-                )
-                ids_vistos.add(related_id)
+    related_options = _opcoes_relacionadas(dados) if api == "google_images" else []
 
     return _contexto_serpapi(
         request,
@@ -1920,6 +1918,21 @@ def salvar_config_vazamentos(
 TEMPO_MAXIMO_BUSCA_VAZAMENTO = 900
 
 
+def _opcoes_relacionadas(dados):
+    opcoes = []
+    ids_vistos = set()
+    for item in dados.get("images_results", []):
+        if not isinstance(item, dict):
+            continue
+        related_id = item.get("related_content_id")
+        if isinstance(related_id, str) and related_id and related_id not in ids_vistos:
+            opcoes.append(
+                {"id": related_id, "title": str(item.get("title") or "Resultado de imagem")}
+            )
+            ids_vistos.add(related_id)
+    return opcoes
+
+
 def _chave_status_vazamento(user_id):
     return f"vazamento_status_{user_id}"
 
@@ -1944,10 +1957,14 @@ def _executar_busca_vazamentos(alvo, api, consultas, parametros):
     try:
         resultados = []
         por_consulta = []
+        related_options = {}
         for consulta in consultas:
             try:
                 dados = serpapi.pesquisar(api, q=consulta, **parametros)
                 encontrados = serpapi.normalizar_resultados(dados, api)
+                if api == "google_images":
+                    for opcao in _opcoes_relacionadas(dados):
+                        related_options[opcao["id"]] = opcao
             except serpapi.SemResultados:
                 encontrados = []
             por_consulta.append({"consulta": consulta, "resultados": len(encontrados)})
@@ -1960,6 +1977,7 @@ def _executar_busca_vazamentos(alvo, api, consultas, parametros):
                 "estado": "ok",
                 "resumo": resumo,
                 "por_consulta": por_consulta,
+                "related_options": list(related_options.values()),
                 "fim": time.time(),
             },
         )

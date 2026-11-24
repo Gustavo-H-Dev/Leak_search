@@ -5,9 +5,8 @@
   <span class="eyebrow">BUSCA NA WEB</span>
   <h1>Busca na web</h1>
   <p class="search-intro">
-    Escolha a criadora, a API e o endpoint. Os resultados da API são filtrados e os
-    candidatos seguem para a página <a href="/valida">Valida</a>, onde são
-    comparados por hash e validados pela criadora.
+    Escolha a criadora e o endpoint. Os resultados são filtrados e os candidatos seguem
+    para a página <a href="/valida">Valida</a>, onde são comparados por hash e validados.
   </p>
 
   {% if current_user.role == "admin" %}
@@ -22,45 +21,31 @@
     </select>
     {% if not target_users %}<p>Nenhuma criadora cadastrada ainda.</p>{% endif %}
     <button type="submit">Selecionar usuário</button>
+    <p>Criadoras sem conta vinculada ainda não aparecem neste seletor.</p>
   </form>
-  {% else %}
-  <p>Esta busca usa somente o perfil da sua conta: {{ target_user.public_name or target_user.username }}{% if target_user.public_handle %} (@{{ target_user.public_handle }}){% endif %}.</p>
   {% endif %}
 
   {% if not perfil_busca_completo %}
   <p class="api-status api-status-missing">
-    {% if current_user.role == "admin" and target_user.id != current_user.id %}
-    Esta criadora ainda não preencheu nome público e arroba; a busca usará o nome de usuário.
-    {% else %}
-    Complete seu nome público e arroba antes de pesquisar.
+    Complete o nome público e a arroba antes de pesquisar.
     <a href="/perfil-busca">Configurar perfil de busca</a>.
-    {% endif %}
   </p>
-  {% else %}
-  <p class="api-status api-status-ready">Termos da busca: <strong>{{ query_perfil }}</strong></p>
   {% endif %}
-
-  {% if api_key_configurada %}
-  <p class="api-status api-status-ready">Chave SerpApi configurada no servidor.</p>
-  {% else %}
+  {% if not api_key_configurada %}
   <p class="api-status api-status-missing">
-    Chave não configurada. Defina <code>SERPAPI_API_KEY</code> no ambiente do
-    Docker para habilitar as consultas. A chave nunca deve ser colocada neste
-    formulário ou no código do navegador.
+    Chave não configurada. Defina <code>SERPAPI_API_KEY</code> no ambiente do servidor.
   </p>
   {% endif %}
 
-  <details class="account-usage collapsible" {% if status_conta_atualizado %}open{% endif %}>
-    <summary>Uso da conta SerpApi</summary>
-    <div class="account-usage-heading">
-      {% if api_key_configurada %}
-      <form method="post" action="/status-serpapi">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <button type="submit">{% if status_conta %}Atualizar saldo{% else %}Consultar saldo{% endif %}</button>
-      </form>
-      {% endif %}
-    </div>
+  <section class="account-usage" aria-labelledby="account-usage-title">
+    <h2 id="account-usage-title">Uso da conta SerpApi</h2>
+    {% if api_key_configurada %}
+    <form method="post" action="/status-serpapi">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <button type="submit">Atualizar saldo</button>
+    </form>
+    {% endif %}
     {% if status_conta %}
       {% if status_conta.searches_per_month is defined and status_conta.this_month_usage is defined %}
       <p class="account-usage-summary">
@@ -70,12 +55,10 @@
         Restam <strong>{{ "{:,}".format(status_conta.plan_searches_left|int) }}</strong> no plano.
         {% endif %}
       </p>
-      <progress
-        class="usage-progress"
+      <progress class="usage-progress"
         value="{{ [status_conta.this_month_usage|int, status_conta.searches_per_month|int]|min }}"
         max="{{ [status_conta.searches_per_month|int, 1]|max }}"
-        aria-label="Consultas usadas neste mês"
-      ></progress>
+        aria-label="Consultas usadas neste mês"></progress>
       {% else %}
       <p class="account-usage-summary">
         {% if status_conta.total_searches_left is defined %}
@@ -104,53 +87,19 @@
       </dl>
       {% if status_conta_em and not status_conta_atualizado %}<p class="account-usage-note">Última consulta em {{ status_conta_em[:19]|replace("T", " ") }} (UTC).</p>{% endif %}
       <p class="account-usage-note">Consulta de saldo feita pela Account API; ela não consome consultas do seu plano.</p>
-    {% elif api_key_configurada %}
-      <p class="account-usage-summary">Clique em “Consultar saldo” para ver o limite e o consumo atual. Essa consulta é gratuita e não usa buscas do seu plano.</p>
-    {% else %}
-      <p class="account-usage-summary">Quando você criar sua conta na SerpApi e configurar a chave no servidor, poderá consultar aqui o consumo e o saldo. Ainda não fazemos nenhuma chamada à API.</p>
+    {% elif not api_key_configurada %}
+      <p class="account-usage-summary">Configure a chave no servidor para consultar o consumo e o saldo.</p>
     {% endif %}
-  </details>
+  </section>
 
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
 
-  <section class="provider-panel" aria-labelledby="providers-title">
-    <div>
-      <span class="eyebrow">CAMADA DE PROVEDORES</span>
-      <h2 id="providers-title">Escolha a fonte da consulta</h2>
-    </div>
-    <div class="provider-grid">
-      {% for provedor in provedores %}
-      <label class="provider-option {% if not provedor.integrado %}provider-disabled{% endif %}">
-        <input type="radio" name="provedor" value="{{ provedor.id }}" {% if provedor_selecionado == provedor.id %}checked{% endif %} {% if not provedor.integrado %}disabled{% endif %}>
-        <strong>{{ provedor.nome }}</strong>
-        <span>{{ provedor.descricao }}</span>
-        <small>{{ provedor.status }}</small>
-      </label>
-      {% endfor %}
-    </div>
-  </section>
-
-  <details class="collapsible"><summary>Privacidade e consumo de créditos</summary>
-  <p class="privacy-note">
-    Cada busca envia a consulta ou a imagem à SerpApi. A Google Lens API exige
-    o envio da imagem para a SerpApi; a documentação limita esse upload a
-    500 KB. Use apenas fotos suas, confira
-    os <a href="https://serpapi.com/pricing" target="_blank" rel="noopener noreferrer">limites e preços</a>
-    e as <a href="https://serpapi.com/terms" target="_blank" rel="noopener noreferrer">condições da SerpApi</a>
-    antes de testar com imagens sensíveis.
-  </p>
-  </details>
-
   <div class="serpapi-sections">
     <h2 class="search-group-title">Google via SerpApi</h2>
-    <details class="serpapi-card search-option" id="busca-vazamentos" {% if vazamento_status %}open{% endif %}>
+    <details class="serpapi-card search-option" id="busca-vazamentos" {% if vazamento_status or api_ativa %}open{% endif %}>
       <summary><span class="eyebrow">00 · BUSCA DE VAZAMENTOS</span><strong>Termos e sites conhecidos, em poucas consultas</strong></summary>
-      <p>
-        Combina nome e arroba com os termos e sites abaixo, agrupados com
-        <code>OR</code> para gastar poucos créditos. Os resultados vão para a
-        <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>.
-      </p>
+      <p>Os resultados vão para a <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>.</p>
       <form class="search-form" method="post" action="/busca-vazamentos/config">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
@@ -179,276 +128,61 @@
       </div>
       {% endif %}
       {% if vazamento_consultas %}
-      <p><strong>Esta busca usa {{ vazamento_consultas|length }} crédito(s)</strong> da SerpApi:</p>
+      <p><strong>A busca por texto usa {{ vazamento_consultas|length }} crédito(s)</strong> da SerpApi:</p>
       <ul>{% for consulta in vazamento_consultas %}<li><code>{{ consulta }}</code></li>{% endfor %}</ul>
       {% endif %}
-      <form class="search-form" method="post" action="/buscar-vazamentos">
+      <form id="endpoint-form" class="search-form" method="post" action="/buscar-vazamentos" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <label class="field-label" for="vaz-api">Endpoint</label>
         <select id="vaz-api" name="api">
           <option value="google_images_light">Google Images Light API</option>
           <option value="google_images">Google Images API</option>
+          <option value="google_lens">Google Lens API</option>
+          <option value="google_images_related_content">Google Images Related Content API</option>
         </select>
-        <label class="field-label" for="vaz-periodo">Período (opcional)</label>
-        <select id="vaz-periodo" name="periodo">
-          {% for chave, nome in vazamento_periodos.items() %}<option value="{{ chave }}">{{ nome }}</option>{% endfor %}
-        </select>
+        <div id="endpoint-texto">
+          <label class="field-label" for="vaz-periodo">Período (opcional)</label>
+          <select id="vaz-periodo" name="periodo">
+            {% for chave, nome in vazamento_periodos.items() %}<option value="{{ chave }}">{{ nome }}</option>{% endfor %}
+          </select>
+        </div>
+        <div id="endpoint-lens" hidden>
+          {% if target_user_id == current_user.id %}
+          <p>Envie uma foto sua à SerpApi. A foto nova será guardada no seu perfil.</p>
+          {% if fotos %}
+          <label class="field-label" for="lens-photo">Foto já salva</label>
+          <select id="lens-photo" name="foto_id">
+            <option value="">Selecione uma foto salva</option>
+            {% for foto in fotos %}<option value="{{ foto.id }}">{{ foto.nome_original }} — {{ foto.created_at }}</option>{% endfor %}
+          </select>
+          {% endif %}
+          <label class="field-label" for="lens-new-photo">Ou envie uma foto nova</label>
+          <input id="lens-new-photo" type="file" name="image_file" accept="image/jpeg,image/png,image/webp">
+          {% else %}
+          <p>A busca visual com foto fica disponível apenas para o próprio usuário.</p>
+          {% endif %}
+        </div>
+        <div id="endpoint-related" hidden>
+          {% if related_options %}
+          <label class="field-label" for="related-content-id">Resultado da Google Images</label>
+          <select id="related-content-id" name="related_content_id">
+            {% for option in related_options %}<option value="{{ option.id }}">{{ option.title }}</option>{% endfor %}
+          </select>
+          {% else %}
+          <p>Execute uma busca Google Images para carregar opções de conteúdo relacionado.</p>
+          {% endif %}
+        </div>
         <label class="consent-control">
           <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio destas consultas à SerpApi.</span>
+          <span>Autorizo o envio da consulta ou da minha foto à SerpApi.</span>
         </label>
-        <button type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos</button>
-      </form>
-    </details>
-
-    <details class="serpapi-card search-option" id="google-images" {% if api_ativa == 'google_images' %}open{% endif %}>
-      <summary><span class="eyebrow">01 · BUSCA POR TEXTO</span><strong>Google Images API</strong></summary>
-      <p class="doc-link"><a href="https://serpapi.com/google-images-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>
-      <p>Pesquisa imagens usando termos, como no Google Images. Não é busca reversa pela foto.</p>
-      <form class="search-form" method="post" action="/buscar-serpapi">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <input type="hidden" name="api" value="google_images">
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio do meu nome e arroba à SerpApi.</span>
-        </label>
-        <button type="submit" {% if not perfil_busca_completo %}disabled{% endif %}>Buscar por nome</button>
-      </form>
-    </details>
-
-    <details class="serpapi-card search-option" id="google-images-light" {% if api_ativa == 'google_images_light' %}open{% endif %}>
-      <summary><span class="eyebrow">02 · BUSCA LEVE POR TEXTO</span><strong>Google Images Light API</strong></summary>
-      <p class="doc-link"><a href="https://serpapi.com/google-images-light-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>
-      <p>Busca imagens por texto em uma resposta simplificada. Também não é busca reversa pela foto.</p>
-      <form class="search-form" method="post" action="/buscar-serpapi">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <input type="hidden" name="api" value="google_images_light">
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio do meu nome e arroba à SerpApi.</span>
-        </label>
-        <button type="submit" {% if not perfil_busca_completo %}disabled{% endif %}>Buscar por nome (Light)</button>
-      </form>
-    </details>
-
-    <details class="serpapi-card search-option" id="google-lens" {% if api_ativa == 'google_lens' %}open{% endif %}>
-      <summary><span class="eyebrow">03 · BUSCA VISUAL</span><strong>Google Lens API</strong></summary>
-      <p class="doc-link"><a href="https://serpapi.com/google-lens-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>
-      <p>Use uma foto já salva ou envie uma nova. Fotos novas são guardadas no seu perfil para buscas futuras.</p>
-      {% if target_user_id == current_user.id %}
-      <form class="search-form" method="post" action="/buscar-serpapi" enctype="multipart/form-data">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <input type="hidden" name="api" value="google_lens">
-        {% if fotos %}
-        <label class="field-label" for="lens-photo">Foto já salva</label>
-        <select id="lens-photo" name="foto_id">
-          <option value="">Selecione uma foto salva</option>
-          {% for foto in fotos %}
-          <option value="{{ foto.id }}" {% if api_ativa == 'google_lens' and foto_selecionada == foto.id %}selected{% endif %}>
-            {{ foto.nome_original }} — {{ foto.created_at }}
-          </option>
-          {% endfor %}
-        </select>
-        {% endif %}
-        <label class="field-label" for="lens-new-photo">Ou envie uma foto nova</label>
-        <input id="lens-new-photo" type="file" name="image_file" accept="image/jpeg,image/png,image/webp">
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Confirmo que esta foto é minha e autorizo seu envio à SerpApi para esta busca.</span>
-        </label>
-        <button type="submit" {% if not perfil_busca_completo %}disabled{% endif %}>Buscar com Google Lens</button>
-      </form>
-      {% else %}
-      <p>A busca visual com foto fica disponível apenas para o próprio usuário.</p>
-      {% endif %}
-    </details>
-
-    <details class="serpapi-card search-option" id="google-images-related-content" {% if api_ativa == 'google_images_related_content' %}open{% endif %}>
-      <summary><span class="eyebrow">04 · RESULTADOS RELACIONADOS</span><strong>Google Images Related Content API</strong></summary>
-      <p class="doc-link"><a href="https://serpapi.com/google-images-related-content-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>
-      <p>
-        Busca sugestões relacionadas a um resultado da Google Images. Primeiro
-        execute uma busca na seção Google Images; depois escolha abaixo um dos
-        resultados que tenha conteúdo relacionado.
-      </p>
-      {% if related_options %}
-      <form class="search-form" method="post" action="/buscar-serpapi">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <input type="hidden" name="api" value="google_images_related_content">
-        <label class="field-label" for="related-content-id">Resultado da Google Images</label>
-        <select id="related-content-id" name="related_content_id" required>
-          {% for option in related_options %}
-          <option value="{{ option.id }}">{{ option.title }}</option>
-          {% endfor %}
-        </select>
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio desta consulta à SerpApi.</span>
-        </label>
-        <button type="submit">Testar Related Content</button>
-      </form>
-      {% else %}
-      <p>Execute Google Images para carregar opções de conteúdo relacionado.</p>
-      {% endif %}
-    </details>
-
-    <h2 class="search-group-title">Google Cloud Vision</h2>
-    <details class="serpapi-card search-option" id="google-vision" {% if fonte == 'google' %}open{% endif %}>
-      <summary><span class="eyebrow">BUSCA POR IMAGEM DO CATÁLOGO</span><strong>Google Cloud Vision (Web Detection)</strong></summary>
-      <p>
-        Compara uma imagem do catálogo com páginas públicas indexadas pelo Google.
-        Os resultados podem indicar imagens iguais ou semelhantes, mas não garantem
-        que todas as publicações serão encontradas nem confirmam quem publicou.
-      </p>
-      <div class="provider-grid">
-        {% for provedor in provedores_imagem %}
-        <label class="provider-option {% if provedor.status != 'Ativo' and provedor.status != 'Integrado, não configurado' %}provider-disabled{% endif %}">
-          <input type="radio" name="provedor_imagem" value="{{ provedor.id }}" {% if provedor_imagem_selecionado == provedor.id %}checked{% endif %} {% if provedor.id != "google_vision" %}disabled{% endif %}>
-          <strong>{{ provedor.nome }}</strong>
-          <span>{{ provedor.descricao }}</span>
-          <small>{{ provedor.status }}</small>
-        </label>
-        {% endfor %}
-      </div>
-      {% if conteudos %}
-      <form class="search-form" method="post" action="/buscar-google">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="provedor" value="google_vision">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <label class="field-label" for="conteudo_id">Imagem do catálogo desta criadora</label>
-        <select id="conteudo_id" name="conteudo_id" required>
-          <option value="">Selecione uma imagem</option>
-          {% for conteudo in conteudos %}
-          <option value="{{ conteudo.id }}" {% if conteudo_selecionado == conteudo.id %}selected{% endif %}>
-            {{ conteudo.criadora }} — {{ conteudo.nome_original }}
-          </option>
-          {% endfor %}
-        </select>
-        <p class="privacy-note">
-          A imagem selecionada não será salva novamente pelo aplicativo, mas será
-          enviada ao Google Cloud Vision. A busca consome a cota do Google Cloud e pode
-          gerar cobrança. Consulte as
-          <a href="https://cloud.google.com/vision/docs/data-usage" target="_blank" rel="noopener noreferrer">informações de uso de dados</a>
-          e os <a href="https://cloud.google.com/vision/pricing" target="_blank" rel="noopener noreferrer">preços da API</a>.
-        </p>
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio desta imagem do catálogo ao Google Cloud Vision para esta busca.</span>
-        </label>
-        <button type="submit">Buscar na web</button>
-      </form>
-      {% else %}
-      <p class="privacy-note">
-        Cadastre uma imagem no <a href="/catalogo">Catálogo</a> antes de iniciar uma busca.
-      </p>
-      {% endif %}
-    </details>
-
-    <h2 class="search-group-title">Instagram</h2>
-    <details class="serpapi-card search-option" id="instagram-profile" {% if api_ativa == 'instagram_profile' %}open{% endif %}>
-      <summary><span class="eyebrow">DADOS DE PERFIL</span><strong>Instagram Profile API</strong></summary>
-      <p class="doc-link"><a href="https://serpapi.com/instagram-profile-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>
-      <p>Busca informações e publicações disponíveis para um perfil pelo nome de usuário.</p>
-      <form class="search-form" method="post" action="/buscar-instagram">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="api" value="instagram_profile">
-        <label class="field-label" for="instagram-username">Nome de usuário</label>
-        <input id="instagram-username" name="username" value="{{ username if api_ativa == 'instagram_profile' else '' }}" placeholder="Ex.: exemplo ou @exemplo" maxlength="31" required>
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio deste nome de usuário à SerpApi para consultar dados disponíveis do perfil.</span>
-        </label>
-        <button type="submit">Consultar perfil</button>
-      </form>
-      <form class="search-form" method="post" action="/instagram/importar-oficiais">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <p><strong>Importar posts oficiais</strong> (1 crédito por página): percorre as páginas do perfil e registra as publicações retornadas pelo perfil como oficiais, para não aparecerem na Valida, e guarda só o hash das imagens como referência. Sem usuário, usa o Instagram cadastrado como site oficial da criadora.</p>
-        <input name="username" placeholder="Usuário (opcional)" maxlength="31">
-        <label class="field-label" for="instagram-paginas">Máximo de páginas (cada uma custa 1 crédito)</label>
-        <input id="instagram-paginas" type="number" name="max_paginas" value="30" min="1" max="30">
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio do usuário à SerpApi.</span>
-        </label>
-        <button type="submit" class="button-secondary">Importar posts oficiais</button>
-      </form>
-    </details>
-
-    <details class="serpapi-card search-option" id="instagram-popular" {% if api_ativa == 'instagram_popular' %}open{% endif %}>
-      <summary><span class="eyebrow">POSTS POPULARES</span><strong>Instagram Popular API</strong></summary>
-      <p class="doc-link"><a href="https://serpapi.com/instagram-popular-api" target="_blank" rel="noopener noreferrer">Ver documentação</a></p>
-      <p>Pesquisa posts populares relacionados a uma palavra-chave. Não consulta uma imagem nem garante listar todas as publicações.</p>
-      <form class="search-form" method="post" action="/buscar-instagram">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="api" value="instagram_popular">
-        <label class="field-label" for="instagram-keyword">Palavra-chave</label>
-        <input id="instagram-keyword" name="keyword" value="{{ keyword if api_ativa == 'instagram_popular' else '' }}" placeholder="Ex.: nome, marca ou assunto" maxlength="200" required>
-        <label class="consent-control">
-          <input type="checkbox" name="consentimento" value="on" required>
-          <span>Autorizo o envio desta palavra-chave à SerpApi para pesquisar posts populares.</span>
-        </label>
-        <button type="submit">Pesquisar posts populares</button>
+        <button id="endpoint-submit" type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos</button>
       </form>
     </details>
   </div>
 
-  {% if pesquisa_realizada and fonte == "instagram" %}
-  <section class="search-results" aria-live="polite">
-    <h2>Resultados: {{ nomes_apis[api_ativa] }}</h2>
-    {% if api_ativa == "instagram_profile" and perfil %}
-    <article class="instagram-profile">
-      <h3>
-        {% if perfil.link %}<a href="{{ perfil.link }}" target="_blank" rel="noopener noreferrer">{% endif %}
-          {{ perfil.nome or perfil.username or "Perfil" }}
-        {% if perfil.link %}</a>{% endif %}
-        {% if perfil.verificado %}<span class="profile-badge">Verificado</span>{% endif %}
-      </h3>
-      {% if perfil.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ perfil.criadoras_oficiais|join(", ") }}</span>{% endif %}
-      {% if perfil.username %}<p>@{{ perfil.username }}</p>{% endif %}
-      <div class="profile-stats">
-        <span><strong>{{ perfil.seguidores }}</strong> seguidores</span>
-        <span><strong>{{ perfil.seguindo }}</strong> seguindo</span>
-        {% if perfil.privado %}<span>Perfil privado</span>{% endif %}
-      </div>
-      {% if perfil.biografia %}<p class="profile-bio">{{ perfil.biografia }}</p>{% endif %}
-    </article>
-    {% endif %}
-
-    {% if posts %}
-    <h3>{% if api_ativa == "instagram_profile" %}Publicações retornadas{% else %}Posts populares encontrados{% endif %}</h3>
-    <ul class="search-result-list">
-      {% for post in posts %}
-      <li>
-        <a href="{{ post.link }}" target="_blank" rel="noopener noreferrer">{{ post.titulo }}</a>
-        {% if post.criadoras_oficiais %}<span class="official-site-badge">Página oficial cadastrada para: {{ post.criadoras_oficiais|join(", ") }}</span>{% endif %}
-        {% if post.usuario %}
-          {% if post.link_perfil %}
-          <span>Por <a href="{{ post.link_perfil }}" target="_blank" rel="noopener noreferrer">@{{ post.usuario }}</a></span>
-          {% else %}
-          <span>Por @{{ post.usuario }}</span>
-          {% endif %}
-        {% endif %}
-        {% if post.tipo %}<span>{{ post.tipo }}</span>{% endif %}
-        {% if post.reproducoes %}<span>Reproduções: {{ post.reproducoes }}</span>{% endif %}
-      </li>
-      {% endfor %}
-    </ul>
-    {% elif not perfil %}
-    <p>A API respondeu, mas não retornou publicações para exibir.</p>
-    {% else %}
-    <p>Nenhuma publicação foi retornada para este perfil.</p>
-    {% endif %}
-  </section>
-  {% endif %}
-
   {% if busca_restaurada_em %}<p class="account-usage-note">Mostrando a última busca, feita em {{ busca_restaurada_em[:19]|replace("T", " ") }} (UTC).</p>{% endif %}
-
   {% if pesquisa_realizada and resumo_busca %}
   <section class="search-results" aria-live="polite">
     <h2>Resultado da busca{% if nomes_apis[api_ativa] %}: {{ nomes_apis[api_ativa] }}{% endif %}</h2>
@@ -466,40 +200,24 @@
     </ul>
   </section>
   {% endif %}
-
-  {% if sites_vazados %}
-  <section class="search-results">
-    <h2>Resultados validados como vazados</h2>
-    <ul class="search-result-list">
-      {% for site in sites_vazados %}
-      <li>
-        <a href="{{ site.url }}" target="_blank" rel="noopener noreferrer">{{ site.title }}</a>
-        <span>{{ site.url }}</span>
-        {% if site.source %}<span>Origem: {{ site.source }}</span>{% endif %}
-        {% if site.snippet %}<span>{{ site.snippet }}</span>{% endif %}
-        <span>Registrado em {{ site.created_at }} · Busca: {{ nomes_apis.get(site.engine, site.engine) }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
 </section>
 <script>
-  const provedorSelecionado = () =>
-    document.querySelector('input[name="provedor"]:checked')?.value || "serpapi";
-
-  document.querySelectorAll('form[action="/buscar-serpapi"]').forEach((form) => {
-    form.addEventListener("submit", () => {
-      let campo = form.querySelector('input[name="provedor"]');
-      if (!campo) {
-        campo = document.createElement("input");
-        campo.type = "hidden";
-        campo.name = "provedor";
-        form.appendChild(campo);
-      }
-      campo.value = provedorSelecionado();
-    });
-  });
+  const endpoint = document.getElementById("vaz-api");
+  const formEndpoint = document.getElementById("endpoint-form");
+  function atualizarEndpoint() {
+    const texto = endpoint.value === "google_images" || endpoint.value === "google_images_light";
+    const lens = endpoint.value === "google_lens";
+    document.getElementById("endpoint-texto").hidden = !texto;
+    document.getElementById("endpoint-lens").hidden = !lens;
+    document.getElementById("endpoint-related").hidden = texto || lens;
+    formEndpoint.action = texto ? "/buscar-vazamentos" : "/buscar-serpapi";
+    document.getElementById("endpoint-submit").disabled = texto
+      ? {{ (not perfil_busca_completo or not vazamento_consultas)|tojson }}
+      : lens ? {{ (not perfil_busca_completo or target_user_id != current_user.id)|tojson }}
+      : {{ (not perfil_busca_completo or not related_options)|tojson }};
+  }
+  endpoint.addEventListener("change", atualizarEndpoint);
+  atualizarEndpoint();
 </script>
 {% if vazamento_status and vazamento_status.estado == "rodando" %}
 <script>setTimeout(function () { window.location.href = "/busca-web?target_user_id={{ target_user_id }}#busca-vazamentos"; }, 10000);</script>

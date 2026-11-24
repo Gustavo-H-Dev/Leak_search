@@ -404,7 +404,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                     return_value={"plan_name": "Free", "searches_per_month": 100, "this_month_usage": 3},
                 ):
                     saldo = await status_serpapi(request, target_user_id=0)
-                pagina = pagina_busca_na_web(request)
+                    pagina = pagina_busca_na_web(request)
 
                 for corpo in (saldo.body.decode(), pagina.body.decode()):
                     self.assertIn("foram enviados como candidatos", corpo)
@@ -538,6 +538,51 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
         status.assert_called_once_with()
         pesquisar.assert_not_called()
 
+    async def test_pagina_consulta_saldo_automaticamente_e_preserva_interface(self):
+        usuario = {
+            "id": 1, "username": "cliente", "role": "cliente",
+            "public_name": "Ana", "public_handle": "ana",
+        }
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value=usuario),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.serpapi.obter_status_conta", return_value={
+                "plan_name": "Free", "searches_per_month": 100, "this_month_usage": 3,
+            }) as status,
+            patch("app.main.serpapi.pesquisar") as pesquisar,
+        ):
+            corpo = pagina_busca_na_web(self.criar_request("/busca-web")).body.decode()
+        status.assert_called_once_with()
+        pesquisar.assert_not_called()
+        self.assertIn("Atualizar saldo", corpo)
+        self.assertIn("Free", corpo)
+        for endpoint in ("google_images", "google_images_light", "google_lens",
+                         "google_images_related_content"):
+            self.assertIn(f'value="{endpoint}"', corpo)
+        for texto in ("CAMADA DE PROVEDORES", "Privacidade e consumo de créditos",
+                      "Google Cloud Vision", "Resultados validados como vazados",
+                      "Termos da busca:", "Chave SerpApi configurada no servidor."):
+            self.assertNotIn(texto, corpo)
+
+    async def test_erro_ao_carregar_saldo_e_exibido(self):
+        usuario = {
+            "id": 1, "username": "cliente", "role": "cliente",
+            "public_name": "Ana", "public_handle": "ana",
+        }
+        with (
+            patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
+            patch("app.main.db.obter_usuario_por_id", return_value=usuario),
+            patch("app.main.db.listar_fotos_busca", return_value=[]),
+            patch("app.main.db.listar_conteudos", return_value=[]),
+            patch("app.main.db.listar_sites_vazados", return_value=[]),
+            patch("app.main.serpapi.obter_status_conta", side_effect=serpapi.ErroSerpApi("erro")),
+        ):
+            corpo = pagina_busca_na_web(self.criar_request("/busca-web")).body.decode()
+        self.assertIn("Não foi possível consultar a conta SerpApi", corpo)
+
     async def test_instagram_profile_envia_apenas_profile_id(self):
         resposta = {
             "profile_results": {
@@ -569,8 +614,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
 
         pesquisar.assert_called_once_with("instagram_profile", profile_id="exemplo")
         corpo = resultado.body.decode()
-        self.assertIn("Perfil Exemplo", corpo)
-        self.assertIn("120", corpo)
+        self.assertNotIn("Perfil Exemplo", corpo)
 
     async def test_instagram_popular_envia_apenas_keyword(self):
         with (
