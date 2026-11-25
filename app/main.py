@@ -290,15 +290,19 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
 async def verificar_instagram(request: Request, arroba: str = Form(...), csrf_token: str = Form(...)):
     """Verifica perfil Instagram. CSRF validado manualmente para garantir JSON"""
     logger.info(f"Verificar instagram: arroba={arroba}, csrf={bool(csrf_token)}")
+    logger.info(f"DEBUG: Content-Type response will be: application/json")
     try:
         # Validar CSRF manualmente (garante resposta JSON em caso de erro)
         esperado = request.session.get("csrf_token", "")
+        logger.info(f"DEBUG CSRF: enviado={bool(csrf_token)}, esperado={bool(esperado)}")
         if not isinstance(csrf_token, str) or not secrets.compare_digest(csrf_token, esperado):
+            logger.info(f"DEBUG: CSRF validation FAILED - returning JSON error")
             return JSONResponse(
                 {"ok": False, "erro": "Token CSRF inválido."},
                 status_code=403
             )
         
+        logger.info(f"DEBUG: CSRF validation OK - proceeding")
         usuario = serpapi.validar_usuario_instagram(arroba)
         dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
         perfil, posts = serpapi.normalizar_perfil_instagram(dados)
@@ -318,10 +322,26 @@ async def verificar_instagram(request: Request, arroba: str = Form(...), csrf_to
             }
         })
     except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
+        logger.info(f"DEBUG: SerpApi error - returning JSON: {erro}")
         return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
     except Exception as erro:
         logger.exception("Erro inesperado ao verificar Instagram")
         return JSONResponse({"ok": False, "erro": "Erro interno do servidor"}, status_code=500)
+
+
+@app.post("/debug-instagram")
+async def debug_instagram(request: Request, arroba: str = Form(...), csrf_token: str = Form(...)):
+    """Endpoint de DEBUG para testar resposta JSON"""
+    logger.info(f"DEBUG endpoint called: arroba={arroba}")
+    return JSONResponse(
+        {
+            "debug": True,
+            "arroba": arroba,
+            "csrf_sent": bool(csrf_token),
+            "csrf_in_session": bool(request.session.get("csrf_token")),
+            "message": "Este endpoint retorna JSON puro"
+        }
+    )
 
 
 @app.post("/test-instagram")
