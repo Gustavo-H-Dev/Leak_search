@@ -285,7 +285,7 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
     )
 
 
-@app.post("/verificar-instagram")
+@app.post("/verificar-instagram", dependencies=_csrf())
 async def verificar_instagram(request: Request, arroba: str = Form(...)):
     try:
         usuario = serpapi.validar_usuario_instagram(arroba)
