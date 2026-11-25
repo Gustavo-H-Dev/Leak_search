@@ -449,19 +449,22 @@ async def cadastrar(
                 status_code=503,
             )
 
-    return templates.TemplateResponse(
-        request,
-        "cadastro.html",
-        {
-            "erro": "",
-            "mensagem": (
-                "Cadastro concluído. Sua conta já está ativa."
-                if not confirmacao_email_obrigatoria
-                else "Cadastro recebido. Enviamos um link para confirmar seu e-mail."
-            ),
-            "confirmacao_email_obrigatoria": confirmacao_email_obrigatoria,
-        },
-    )
+        return templates.TemplateResponse(
+            request,
+            "cadastro.html",
+            {
+                "erro": "",
+                "mensagem": (
+                    "Cadastro concluído. Sua conta já está ativa."
+                    if not confirmacao_email_obrigatoria
+                    else "Cadastro recebido. Enviamos um link para confirmar seu e-mail."
+                ),
+                "confirmacao_email_obrigatoria": confirmacao_email_obrigatoria,
+            },
+        )
+
+    _nova_sessao(request, user_id)
+    return RedirectResponse("/", status_code=303)
 
 
 def _criar_conta(username, email, nome_publico, arroba, senha, confirmar_senha):
