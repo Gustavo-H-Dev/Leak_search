@@ -74,17 +74,6 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """Retorna JSON para endpoints que esperam JSON"""
-    if request.url.path.startswith("/api/") or request.url.path in ["/verificar-instagram", "/test-instagram"]:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"ok": False, "erro": exc.detail}
-        )
-    raise exc
-
-
 def _contexto_template(request: Request):
     session = request.scope.get("session", {})
     return {
@@ -122,22 +111,8 @@ async def validar_csrf(request: Request):
         raise HTTPException(status_code=403, detail="Token CSRF inválido.")
 
 
-async def validar_csrf_json(request: Request):
-    """CSRF validation que retorna JSON para endpoints API"""
-    formulario = await request.form()
-    enviado = formulario.get("csrf_token")
-    esperado = request.session.get("csrf_token", "")
-    logger.info(f"CSRF validation: enviado={enviado}, esperado={esperado}, session_keys={list(request.session.keys())}")
-    if not isinstance(enviado, str) or not secrets.compare_digest(enviado, esperado):
-        raise HTTPException(status_code=403, detail="Token CSRF inválido.")
-
-
 def _csrf():
     return [Depends(validar_csrf)]
-
-
-def _csrf_json():
-    return [Depends(validar_csrf_json)]
 
 
 def exigir_admin(request: Request):
@@ -311,10 +286,23 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
     )
 
 
-@app.post("/verificar-instagram", dependencies=_csrf_json())
-async def verificar_instagram(request: Request, arroba: str = Form(...)):
-    logger.info(f"Verificar instagram: arroba={arroba}, session={dict(request.session)}, session_csrf={request.session.get('csrf_token')}")
+@app.post("/verificar-instagram")
+async def verificar_instagram(request: Request, arroba: str = Form(...), csrf_token: str = Form(...)):
+    """Verifica perfil Instagram. CSRF validado manualmente para garantir JSON"""
+    logger.info(f"Verificar instagram: arroba={arroba}, csrf={bool(csrf_token)}")
+    logger.info(f"DEBUG: Content-Type response will be: application/json")
     try:
+        # Validar CSRF manualmente (garante resposta JSON em caso de erro)
+        esperado = request.session.get("csrf_token", "")
+        logger.info(f"DEBUG CSRF: enviado={bool(csrf_token)}, esperado={bool(esperado)}")
+        if not isinstance(csrf_token, str) or not secrets.compare_digest(csrf_token, esperado):
+            logger.info(f"DEBUG: CSRF validation FAILED - returning JSON error")
+            return JSONResponse(
+                {"ok": False, "erro": "Token CSRF inválido."},
+                status_code=403
+            )
+        
+        logger.info(f"DEBUG: CSRF validation OK - proceeding")
         usuario = serpapi.validar_usuario_instagram(arroba)
         dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
         perfil, posts = serpapi.normalizar_perfil_instagram(dados)
@@ -334,10 +322,26 @@ async def verificar_instagram(request: Request, arroba: str = Form(...)):
             }
         })
     except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
+        logger.info(f"DEBUG: SerpApi error - returning JSON: {erro}")
         return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
     except Exception as erro:
         logger.exception("Erro inesperado ao verificar Instagram")
         return JSONResponse({"ok": False, "erro": "Erro interno do servidor"}, status_code=500)
+
+
+@app.post("/debug-instagram")
+async def debug_instagram(request: Request, arroba: str = Form(...), csrf_token: str = Form(...)):
+    """Endpoint de DEBUG para testar resposta JSON"""
+    logger.info(f"DEBUG endpoint called: arroba={arroba}")
+    return JSONResponse(
+        {
+            "debug": True,
+            "arroba": arroba,
+            "csrf_sent": bool(csrf_token),
+            "csrf_in_session": bool(request.session.get("csrf_token")),
+            "message": "Este endpoint retorna JSON puro"
+        }
+    )
 
 
 @app.post("/test-instagram")
