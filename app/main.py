@@ -1767,6 +1767,7 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         ),
         "fotos": fotos,
         "sites_vazados": db.listar_sites_vazados(target_user_id),
+        "sites_oficiais_usuario": db.listar_sites_oficiais_usuario(target_user_id),
         "vazamento_termos": _config_vazamentos()[0],
         "vazamento_sites": _config_vazamentos()[1],
         "vazamento_periodos": consultas_vazamento.PERIODOS,
@@ -1956,6 +1957,16 @@ async def buscar_serpapi(
             request,
             target_user_id,
             erro="Complete seu nome público e arroba no perfil de busca.",
+            **contexto,
+        )
+    if not db.listar_sites_oficiais_usuario(target_user_id):
+        return _contexto_serpapi(
+            request,
+            target_user_id,
+            erro=(
+                "Cadastre pelo menos um site oficial no seu perfil de busca antes "
+                "de pesquisar na internet. As fotos são opcionais."
+            ),
             **contexto,
         )
 

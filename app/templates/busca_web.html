@@ -34,6 +34,12 @@
     {% endif %}
   </p>
   {% endif %}
+  {% if not sites_oficiais_usuario %}
+  <p class="api-status api-status-missing">
+    Cadastre pelo menos um site oficial antes de pesquisar na internet.
+    <a href="/perfil-busca">Adicionar site oficial</a>. As fotos são opcionais.
+  </p>
+  {% endif %}
   {% if not api_key_configurada %}
   <p class="api-status api-status-missing">
     Chave não configurada. Defina <code>SERPAPI_API_KEY</code> no ambiente do servidor.
@@ -219,9 +225,9 @@
     document.getElementById("endpoint-related").hidden = texto || lens;
     formEndpoint.action = texto ? "/buscar-vazamentos" : "/buscar-serpapi";
     document.getElementById("endpoint-submit").disabled = texto
-      ? {{ (not perfil_busca_completo or not vazamento_consultas)|tojson }}
-      : lens ? {{ (not perfil_busca_completo or target_user_id != current_user.id)|tojson }}
-      : {{ (not perfil_busca_completo or not related_options)|tojson }};
+      ? {{ (not perfil_busca_completo or not vazamento_consultas or not sites_oficiais_usuario)|tojson }}
+      : lens ? {{ (not perfil_busca_completo or target_user_id != current_user.id or not sites_oficiais_usuario)|tojson }}
+      : {{ (not perfil_busca_completo or not related_options or not sites_oficiais_usuario)|tojson }};
   }
   endpoint.addEventListener("change", atualizarEndpoint);
   atualizarEndpoint();
