@@ -80,6 +80,7 @@
   <div class="modal-content">
     <button type="button" class="modal-close" id="modal-close">&times;</button>
     <div id="modal-perfil" class="instagram-profile">
+      <img id="modal-perfil-foto" src="" alt="Foto do perfil" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border); display: block; margin: 0 auto 1rem;">
       <h3><a id="modal-perfil-link" href="#" target="_blank">@<span id="modal-perfil-username"></span></a>
         <span class="profile-badge" id="modal-badge-verificado" style="display: none;">Verificado</span>
       </h3>
@@ -213,6 +214,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const modalPerfilSeguindo = document.getElementById('modal-perfil-seguindo');
   const modalPerfilBio = document.getElementById('modal-perfil-bio');
   const modalBadgeVerificado = document.getElementById('modal-badge-verificado');
+  const modalPerfilFoto = document.getElementById('modal-perfil-foto');
 
   let arrobaVerificado = '';
 
@@ -379,6 +381,13 @@ document.addEventListener('DOMContentLoaded', function() {
           modalBadgeVerificado.style.display = 'inline-block';
         } else {
           modalBadgeVerificado.style.display = 'none';
+        }
+
+        if (p.foto_perfil) {
+          modalPerfilFoto.src = p.foto_perfil;
+          modalPerfilFoto.style.display = 'block';
+        } else {
+          modalPerfilFoto.style.display = 'none';
         }
 
         modal.style.display = 'flex';

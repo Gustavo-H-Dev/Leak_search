@@ -205,6 +205,12 @@ def normalizar_perfil_instagram(dados: dict) -> tuple[dict, list[dict[str, str]]
         "link": f"https://www.instagram.com/{username}/"
         if re.fullmatch(r"[A-Za-z0-9._]{1,30}", username)
         else "",
+        "foto_perfil": str(
+            perfil_original.get("profile_image_url")
+            or perfil_original.get("profile_pic_url")
+            or perfil_original.get("picture")
+            or ""
+        ),
     }
 
     posts = []

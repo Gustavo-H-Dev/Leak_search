@@ -319,6 +319,7 @@ async def verificar_instagram(request: Request, arroba: str = Form(...), csrf_to
                 "privado": perfil["privado"],
                 "verificado": perfil["verificado"],
                 "link": perfil["link"],
+                "foto_perfil": perfil.get("foto_perfil", ""),
             }
         })
     except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
@@ -365,6 +366,7 @@ async def test_instagram(request: Request, arroba: str = Form(...)):
                 "privado": perfil["privado"],
                 "verificado": perfil["verificado"],
                 "link": perfil["link"],
+                "foto_perfil": perfil.get("foto_perfil", ""),
             }
         })
     except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
