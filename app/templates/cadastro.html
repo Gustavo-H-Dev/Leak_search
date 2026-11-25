@@ -16,21 +16,61 @@
   {% endif %}
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
-  <form method="post" action="/cadastro">
+
+  <!-- Passo 1: Verificar Instagram -->
+  <form id="form-instagram" method="post" action="/verificar-instagram">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="field-label" for="register-username">Usuário</label>
-    <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
-    <label class="field-label" for="register-email">E-mail</label>
-    <input id="register-email" name="email" type="email" autocomplete="email" required>
-    <label class="field-label" for="register-public-name">Nome público</label>
-    <input id="register-public-name" name="nome_publico" maxlength="80" required>
     <label class="field-label" for="register-handle">Instagram (@)</label>
-    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required>
-    <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
-    <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
-    <label class="field-label" for="register-confirm">Confirme a senha</label>
-    <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
-    <button type="submit">Cadastrar</button>
+    <div class="input-group">
+      <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required placeholder="@usuario">
+      <button type="submit" id="btn-verificar">Verificar</button>
+    </div>
+  </form>
+
+  <!-- Passo 2: Confirmar perfil e completar cadastro -->
+  <form id="form-cadastro" method="post" action="/cadastro" style="display: none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="arroba_confirmado" id="arroba_confirmado">
+
+    <div id="perfil-instagram" class="instagram-profile" style="display: none;">
+      <h3><a id="perfil-link" href="#" target="_blank">@<span id="perfil-username"></span></a>
+        {% if true %}<span class="profile-badge" id="badge-verificado" style="display: none;">Verificado</span>{% endif %}
+      </h3>
+      <p id="perfil-nome"></p>
+      <div class="profile-stats">
+        <span><strong id="perfil-seguidores">—</strong> seguidores</span>
+        <span><strong id="perfil-seguindo">—</strong> seguindo</span>
+      </div>
+      <p class="profile-bio" id="perfil-bio"></p>
+      <p style="margin-top: 1rem; color: var(--muted); font-size: .85rem;">
+        <strong>É esta a sua conta?</strong>
+      </p>
+      <div style="display: flex; gap: .5rem; margin-top: .5rem;">
+        <button type="button" id="btn-confirmar" class="button-primary">Sim, é minha</button>
+        <button type="button" id="btn-cancelar" class="button-danger">Não, tentar outro</button>
+      </div>
+    </div>
+
+    <hr style="margin: 1.5rem 0; border-color: var(--border);" id="divisor-cadastro" style="display: none;">
+
+    <div id="campos-cadastro" style="display: none;">
+      <label class="field-label" for="register-username">Usuário</label>
+      <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
+
+      <label class="field-label" for="register-email">E-mail</label>
+      <input id="register-email" name="email" type="email" autocomplete="email" required>
+
+      <label class="field-label" for="register-public-name">Nome público</label>
+      <input id="register-public-name" name="nome_publico" maxlength="80" required>
+
+      <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
+      <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+
+      <label class="field-label" for="register-confirm">Confirme a senha</label>
+      <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+
+      <button type="submit">Cadastrar</button>
+    </div>
   </form>
 
   {% if confirmacao_email_obrigatoria %}
@@ -46,4 +86,130 @@
   {% endif %}
   <p>Já tem conta? <a href="/login">Entrar</a>.</p>
 </section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const formInstagram = document.getElementById('form-instagram');
+  const formCadastro = document.getElementById('form-cadastro');
+  const btnVerificar = document.getElementById('btn-verificar');
+  const btnConfirmar = document.getElementById('btn-confirmar');
+  const btnCancelar = document.getElementById('btn-cancelar');
+  const perfilDiv = document.getElementById('perfil-instagram');
+  const divisor = document.getElementById('divisor-cadastro');
+  const camposCadastro = document.getElementById('campos-cadastro');
+  const arrobaConfirmado = document.getElementById('arroba_confirmado');
+
+  // Elementos do perfil
+  const perfilUsername = document.getElementById('perfil-username');
+  const perfilLink = document.getElementById('perfil-link');
+  const perfilNome = document.getElementById('perfil-nome');
+  const perfilSeguidores = document.getElementById('perfil-seguidores');
+  const perfilSeguindo = document.getElementById('perfil-seguindo');
+  const perfilBio = document.getElementById('perfil-bio');
+  const badgeVerificado = document.getElementById('badge-verificado');
+
+  let arrobaAtual = '';
+
+  formInstagram.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const arroba = document.getElementById('register-handle').value.trim();
+    if (!arroba) return;
+
+    btnVerificar.disabled = true;
+    btnVerificar.textContent = 'Verificando...';
+
+    try {
+      const formData = new FormData();
+      formData.append('arroba', arroba);
+      formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+      const response = await fetch('/verificar-instagram', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (data.ok) {
+        const p = data.perfil;
+        arrobaAtual = p.username;
+
+        // Preencher dados do perfil
+        perfilUsername.textContent = p.username;
+        perfilLink.href = p.link;
+        perfilNome.textContent = p.nome || '—';
+        perfilSeguidores.textContent = p.seguidores || '—';
+        perfilSeguindo.textContent = p.seguindo || '—';
+        perfilBio.textContent = p.biografia || '—';
+
+        if (p.verificado) {
+          badgeVerificado.style.display = 'inline-block';
+        } else {
+          badgeVerificado.style.display = 'none';
+        }
+
+        // Esconder passo 1, mostrar passo 2
+        formInstagram.style.display = 'none';
+        formCadastro.style.display = 'block';
+        perfilDiv.style.display = 'block';
+        divisor.style.display = 'block';
+      } else {
+        alert('Erro: ' + data.erro);
+      }
+    } catch (err) {
+      alert('Erro ao verificar: ' + err.message);
+    } finally {
+      btnVerificar.disabled = false;
+      btnVerificar.textContent = 'Verificar';
+    }
+  });
+
+  btnConfirmar.addEventListener('click', function() {
+    arrobaConfirmado.value = arrobaAtual;
+    perfilDiv.style.display = 'none';
+    divisor.style.display = 'none';
+    camposCadastro.style.display = 'block';
+    btnConfirmar.style.display = 'none';
+    btnCancelar.style.display = 'none';
+  });
+
+  btnCancelar.addEventListener('click', function() {
+    // Voltar ao passo 1
+    formInstagram.style.display = 'block';
+    formCadastro.style.display = 'none';
+    perfilDiv.style.display = 'none';
+    divisor.style.display = 'none';
+    camposCadastro.style.display = 'none';
+    arrobaConfirmado.value = '';
+    arrobaAtual = '';
+  });
+});
+</script>
+<style>
+.input-group {
+  display: flex;
+  gap: .5rem;
+  align-items: stretch;
+}
+.input-group input {
+  flex: 1;
+}
+.button-primary {
+  background: var(--pink);
+  color: #21131a;
+  border: none;
+}
+.button-primary:hover {
+  background: var(--pink-light);
+}
+.button-danger {
+  background: #422331;
+  color: #ffd9e8;
+  border: 1px solid #754052;
+}
+.button-danger:hover {
+  background: #5a2c40;
+  border-color: #a74b70;
+}
+</style>
 {% endblock %}

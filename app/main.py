@@ -285,19 +285,47 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
     )
 
 
+@app.post("/verificar-instagram")
+async def verificar_instagram(request: Request, arroba: str = Form(...)):
+    try:
+        usuario = serpapi.validar_usuario_instagram(arroba)
+        dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
+        perfil, posts = serpapi.normalizar_perfil_instagram(dados)
+        if not perfil.get("username"):
+            raise ValueError("Perfil não encontrado ou privado.")
+        return JSONResponse({
+            "ok": True,
+            "perfil": {
+                "username": perfil["username"],
+                "nome": perfil["nome"],
+                "biografia": perfil["biografia"],
+                "seguidores": perfil["seguidores"],
+                "seguindo": perfil["seguindo"],
+                "privado": perfil["privado"],
+                "verificado": perfil["verificado"],
+                "link": perfil["link"],
+            }
+        })
+    except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
+        return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+
+
 @app.post("/cadastro", response_class=HTMLResponse, dependencies=_csrf())
 async def cadastrar(
     request: Request,
     username: str = Form(...),
     email: str = Form(...),
     nome_publico: str = Form(...),
-    arroba: str = Form(...),
+    arroba: str = Form(""),
+    arroba_confirmado: str = Form(""),
     senha: str = Form(...),
     confirmar_senha: str = Form(...),
 ):
+    # Usar o arroba confirmado se disponível, senão o do formulário direto
+    arroba_final = arroba_confirmado or arroba
     try:
         user_id, username, email = _criar_conta(
-            username, email, nome_publico, arroba, senha, confirmar_senha
+            username, email, nome_publico, arroba_final, senha, confirmar_senha
         )
         confirmacao_email_obrigatoria = autenticacao.confirmacao_email_obrigatoria()
     except ValueError as erro:
