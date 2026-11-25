@@ -17,21 +17,21 @@
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
-  <form method="post" action="/cadastro">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-
-    <!-- Verificação opcional do Instagram -->
-    <div id="instagram-verificacao" style="margin-bottom: 1.5rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);">
-      <h3 style="margin-bottom: .75rem; font-size: .95rem;">Verificar Instagram (opcional)</h3>
-      <p style="font-size: .85rem; color: var(--muted); margin-bottom: .75rem;">
-        Insira seu @ do Instagram para buscar e confirmar seu perfil. Isso preenche automaticamente o campo "Instagram (@)" abaixo.
-      </p>
-      <div class="input-group" style="margin-bottom: .75rem;">
-        <input id="instagram-arroba" name="instagram_arroba" maxlength="31" autocomplete="username" placeholder="@usuario" style="flex: 1;">
-        <button type="button" id="btn-verificar-instagram" class="button-primary">Verificar</button>
-      </div>
-      <div id="instagram-status" style="font-size: .85rem; min-height: 1.25rem;"></div>
+  <!-- Verificação OBRIGATÓRIA do Instagram -->
+  <div id="instagram-verificacao" style="margin-bottom: 1.5rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);">
+    <h3 style="margin-bottom: .75rem; font-size: .95rem;">Verificar Instagram (obrigatório)</h3>
+    <p style="font-size: .85rem; color: var(--muted); margin-bottom: .75rem;">
+      Insira seu @ do Instagram para buscar e confirmar seu perfil. O campo "Instagram (@)" abaixo será preenchido automaticamente após a verificação.
+    </p>
+    <div class="input-group" style="margin-bottom: .75rem;">
+      <input id="instagram-arroba" name="instagram_arroba" maxlength="31" autocomplete="username" placeholder="@usuario" required style="flex: 1;">
+      <button type="button" id="btn-verificar-instagram" class="button-primary">Verificar</button>
     </div>
+    <div id="instagram-status" style="font-size: .85rem; min-height: 1.25rem;"></div>
+  </div>
+
+  <form method="post" action="/cadastro" id="form-cadastro">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <label class="field-label" for="register-username">Usuário</label>
     <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
@@ -43,15 +43,15 @@
     <input id="register-public-name" name="nome_publico" maxlength="80" required>
 
     <label class="field-label" for="register-handle">Instagram (@)</label>
-    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required>
+    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required readonly>
 
     <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
     <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
 
     <label class="field-label" for="register-confirm">Confirme a senha</label>
-    <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required">
 
-    <button type="submit">Cadastrar</button>
+    <button type="submit" id="btn-cadastrar" disabled>Cadastrar</button>
   </form>
 
   {% if confirmacao_email_obrigatoria %}
@@ -110,6 +110,10 @@
 .button-primary:hover {
   background: var(--pink-light);
 }
+.button-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .button-danger {
   background: #422331;
   color: #ffd9e8;
@@ -164,6 +168,10 @@
 #instagram-status.erro {
   color: #ff7b9a;
 }
+input[readonly] {
+  background: var(--surface);
+  opacity: 0.7;
+}
 </style>
 
 <script>
@@ -172,6 +180,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const inputArroba = document.getElementById('instagram-arroba');
   const statusDiv = document.getElementById('instagram-status');
   const registerHandle = document.getElementById('register-handle');
+  const btnCadastrar = document.getElementById('btn-cadastrar');
 
   const modal = document.getElementById('modal-instagram');
   const modalClose = document.getElementById('modal-close');
@@ -255,8 +264,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
   modalBtnSim.addEventListener('click', function() {
     registerHandle.value = arrobaVerificado;
+    registerHandle.readOnly = true;
     statusDiv.textContent = '✓ Instagram verificado: @' + arrobaVerificado;
     statusDiv.className = 'verificado';
+    btnCadastrar.disabled = false;
     modal.style.display = 'none';
   });
 
@@ -264,6 +275,11 @@ document.addEventListener('DOMContentLoaded', function() {
     modal.style.display = 'none';
     inputArroba.value = '';
     arrobaVerificado = '';
+    registerHandle.value = '';
+    registerHandle.readOnly = false;
+    btnCadastrar.disabled = true;
+    statusDiv.textContent = '';
+    statusDiv.className = '';
   });
 
   modalClose.addEventListener('click', function() {
