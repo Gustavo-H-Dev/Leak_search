@@ -74,6 +74,17 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Retorna JSON para endpoints que esperam JSON"""
+    if request.url.path.startswith("/api/") or request.url.path in ["/verificar-instagram", "/test-instagram"]:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"ok": False, "erro": exc.detail}
+        )
+    raise exc
+
+
 def _contexto_template(request: Request):
     session = request.scope.get("session", {})
     return {
@@ -111,8 +122,22 @@ async def validar_csrf(request: Request):
         raise HTTPException(status_code=403, detail="Token CSRF inválido.")
 
 
+async def validar_csrf_json(request: Request):
+    """CSRF validation que retorna JSON para endpoints API"""
+    formulario = await request.form()
+    enviado = formulario.get("csrf_token")
+    esperado = request.session.get("csrf_token", "")
+    logger.info(f"CSRF validation: enviado={enviado}, esperado={esperado}, session_keys={list(request.session.keys())}")
+    if not isinstance(enviado, str) or not secrets.compare_digest(enviado, esperado):
+        raise HTTPException(status_code=403, detail="Token CSRF inválido.")
+
+
 def _csrf():
     return [Depends(validar_csrf)]
+
+
+def _csrf_json():
+    return [Depends(validar_csrf_json)]
 
 
 def exigir_admin(request: Request):
@@ -286,7 +311,7 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
     )
 
 
-@app.post("/verificar-instagram", dependencies=_csrf())
+@app.post("/verificar-instagram", dependencies=_csrf_json())
 async def verificar_instagram(request: Request, arroba: str = Form(...)):
     logger.info(f"Verificar instagram: arroba={arroba}, session={dict(request.session)}, session_csrf={request.session.get('csrf_token')}")
     try:
