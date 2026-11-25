@@ -17,6 +17,9 @@ ROTAS_PUBLICAS = {
     "/reenviar-confirmacao",
     "/esqueci-senha",
     "/redefinir-senha",
+    "/verificar-instagram",
+    "/debug-instagram",
+    "/test-instagram",
 }
 
 
