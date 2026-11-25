@@ -400,6 +400,10 @@ async def cadastrar(
                 "erro": str(erro),
                 "mensagem": "",
                 "confirmacao_email_obrigatoria": autenticacao.confirmacao_email_obrigatoria(),
+                "username_valor": username,
+                "email_valor": email,
+                "nome_publico_valor": nome_publico,
+                "arroba_valor": arroba_final,
             },
             status_code=400,
         )
@@ -411,6 +415,10 @@ async def cadastrar(
                 "erro": "Esse nome de usuário ou e-mail já está cadastrado.",
                 "mensagem": "",
                 "confirmacao_email_obrigatoria": autenticacao.confirmacao_email_obrigatoria(),
+                "username_valor": username,
+                "email_valor": email,
+                "nome_publico_valor": nome_publico,
+                "arroba_valor": arroba_final,
             },
             status_code=400,
         )

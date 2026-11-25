@@ -27,7 +27,6 @@
     <div class="input-group" style="margin-bottom: .75rem;">
       <input id="instagram-arroba" name="instagram_arroba" maxlength="31" autocomplete="username" placeholder="@usuario" required style="flex: 1;">
       <button type="button" id="btn-verificar-instagram" class="button-primary">Verificar</button>
-      <button type="button" id="btn-test-debug" class="button-primary" style="background: #666; margin-left: .5rem;">Test Debug</button>
     </div>
     <div id="instagram-status" style="font-size: .85rem; min-height: 1.25rem;"></div>
   </div>
@@ -36,22 +35,28 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <label class="field-label" for="register-username">Usuário</label>
-    <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
+    <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required value="{{ username_valor or '' }}">
+    <span id="erro-username" class="erro-campo" style="display:none; font-size: .8rem; color: #ff7b9a; margin-top: .2rem; display: block;"></span>
 
     <label class="field-label" for="register-email">E-mail</label>
-    <input id="register-email" name="email" type="email" autocomplete="email" required>
+    <input id="register-email" name="email" type="email" autocomplete="email" required value="{{ email_valor or '' }}">
+    <span id="erro-email" class="erro-campo" style="display:none; font-size: .8rem; color: #ff7b9a; margin-top: .2rem; display: block;"></span>
 
     <label class="field-label" for="register-public-name">Nome público</label>
-    <input id="register-public-name" name="nome_publico" maxlength="80" required>
+    <input id="register-public-name" name="nome_publico" maxlength="80" required value="{{ nome_publico_valor or '' }}">
+    <span id="erro-nome-publico" class="erro-campo" style="display:none; font-size: .8rem; color: #ff7b9a; margin-top: .2rem; display: block;"></span>
 
     <label class="field-label" for="register-handle">Instagram (@)</label>
-    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required readonly>
+    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required readonly value="{{ arroba_valor or '' }}">
+    <span id="erro-handle" class="erro-campo" style="display:none; font-size: .8rem; color: #ff7b9a; margin-top: .2rem; display: block;"></span>
 
     <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
     <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <span id="erro-senha" class="erro-campo" style="display:none; font-size: .8rem; color: #ff7b9a; margin-top: .2rem; display: block;"></span>
 
     <label class="field-label" for="register-confirm">Confirme a senha</label>
-    <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required">
+    <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <span id="erro-confirmar" class="erro-campo" style="display:none; font-size: .8rem; color: #ff7b9a; margin-top: .2rem; display: block;"></span>
 
     <button type="submit" id="btn-cadastrar" disabled>Cadastrar</button>
   </form>
@@ -179,18 +184,28 @@ input[readonly] {
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const btnVerificar = document.getElementById('btn-verificar-instagram');
-  const btnTestDebug = document.getElementById('btn-test-debug');
   const inputArroba = document.getElementById('instagram-arroba');
   const statusDiv = document.getElementById('instagram-status');
   const registerHandle = document.getElementById('register-handle');
   const btnCadastrar = document.getElementById('btn-cadastrar');
+
+  const inputUsername = document.getElementById('register-username');
+  const inputEmail = document.getElementById('register-email');
+  const inputNomePublico = document.getElementById('register-public-name');
+  const inputSenha = document.getElementById('register-password');
+  const inputConfirmar = document.getElementById('register-confirm');
+
+  const erroUsername = document.getElementById('erro-username');
+  const erroEmail = document.getElementById('erro-email');
+  const erroNomePublico = document.getElementById('erro-nome-publico');
+  const erroSenha = document.getElementById('erro-senha');
+  const erroConfirmar = document.getElementById('erro-confirmar');
 
   const modal = document.getElementById('modal-instagram');
   const modalClose = document.getElementById('modal-close');
   const modalBtnSim = document.getElementById('modal-btn-sim');
   const modalBtnNao = document.getElementById('modal-btn-nao');
 
-  // Elementos do modal
   const modalPerfilUsername = document.getElementById('modal-perfil-username');
   const modalPerfilLink = document.getElementById('modal-perfil-link');
   const modalPerfilNome = document.getElementById('modal-perfil-nome');
@@ -201,44 +216,120 @@ document.addEventListener('DOMContentLoaded', function() {
 
   let arrobaVerificado = '';
 
-  // Botão de teste DEBUG
-  if (btnTestDebug) {
-    btnTestDebug.addEventListener('click', async function() {
-      statusDiv.textContent = 'Testando endpoint de debug...';
-      statusDiv.className = '';
-      btnTestDebug.disabled = true;
-
-      try {
-        const response = await fetch('/debug-instagram', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            arroba: 'teste',
-            csrf_token: document.getElementById('csrf-token-instagram').value
-          }),
-          credentials: 'include'
-        });
-
-        console.log('Debug Response Status:', response.status);
-        console.log('Debug Response Headers:', response.headers);
-        console.log('Debug Content-Type:', response.headers.get('content-type'));
-
-        const contentType = response.headers.get('content-type');
-        const isJson = contentType && contentType.includes('application/json');
-        
-        const data = await response.json();
-        
-        statusDiv.textContent = `✓ Debug OK! Content-Type: ${contentType || 'não definido'} | Response: ${JSON.stringify(data)}`;
-        statusDiv.className = 'verificado';
-      } catch (err) {
-        statusDiv.textContent = `✗ Debug Error: ${err.message}`;
-        statusDiv.className = 'erro';
-        console.error('Debug Error:', err);
-      } finally {
-        btnTestDebug.disabled = false;
-      }
-    });
+  function mostrarErro(elementoErro, mensagem) {
+    if (mensagem) {
+      elementoErro.textContent = mensagem;
+      elementoErro.style.display = 'block';
+    } else {
+      elementoErro.style.display = 'none';
+    }
   }
+
+  function validarUsername() {
+    const v = inputUsername.value.trim();
+    if (!v) {
+      mostrarErro(erroUsername, 'Informe o usuário.');
+      return false;
+    }
+    if (v.length < 3 || v.length > 32) {
+      mostrarErro(erroUsername, 'O usuário deve ter entre 3 e 32 caracteres.');
+      return false;
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(v)) {
+      mostrarErro(erroUsername, 'Use apenas letras, números, ponto, hífen ou sublinhado.');
+      return false;
+    }
+    mostrarErro(erroUsername, '');
+    return true;
+  }
+
+  function validarEmail() {
+    const v = inputEmail.value.trim();
+    if (!v) {
+      mostrarErro(erroEmail, 'Informe o e-mail.');
+      return false;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      mostrarErro(erroEmail, 'Informe um endereço de e-mail válido.');
+      return false;
+    }
+    mostrarErro(erroEmail, '');
+    return true;
+  }
+
+  function validarNomePublico() {
+    const v = inputNomePublico.value.trim();
+    if (!v) {
+      mostrarErro(erroNomePublico, 'Informe o nome público.');
+      return false;
+    }
+    if (v.length > 80) {
+      mostrarErro(erroNomePublico, 'O nome público deve ter no máximo 80 caracteres.');
+      return false;
+    }
+    mostrarErro(erroNomePublico, '');
+    return true;
+  }
+
+  function validarSenha() {
+    const v = inputSenha.value;
+    if (!v) {
+      mostrarErro(erroSenha, 'Informe a senha.');
+      return false;
+    }
+    if (v.length < 12) {
+      mostrarErro(erroSenha, 'A senha deve ter pelo menos 12 caracteres.');
+      return false;
+    }
+    mostrarErro(erroSenha, '');
+    return true;
+  }
+
+  function validarConfirmar() {
+    const v = inputConfirmar.value;
+    if (!v) {
+      mostrarErro(erroConfirmar, 'Confirme a senha.');
+      return false;
+    }
+    if (v !== inputSenha.value) {
+      mostrarErro(erroConfirmar, 'As senhas não coincidem.');
+      return false;
+    }
+    mostrarErro(erroConfirmar, '');
+    return true;
+  }
+
+  function validarInstagram() {
+    if (!arrobaVerificado) {
+      mostrarErro(document.getElementById('erro-handle'), 'Verifique o Instagram antes de cadastrar.');
+      return false;
+    }
+    mostrarErro(document.getElementById('erro-handle'), '');
+    return true;
+  }
+
+  function atualizarEstadoBotao() {
+    const valido =
+      validarUsername() &&
+      validarEmail() &&
+      validarNomePublico() &&
+      validarSenha() &&
+      validarConfirmar() &&
+      validarInstagram();
+    btnCadastrar.disabled = !valido;
+  }
+
+  [inputUsername, inputEmail, inputNomePublico, inputSenha, inputConfirmar].forEach(function(input) {
+    input.addEventListener('input', atualizarEstadoBotao);
+    input.addEventListener('blur', function() {
+      if (input === inputUsername) validarUsername();
+      if (input === inputEmail) validarEmail();
+      if (input === inputNomePublico) validarNomePublico();
+      if (input === inputSenha) validarSenha();
+      if (input === inputConfirmar) validarConfirmar();
+      atualizarEstadoBotao();
+    });
+  });
 
   btnVerificar.addEventListener('click', async function() {
     const arroba = inputArroba.value.trim();
@@ -264,11 +355,6 @@ document.addEventListener('DOMContentLoaded', function() {
         credentials: 'include'
       });
 
-      console.log('Response Status:', response.status);
-      console.log('Response Headers:', Object.fromEntries(response.headers));
-      console.log('Response Content-Type:', response.headers.get('content-type'));
-
-      // Verificar se a resposta é JSON
       const contentType = response.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
         const responseText = await response.text();
@@ -282,7 +368,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const p = data.perfil;
         arrobaVerificado = p.username;
 
-        // Preencher modal
         modalPerfilUsername.textContent = p.username;
         modalPerfilLink.href = p.link;
         modalPerfilNome.textContent = p.nome || '—';
@@ -296,15 +381,22 @@ document.addEventListener('DOMContentLoaded', function() {
           modalBadgeVerificado.style.display = 'none';
         }
 
-        // Mostrar modal
         modal.style.display = 'flex';
       } else {
         statusDiv.textContent = 'Erro: ' + data.erro;
         statusDiv.className = 'erro';
+        arrobaVerificado = '';
+        registerHandle.value = '';
+        registerHandle.readOnly = false;
+        atualizarEstadoBotao();
       }
     } catch (err) {
       statusDiv.textContent = 'Erro ao verificar: ' + err.message;
       statusDiv.className = 'erro';
+      arrobaVerificado = '';
+      registerHandle.value = '';
+      registerHandle.readOnly = false;
+      atualizarEstadoBotao();
     } finally {
       btnVerificar.disabled = false;
       btnVerificar.textContent = 'Verificar';
@@ -326,23 +418,21 @@ document.addEventListener('DOMContentLoaded', function() {
     arrobaVerificado = '';
     registerHandle.value = '';
     registerHandle.readOnly = false;
-    btnCadastrar.disabled = true;
     statusDiv.textContent = '';
     statusDiv.className = '';
+    atualizarEstadoBotao();
   });
 
   modalClose.addEventListener('click', function() {
     modal.style.display = 'none';
   });
 
-  // Fechar modal clicando fora
   modal.addEventListener('click', function(e) {
     if (e.target === modal) {
       modal.style.display = 'none';
     }
   });
 
-  // Fechar modal com ESC
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' && modal.style.display === 'flex') {
       modal.style.display = 'none';
