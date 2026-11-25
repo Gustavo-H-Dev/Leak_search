@@ -106,6 +106,7 @@ async def validar_csrf(request: Request):
     formulario = await request.form()
     enviado = formulario.get("csrf_token")
     esperado = request.session.get("csrf_token", "")
+    logger.info(f"CSRF validation: enviado={enviado}, esperado={esperado}, session_keys={list(request.session.keys())}")
     if not isinstance(enviado, str) or not secrets.compare_digest(enviado, esperado):
         raise HTTPException(status_code=403, detail="Token CSRF inválido.")
 
@@ -287,7 +288,7 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
 
 @app.post("/verificar-instagram", dependencies=_csrf())
 async def verificar_instagram(request: Request, arroba: str = Form(...)):
-    logger.info(f"Verificar instagram: arroba={arroba}, session_csrf={request.session.get('csrf_token')}")
+    logger.info(f"Verificar instagram: arroba={arroba}, session={dict(request.session)}, session_csrf={request.session.get('csrf_token')}")
     try:
         usuario = serpapi.validar_usuario_instagram(arroba)
         dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
