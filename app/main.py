@@ -292,7 +292,7 @@ async def verificar_instagram(request: Request, arroba: str = Form(...)):
         dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
         perfil, posts = serpapi.normalizar_perfil_instagram(dados)
         if not perfil.get("username"):
-            raise ValueError("Perfil não encontrado ou privado.")
+            return JSONResponse({"ok": False, "erro": "Perfil não encontrado ou privado."}, status_code=400)
         return JSONResponse({
             "ok": True,
             "perfil": {
@@ -308,6 +308,9 @@ async def verificar_instagram(request: Request, arroba: str = Form(...)):
         })
     except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
         return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+    except Exception as erro:
+        logger.exception("Erro inesperado ao verificar Instagram")
+        return JSONResponse({"ok": False, "erro": "Erro interno do servidor"}, status_code=500)
 
 
 @app.post("/cadastro", response_class=HTMLResponse, dependencies=_csrf())

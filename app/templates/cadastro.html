@@ -17,60 +17,41 @@
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
-  <!-- Passo 1: Verificar Instagram -->
-  <form id="form-instagram" method="post" action="/verificar-instagram">
+  <form method="post" action="/cadastro">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="field-label" for="register-handle">Instagram (@)</label>
-    <div class="input-group">
-      <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required placeholder="@usuario">
-      <button type="submit" id="btn-verificar">Verificar</button>
-    </div>
-  </form>
 
-  <!-- Passo 2: Confirmar perfil e completar cadastro -->
-  <form id="form-cadastro" method="post" action="/cadastro" style="display: none;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="arroba_confirmado" id="arroba_confirmado">
-
-    <div id="perfil-instagram" class="instagram-profile" style="display: none;">
-      <h3><a id="perfil-link" href="#" target="_blank">@<span id="perfil-username"></span></a>
-        {% if true %}<span class="profile-badge" id="badge-verificado" style="display: none;">Verificado</span>{% endif %}
-      </h3>
-      <p id="perfil-nome"></p>
-      <div class="profile-stats">
-        <span><strong id="perfil-seguidores">—</strong> seguidores</span>
-        <span><strong id="perfil-seguindo">—</strong> seguindo</span>
-      </div>
-      <p class="profile-bio" id="perfil-bio"></p>
-      <p style="margin-top: 1rem; color: var(--muted); font-size: .85rem;">
-        <strong>É esta a sua conta?</strong>
+    <!-- Verificação opcional do Instagram -->
+    <div id="instagram-verificacao" style="margin-bottom: 1.5rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);">
+      <h3 style="margin-bottom: .75rem; font-size: .95rem;">Verificar Instagram (opcional)</h3>
+      <p style="font-size: .85rem; color: var(--muted); margin-bottom: .75rem;">
+        Insira seu @ do Instagram para buscar e confirmar seu perfil. Isso preenche automaticamente o campo "Instagram (@)" abaixo.
       </p>
-      <div style="display: flex; gap: .5rem; margin-top: .5rem;">
-        <button type="button" id="btn-confirmar" class="button-primary">Sim, é minha</button>
-        <button type="button" id="btn-cancelar" class="button-danger">Não, tentar outro</button>
+      <div class="input-group" style="margin-bottom: .75rem;">
+        <input id="instagram-arroba" name="instagram_arroba" maxlength="31" autocomplete="username" placeholder="@usuario" style="flex: 1;">
+        <button type="button" id="btn-verificar-instagram" class="button-primary">Verificar</button>
       </div>
+      <div id="instagram-status" style="font-size: .85rem; min-height: 1.25rem;"></div>
     </div>
 
-    <hr style="margin: 1.5rem 0; border-color: var(--border);" id="divisor-cadastro" style="display: none;">
+    <label class="field-label" for="register-username">Usuário</label>
+    <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
 
-    <div id="campos-cadastro" style="display: none;">
-      <label class="field-label" for="register-username">Usuário</label>
-      <input id="register-username" name="username" minlength="3" maxlength="32" autocomplete="username" required>
+    <label class="field-label" for="register-email">E-mail</label>
+    <input id="register-email" name="email" type="email" autocomplete="email" required>
 
-      <label class="field-label" for="register-email">E-mail</label>
-      <input id="register-email" name="email" type="email" autocomplete="email" required>
+    <label class="field-label" for="register-public-name">Nome público</label>
+    <input id="register-public-name" name="nome_publico" maxlength="80" required>
 
-      <label class="field-label" for="register-public-name">Nome público</label>
-      <input id="register-public-name" name="nome_publico" maxlength="80" required>
+    <label class="field-label" for="register-handle">Instagram (@)</label>
+    <input id="register-handle" name="arroba" maxlength="31" autocomplete="username" required>
 
-      <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
-      <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <label class="field-label" for="register-password">Senha (mínimo 12 caracteres)</label>
+    <input id="register-password" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
 
-      <label class="field-label" for="register-confirm">Confirme a senha</label>
-      <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+    <label class="field-label" for="register-confirm">Confirme a senha</label>
+    <input id="register-confirm" name="confirmar_senha" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
 
-      <button type="submit">Cadastrar</button>
-    </div>
+    <button type="submit">Cadastrar</button>
   </form>
 
   {% if confirmacao_email_obrigatoria %}
@@ -87,104 +68,31 @@
   <p>Já tem conta? <a href="/login">Entrar</a>.</p>
 </section>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  const formInstagram = document.getElementById('form-instagram');
-  const formCadastro = document.getElementById('form-cadastro');
-  const btnVerificar = document.getElementById('btn-verificar');
-  const btnConfirmar = document.getElementById('btn-confirmar');
-  const btnCancelar = document.getElementById('btn-cancelar');
-  const perfilDiv = document.getElementById('perfil-instagram');
-  const divisor = document.getElementById('divisor-cadastro');
-  const camposCadastro = document.getElementById('campos-cadastro');
-  const arrobaConfirmado = document.getElementById('arroba_confirmado');
+<!-- Modal de confirmação do Instagram -->
+<div id="modal-instagram" class="modal-overlay" style="display: none;">
+  <div class="modal-content">
+    <button type="button" class="modal-close" id="modal-close">&times;</button>
+    <div id="modal-perfil" class="instagram-profile">
+      <h3><a id="modal-perfil-link" href="#" target="_blank">@<span id="modal-perfil-username"></span></a>
+        <span class="profile-badge" id="modal-badge-verificado" style="display: none;">Verificado</span>
+      </h3>
+      <p id="modal-perfil-nome"></p>
+      <div class="profile-stats">
+        <span><strong id="modal-perfil-seguidores">—</strong> seguidores</span>
+        <span><strong id="modal-perfil-seguindo">—</strong> seguindo</span>
+      </div>
+      <p class="profile-bio" id="modal-perfil-bio"></p>
+      <p style="margin-top: 1rem; color: var(--muted); font-size: .85rem;">
+        <strong>É esta a sua conta?</strong>
+      </p>
+      <div style="display: flex; gap: .5rem; margin-top: .5rem; justify-content: flex-end;">
+        <button type="button" id="modal-btn-nao" class="button-danger">Não, tentar outro</button>
+        <button type="button" id="modal-btn-sim" class="button-primary">Sim, usar esta conta</button>
+      </div>
+    </div>
+  </div>
+</div>
 
-  // Elementos do perfil
-  const perfilUsername = document.getElementById('perfil-username');
-  const perfilLink = document.getElementById('perfil-link');
-  const perfilNome = document.getElementById('perfil-nome');
-  const perfilSeguidores = document.getElementById('perfil-seguidores');
-  const perfilSeguindo = document.getElementById('perfil-seguindo');
-  const perfilBio = document.getElementById('perfil-bio');
-  const badgeVerificado = document.getElementById('badge-verificado');
-
-  let arrobaAtual = '';
-
-  formInstagram.addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const arroba = document.getElementById('register-handle').value.trim();
-    if (!arroba) return;
-
-    btnVerificar.disabled = true;
-    btnVerificar.textContent = 'Verificando...';
-
-    try {
-      const formData = new FormData();
-      formData.append('arroba', arroba);
-      formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
-
-      const response = await fetch('/verificar-instagram', {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await response.json();
-
-      if (data.ok) {
-        const p = data.perfil;
-        arrobaAtual = p.username;
-
-        // Preencher dados do perfil
-        perfilUsername.textContent = p.username;
-        perfilLink.href = p.link;
-        perfilNome.textContent = p.nome || '—';
-        perfilSeguidores.textContent = p.seguidores || '—';
-        perfilSeguindo.textContent = p.seguindo || '—';
-        perfilBio.textContent = p.biografia || '—';
-
-        if (p.verificado) {
-          badgeVerificado.style.display = 'inline-block';
-        } else {
-          badgeVerificado.style.display = 'none';
-        }
-
-        // Esconder passo 1, mostrar passo 2
-        formInstagram.style.display = 'none';
-        formCadastro.style.display = 'block';
-        perfilDiv.style.display = 'block';
-        divisor.style.display = 'block';
-      } else {
-        alert('Erro: ' + data.erro);
-      }
-    } catch (err) {
-      alert('Erro ao verificar: ' + err.message);
-    } finally {
-      btnVerificar.disabled = false;
-      btnVerificar.textContent = 'Verificar';
-    }
-  });
-
-  btnConfirmar.addEventListener('click', function() {
-    arrobaConfirmado.value = arrobaAtual;
-    perfilDiv.style.display = 'none';
-    divisor.style.display = 'none';
-    camposCadastro.style.display = 'block';
-    btnConfirmar.style.display = 'none';
-    btnCancelar.style.display = 'none';
-  });
-
-  btnCancelar.addEventListener('click', function() {
-    // Voltar ao passo 1
-    formInstagram.style.display = 'block';
-    formCadastro.style.display = 'none';
-    perfilDiv.style.display = 'none';
-    divisor.style.display = 'none';
-    camposCadastro.style.display = 'none';
-    arrobaConfirmado.value = '';
-    arrobaAtual = '';
-  });
-});
-</script>
 <style>
 .input-group {
   display: flex;
@@ -211,5 +119,170 @@ document.addEventListener('DOMContentLoaded', function() {
   background: #5a2c40;
   border-color: #a74b70;
 }
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+.modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+.modal-close {
+  position: absolute;
+  top: .5rem;
+  right: .75rem;
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  padding: .25rem;
+}
+.modal-close:hover {
+  color: var(--text);
+}
+#instagram-status.verificado {
+  color: #5ac68a;
+}
+#instagram-status.erro {
+  color: #ff7b9a;
+}
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const btnVerificar = document.getElementById('btn-verificar-instagram');
+  const inputArroba = document.getElementById('instagram-arroba');
+  const statusDiv = document.getElementById('instagram-status');
+  const registerHandle = document.getElementById('register-handle');
+
+  const modal = document.getElementById('modal-instagram');
+  const modalClose = document.getElementById('modal-close');
+  const modalBtnSim = document.getElementById('modal-btn-sim');
+  const modalBtnNao = document.getElementById('modal-btn-nao');
+
+  // Elementos do modal
+  const modalPerfilUsername = document.getElementById('modal-perfil-username');
+  const modalPerfilLink = document.getElementById('modal-perfil-link');
+  const modalPerfilNome = document.getElementById('modal-perfil-nome');
+  const modalPerfilSeguidores = document.getElementById('modal-perfil-seguidores');
+  const modalPerfilSeguindo = document.getElementById('modal-perfil-seguindo');
+  const modalPerfilBio = document.getElementById('modal-perfil-bio');
+  const modalBadgeVerificado = document.getElementById('modal-badge-verificado');
+
+  let arrobaVerificado = '';
+
+  btnVerificar.addEventListener('click', async function() {
+    const arroba = inputArroba.value.trim();
+    if (!arroba) {
+      statusDiv.textContent = 'Digite um @ do Instagram';
+      statusDiv.className = 'erro';
+      return;
+    }
+
+    btnVerificar.disabled = true;
+    btnVerificar.textContent = 'Verificando...';
+    statusDiv.textContent = '';
+    statusDiv.className = '';
+
+    try {
+      const formData = new FormData();
+      formData.append('arroba', arroba);
+      formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+
+      const response = await fetch('/verificar-instagram', {
+        method: 'POST',
+        body: formData
+      });
+
+      // Verificar se a resposta é JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Resposta inválida do servidor (não é JSON)');
+      }
+
+      const data = await response.json();
+
+      if (data.ok) {
+        const p = data.perfil;
+        arrobaVerificado = p.username;
+
+        // Preencher modal
+        modalPerfilUsername.textContent = p.username;
+        modalPerfilLink.href = p.link;
+        modalPerfilNome.textContent = p.nome || '—';
+        modalPerfilSeguidores.textContent = p.seguidores || '—';
+        modalPerfilSeguindo.textContent = p.seguindo || '—';
+        modalPerfilBio.textContent = p.biografia || '—';
+
+        if (p.verificado) {
+          modalBadgeVerificado.style.display = 'inline-block';
+        } else {
+          modalBadgeVerificado.style.display = 'none';
+        }
+
+        // Mostrar modal
+        modal.style.display = 'flex';
+      } else {
+        statusDiv.textContent = 'Erro: ' + data.erro;
+        statusDiv.className = 'erro';
+      }
+    } catch (err) {
+      statusDiv.textContent = 'Erro ao verificar: ' + err.message;
+      statusDiv.className = 'erro';
+    } finally {
+      btnVerificar.disabled = false;
+      btnVerificar.textContent = 'Verificar';
+    }
+  });
+
+  modalBtnSim.addEventListener('click', function() {
+    registerHandle.value = arrobaVerificado;
+    statusDiv.textContent = '✓ Instagram verificado: @' + arrobaVerificado;
+    statusDiv.className = 'verificado';
+    modal.style.display = 'none';
+  });
+
+  modalBtnNao.addEventListener('click', function() {
+    modal.style.display = 'none';
+    inputArroba.value = '';
+    arrobaVerificado = '';
+  });
+
+  modalClose.addEventListener('click', function() {
+    modal.style.display = 'none';
+  });
+
+  // Fechar modal clicando fora
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+      modal.style.display = 'none';
+    }
+  });
+
+  // Fechar modal com ESC
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && modal.style.display === 'flex') {
+      modal.style.display = 'none';
+    }
+  });
+});
+</script>
 {% endblock %}
