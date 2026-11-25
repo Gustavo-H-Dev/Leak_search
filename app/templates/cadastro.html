@@ -19,6 +19,7 @@
 
   <!-- Verificação OBRIGATÓRIA do Instagram -->
   <div id="instagram-verificacao" style="margin-bottom: 1.5rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);">
+    <input type="hidden" id="csrf-token-instagram" value="{{ csrf_token }}">
     <h3 style="margin-bottom: .75rem; font-size: .95rem;">Verificar Instagram (obrigatório)</h3>
     <p style="font-size: .85rem; color: var(--muted); margin-bottom: .75rem;">
       Insira seu @ do Instagram para buscar e confirmar seu perfil. O campo "Instagram (@)" abaixo será preenchido automaticamente após a verificação.
@@ -214,11 +215,12 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
       const formData = new FormData();
       formData.append('arroba', arroba);
-      formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+      formData.append('csrf_token', document.getElementById('csrf-token-instagram').value);
 
       const response = await fetch('/verificar-instagram', {
         method: 'POST',
-        body: formData
+        body: formData,
+        credentials: 'include'
       });
 
       // Verificar se a resposta é JSON

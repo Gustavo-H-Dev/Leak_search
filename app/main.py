@@ -287,6 +287,37 @@ def cadastro_formulario(request: Request, erro: str = "", mensagem: str = ""):
 
 @app.post("/verificar-instagram", dependencies=_csrf())
 async def verificar_instagram(request: Request, arroba: str = Form(...)):
+    logger.info(f"Verificar instagram: arroba={arroba}, session_csrf={request.session.get('csrf_token')}")
+    try:
+        usuario = serpapi.validar_usuario_instagram(arroba)
+        dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
+        perfil, posts = serpapi.normalizar_perfil_instagram(dados)
+        if not perfil.get("username"):
+            return JSONResponse({"ok": False, "erro": "Perfil não encontrado ou privado."}, status_code=400)
+        return JSONResponse({
+            "ok": True,
+            "perfil": {
+                "username": perfil["username"],
+                "nome": perfil["nome"],
+                "biografia": perfil["biografia"],
+                "seguidores": perfil["seguidores"],
+                "seguindo": perfil["seguindo"],
+                "privado": perfil["privado"],
+                "verificado": perfil["verificado"],
+                "link": perfil["link"],
+            }
+        })
+    except (ValueError, serpapi.SerpApiNaoConfigurada, serpapi.ErroSerpApi) as erro:
+        return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
+    except Exception as erro:
+        logger.exception("Erro inesperado ao verificar Instagram")
+        return JSONResponse({"ok": False, "erro": "Erro interno do servidor"}, status_code=500)
+
+
+@app.post("/test-instagram")
+async def test_instagram(request: Request, arroba: str = Form(...)):
+    """Test endpoint without CSRF for debugging"""
+    logger.info(f"Test instagram: arroba={arroba}")
     try:
         usuario = serpapi.validar_usuario_instagram(arroba)
         dados = await run_in_threadpool(serpapi.pesquisar, "instagram_profile", profile_id=usuario)
