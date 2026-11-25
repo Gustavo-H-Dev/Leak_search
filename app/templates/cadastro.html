@@ -27,6 +27,7 @@
     <div class="input-group" style="margin-bottom: .75rem;">
       <input id="instagram-arroba" name="instagram_arroba" maxlength="31" autocomplete="username" placeholder="@usuario" required style="flex: 1;">
       <button type="button" id="btn-verificar-instagram" class="button-primary">Verificar</button>
+      <button type="button" id="btn-test-debug" class="button-primary" style="background: #666; margin-left: .5rem;">Test Debug</button>
     </div>
     <div id="instagram-status" style="font-size: .85rem; min-height: 1.25rem;"></div>
   </div>
@@ -178,6 +179,7 @@ input[readonly] {
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const btnVerificar = document.getElementById('btn-verificar-instagram');
+  const btnTestDebug = document.getElementById('btn-test-debug');
   const inputArroba = document.getElementById('instagram-arroba');
   const statusDiv = document.getElementById('instagram-status');
   const registerHandle = document.getElementById('register-handle');
@@ -198,6 +200,45 @@ document.addEventListener('DOMContentLoaded', function() {
   const modalBadgeVerificado = document.getElementById('modal-badge-verificado');
 
   let arrobaVerificado = '';
+
+  // Botão de teste DEBUG
+  if (btnTestDebug) {
+    btnTestDebug.addEventListener('click', async function() {
+      statusDiv.textContent = 'Testando endpoint de debug...';
+      statusDiv.className = '';
+      btnTestDebug.disabled = true;
+
+      try {
+        const response = await fetch('/debug-instagram', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            arroba: 'teste',
+            csrf_token: document.getElementById('csrf-token-instagram').value
+          }),
+          credentials: 'include'
+        });
+
+        console.log('Debug Response Status:', response.status);
+        console.log('Debug Response Headers:', response.headers);
+        console.log('Debug Content-Type:', response.headers.get('content-type'));
+
+        const contentType = response.headers.get('content-type');
+        const isJson = contentType && contentType.includes('application/json');
+        
+        const data = await response.json();
+        
+        statusDiv.textContent = `✓ Debug OK! Content-Type: ${contentType || 'não definido'} | Response: ${JSON.stringify(data)}`;
+        statusDiv.className = 'verificado';
+      } catch (err) {
+        statusDiv.textContent = `✗ Debug Error: ${err.message}`;
+        statusDiv.className = 'erro';
+        console.error('Debug Error:', err);
+      } finally {
+        btnTestDebug.disabled = false;
+      }
+    });
+  }
 
   btnVerificar.addEventListener('click', async function() {
     const arroba = inputArroba.value.trim();
@@ -223,10 +264,16 @@ document.addEventListener('DOMContentLoaded', function() {
         credentials: 'include'
       });
 
+      console.log('Response Status:', response.status);
+      console.log('Response Headers:', Object.fromEntries(response.headers));
+      console.log('Response Content-Type:', response.headers.get('content-type'));
+
       // Verificar se a resposta é JSON
       const contentType = response.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
-        throw new Error('Resposta inválida do servidor (não é JSON)');
+        const responseText = await response.text();
+        console.error('Response Text (first 200 chars):', responseText.substring(0, 200));
+        throw new Error(`Resposta inválida do servidor (não é JSON). Content-Type: ${contentType || 'undefined'}`);
       }
 
       const data = await response.json();
