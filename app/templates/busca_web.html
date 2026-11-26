@@ -108,8 +108,7 @@
 
   <div class="serpapi-sections">
     <h2 class="search-group-title">Google via SerpApi</h2>
-    <details class="serpapi-card search-option" id="busca-vazamentos" {% if vazamento_status or api_ativa %}open{% endif %}>
-      <summary><span class="eyebrow">00 · BUSCA DE VAZAMENTOS</span><strong>Termos e sites conhecidos, em poucas consultas</strong></summary>
+
       <p>Os resultados vão para a <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>.</p>
       {% if current_user.role == "admin" %}
       <form class="search-form" method="post" action="/busca-vazamentos/config">
@@ -192,7 +191,6 @@
         </label>
         <button id="endpoint-submit" type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos</button>
       </form>
-    </details>
   </div>
 
   {% if busca_restaurada_em %}<p class="account-usage-note">Mostrando a última busca, feita em {{ busca_restaurada_em[:19]|replace("T", " ") }} (UTC).</p>{% endif %}
