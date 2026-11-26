@@ -194,8 +194,11 @@
 
       try {
         // Envia o CSRF token no corpo (FormData), pois o backend le de request.form()
+        // Primeiro tenta o input hidden, depois cai de meta tag (mais confiavel em mobile)
+        var csrfToken = document.querySelector('input[name="csrf_token"]')?.value ||
+                        document.querySelector('meta[name="csrf-token"]')?.content || '';
         const formData = new FormData();
-        formData.append("csrf_token", document.querySelector('input[name="csrf_token"]').value);
+        formData.append("csrf_token", csrfToken);
 
         const resposta = await fetch("/valida/buscar-instagram", {
           method: "POST",
@@ -270,6 +273,15 @@
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    var input = document.querySelector("input[name="csrf_token"]");
+    var meta = document.querySelector("meta[name="csrf-token"]");
+    if (meta && input) {
+      input.value = meta.getAttribute("content") || "";
+    }
+  });
+</script>
   `;
   document.head.appendChild(style);
 </script>
