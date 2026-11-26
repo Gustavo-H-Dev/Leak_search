@@ -13,6 +13,22 @@
     pista e não confirma identidade.
   </p>
 
+  {% if current_user.role == "admin" %}
+  <!-- Seletor de usuário para admin -->
+  <form class="search-form target-user-form" method="get" action="/valida">
+    <label class="field-label" for="valida-target">Usuário</label>
+    <select id="valida-target" name="target_user_id" required>
+      {% for usuario in target_users %}
+      <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}
+        {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — perfil de busca incompleto{% endif %}>
+      </option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="status" value="{{ status_atual }}">
+    <button type="submit">Selecionar</button>
+  </form>
+  {% endif %}
+
   <!-- Informacao da ultima busca de postagens do Instagram -->
   <div class="instagram-busca-info" style="margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);">
     <span class="eyebrow" style="display:block; font-size:.8rem; margin-bottom:.4rem;">POSTAGENS DO INSTAGRAM</span>
@@ -55,6 +71,9 @@
           {% if candidato.thumbnail %}<img class="result-thumb" src="{{ candidato.thumbnail }}" alt="{{ candidato.title }}" loading="lazy" referrerpolicy="no-referrer">{% endif %}
           <a href="{{ candidato.url }}" target="_blank" rel="noopener noreferrer">{{ candidato.title }}</a>
           <span>{{ candidato.url }}</span>
+          {% if candidato.source %}<span>{{ candidato.source }}</span>{% endif %}
+          {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
+          {% if candidato.listagem %}<span class="erro">Página de busca ou listagem com vários autores, não uma publicação: a miniatura pode ser da criadora, mas a página não prova nada. Rebaixado para Diferentes.</span>{% endif %}
           {% if candidato.distancia is not none %}
           <span><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>
             {% if candidato.nivel == "diferente" and not candidato.listagem %}— nada parecido nas referências; a mais próxima é{% elif candidato.listagem %}— miniatura parecida com{% else %}— mais parecido com{% endif %}
@@ -108,6 +127,15 @@
 </div>
 
 <script>
+  // Sincroniza token CSRF da meta tag com input hidden onload
+  document.addEventListener('DOMContentLoaded', function() {
+    var input = document.querySelector('input[name="csrf_token"]');
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && input) {
+      input.value = meta.getAttribute('content') || '';
+    }
+  });
+
   // Buscar postagens do Instagram agora (forca nova busca)
   const btnBuscarInstagram = document.getElementById("btn-buscar-instagram-agora");
   const statusBusca = document.getElementById("status-busca-instagram");
@@ -134,7 +162,7 @@
           body: formData,
         });
 
-        // Trata erro HTTP (403, 500, etc.)
+        // Trata erro HTTP
         if (!resposta.ok) {
           let mensagemErro = "Erro HTTP " + resposta.status;
           try {
@@ -169,15 +197,6 @@
       }
     });
   }
-
-  // Sincroniza token CSRF da meta tag com input hidden onload
-  document.addEventListener('DOMContentLoaded', function() {
-    var input = document.querySelector('input[name="csrf_token"]');
-    var meta = document.querySelector('meta[name="csrf-token"]');
-    if (meta && input) {
-      input.value = meta.getAttribute('content') || '';
-    }
-  });
 
   // Modal de imagens do Instagram
   const modalInstagram = document.getElementById("modal-imagens-instagram");
