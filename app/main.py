@@ -103,10 +103,20 @@ elif not db.obter_usuario_por_login(ADMIN_USERNAME):
 
 
 async def validar_csrf(request: Request):
-    formulario = await request.form()
-    enviado = formulario.get("csrf_token")
     esperado = request.session.get("csrf_token", "")
-    logger.info(f"CSRF validation: enviado={enviado}, esperado={esperado}, session_keys={list(request.session.keys())}")
+
+    # Tenta o header X-CSRFToken primeiro (usado por fetch com headers)
+    enviado = request.headers.get("x-csrftoken")
+
+    # Se nao tiver header, tenta ler do corpo do formulário (FormData)
+    if not enviado:
+        try:
+            formulario = await request.form()
+            enviado = formulario.get("csrf_token")
+        except Exception:
+            enviado = None
+
+    logger.info(f"CSRF validation: enviado={bool(enviado)}, esperado={bool(esperado)}, session_keys={list(request.session.keys())}")
     if not isinstance(enviado, str) or not secrets.compare_digest(enviado, esperado):
         raise HTTPException(status_code=403, detail="Token CSRF inválido.")
 
