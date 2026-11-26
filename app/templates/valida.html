@@ -193,10 +193,28 @@
       statusBusca.className = "";
 
       try {
+        // Envia o CSRF token no corpo (FormData), pois o backend le de request.form()
+        const formData = new FormData();
+        formData.append("csrf_token", document.querySelector('input[name="csrf_token"]').value);
+
         const resposta = await fetch("/valida/buscar-instagram", {
           method: "POST",
-          headers: { Accept: "application/json", "X-CSRFToken": document.querySelector('input[name="csrf_token"]').value },
+          headers: { Accept: "application/json" },
+          body: formData,
         });
+
+        // Trata respostas de erro HTTP (ex: 403 CSRF, 500 servidor)
+        if (!resposta.ok) {
+          let mensagemErro = "Erro HTTP " + resposta.status;
+          try {
+            const erroJson = await resposta.json();
+            mensagemErro = erroJson.erro || erroJson.detail || mensagemErro;
+          } catch (e) {
+            // ignora, usa mensagem padrao
+          }
+          throw new Error(mensagemErro);
+        }
+
         const dados = await resposta.json();
 
         if (dados.ok) {
@@ -210,15 +228,15 @@
             window.location.reload();
           }, 1200);
         } else {
-          // Erro da API
+          // Erro de negocio retornado com 200
           statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro:</strong> ' + (dados.erro || "resposta inesperada do servidor");
           btnBuscarInstagram.innerHTML = 'Tentar novamente';
           btnBuscarInstagram.disabled = false;
           btnBuscarInstagram.style.opacity = "1";
         }
       } catch (err) {
-        // Erro de rede/exceção
-        statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro de conexão:</strong> ' + err.message;
+        // Erro de rede, HTTP ou excecao
+        statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro:</strong> ' + err.message;
         btnBuscarInstagram.innerHTML = 'Tentar novamente';
         btnBuscarInstagram.disabled = false;
         btnBuscarInstagram.style.opacity = "1";
