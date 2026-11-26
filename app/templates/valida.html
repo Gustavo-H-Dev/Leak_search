@@ -75,9 +75,9 @@
           {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
           {% if candidato.listagem %}<span class="erro">Página de busca ou listagem com vários autores, não uma publicação: a miniatura pode ser da criadora, mas a página não prova nada. Rebaixado para Diferentes.</span>{% endif %}
           {% if candidato.distancia is not none %}
-          <span><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>
+          <span style="color: var(--text);"><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>
             {% if candidato.nivel == "diferente" and not candidato.listagem %}— nada parecido nas referências; a mais próxima é{% elif candidato.listagem %}— miniatura parecida com{% else %}— mais parecido com{% endif %}
-            {{ candidato.referencia }}</span>
+            <span style="color: var(--text);">{{ candidato.referencia }}</span></span>
           {% elif not candidato.phash %}<span>Sem imagem comparável para este resultado.</span>{% endif %}
           {% if candidato.status == "pending" %}
           <div class="result-actions">
