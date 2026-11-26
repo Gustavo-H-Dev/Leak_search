@@ -842,6 +842,25 @@
   <main class="page-content">
     {% block conteudo %}{% endblock %}
   </main>
+  /* Fix for select element options visibility in dark theme */
+  select {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='%23f5f0f5'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 25px;
+    color: var(--text);
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+  }
+
+  /* Ensure option text is visible */
+  select option {
+    background-color: var(--surface);
+    color: var(--text);
+  }
+  </style>
 <script>
   (function () {
     var btn = document.querySelector(".menu-toggle");
