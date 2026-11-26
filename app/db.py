@@ -67,6 +67,13 @@ def iniciar_banco():
         _migrar_sites_oficiais()
         _migrar_usuarios()
         _migrar_criadoras()
+        try:
+            with conexao() as conn:
+                conn.execute(
+                    "ALTER TABLE instagram_post_hashes ADD COLUMN IF NOT EXISTS miniatura TEXT NOT NULL DEFAULT ''"
+                )
+        except Exception:
+            pass
         return
 
     with conexao() as conn:
@@ -176,6 +183,22 @@ def iniciar_banco():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, url)
             );
+            CREATE TABLE IF NOT EXISTS instagram_post_hashes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                shortcode TEXT NOT NULL,
+                url TEXT NOT NULL,
+                miniatura TEXT NOT NULL DEFAULT '',
+                phash TEXT NOT NULL,
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, shortcode)
+            );
+            CREATE TABLE IF NOT EXISTS instagram_busca_controle (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                ultima_busca_em TEXT NOT NULL,
+                UNIQUE (user_id)
+            );
             CREATE TABLE IF NOT EXISTS auth_tokens (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -204,6 +227,13 @@ def iniciar_banco():
             ON search_snapshots (updated_at);
             """
         )
+        try:
+            conn.execute(
+                "ALTER TABLE instagram_post_hashes ADD COLUMN miniatura TEXT NOT NULL DEFAULT ''"
+            )
+        except Exception:
+            pass
+    _migrar_sites_oficiais()
     _migrar_sites_oficiais()
     _migrar_usuarios()
     _migrar_criadoras()
@@ -335,6 +365,26 @@ def _iniciar_banco_postgresql():
             phash TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, url)
+        )
+        """,
+        """,
+        CREATE TABLE IF NOT EXISTS instagram_post_hashes (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            shortcode TEXT NOT NULL,
+            url TEXT NOT NULL,
+            miniatura TEXT NOT NULL DEFAULT '',
+            phash TEXT NOT NULL,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, shortcode)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS instagram_busca_controle (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            ultima_busca_em TEXT NOT NULL,
+            UNIQUE (user_id)
         )
         """,
         """
@@ -969,6 +1019,101 @@ def listar_hashes_oficiais(user_id):
             """,
             (user_id,),
         ).fetchall()
+
+
+def deve_buscar_instagram(user_id: int) -> bool:
+    """Retorna True se nunca buscou ou se passou mais de 24h desde a ultima busca."""
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT ultima_busca_em FROM instagram_busca_controle
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    if linha is None:
+        return True
+    ultima = linha["ultima_busca_em"]
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        data_ultima = datetime.fromisoformat(ultima)
+    except ValueError:
+        return True
+    if data_ultima.tzinfo is None:
+        data_ultima = data_ultima.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - data_ultima > timedelta(hours=24)
+
+
+def registrar_busca_instagram(user_id: int) -> None:
+    """Registra (ou atualiza) o timestamp da ultima busca de Instagram do usuario."""
+    agora = datetime.now(timezone.utc).isoformat()
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO instagram_busca_controle (user_id, ultima_busca_em)
+            VALUES (?, ?)
+            ON CONFLICT (user_id) DO UPDATE SET ultima_busca_em = excluded.ultima_busca_em
+            """,
+            (user_id, agora),
+        )
+
+
+def salvar_postagens_instagram(user_id: int, posts: list[dict]) -> int:
+    """Salva shortcode, url, miniatura e phash de cada postagem do Instagram. Retorna quantas foram salvas."""
+    from app.core import imagens
+
+    salvos = 0
+    with conexao() as conn:
+        for post in posts:
+            shortcode = post.get("shortcode") or post.get("codigo")
+            url = post.get("url") or post.get("link")
+            miniatura = post.get("miniatura") or ""
+            phash = post.get("phash") or ""
+            if not shortcode or not url:
+                continue
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO instagram_post_hashes (user_id, shortcode, url, miniatura, phash)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (user_id, shortcode) DO UPDATE
+                    SET url = excluded.url, miniatura = excluded.miniatura, phash = excluded.phash, criado_em = CURRENT_TIMESTAMP
+                    """,
+                    (user_id, shortcode, url, miniatura, phash),
+                )
+                salvos += 1
+            except Exception:
+                continue
+    return salvos
+
+
+def listar_postagens_instagram(user_id: int) -> list[dict]:
+    """Lista postagens do Instagram salvas para o usuario."""
+    with conexao() as conn:
+        linhas = conn.execute(
+            """
+            SELECT shortcode, url, phash, criado_em
+            FROM instagram_post_hashes
+            WHERE user_id = ?
+            ORDER BY criado_em DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def obter_ultima_busca_instagram(user_id: int):
+    """Retorna a data/hora da ultima busca de Instagram ou None."""
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT ultima_busca_em FROM instagram_busca_controle
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    return linha["ultima_busca_em"] if linha else None
 
 
 def excluir_site_oficial_usuario(site_id, user_id):

@@ -1344,6 +1344,57 @@ STATUS_VALIDA = {
 }
 
 
+def _buscar_postagens_instagram(alvo: dict) -> list[dict]:
+    """Busca postagens recentes do Instagram da criadora e calcula pHash de cada miniatura.
+
+    Retorna lista de dicts com shortcode, url e phash. Imagens sao baixadas em
+    memoria e descartadas apos o calculo do hash; nada e salvo em disco.
+    """
+    handle = (alvo.get("public_handle") or "").strip().lstrip("@")
+    if not handle:
+        return []
+    try:
+        dados = serpapi.pesquisar("instagram_profile", profile_id=handle)
+    except Exception:
+        logger.exception("Falha na chamada da Instagram Profile API para %s", handle)
+        return []
+
+    try:
+        _perfil, posts = serpapi.normalizar_perfil_instagram(dados)
+    except Exception:
+        logger.exception("Falha ao normalizar perfil do Instagram para %s", handle)
+        return []
+
+    resultado = []
+    for post in posts:
+        miniatura = post.get("miniatura") or ""
+        if not miniatura:
+            continue
+        try:
+            with httpx.Client(timeout=15) as cliente:
+                resposta = cliente.get(miniatura)
+                if resposta.status_code != 200:
+                    continue
+                tipo = resposta.headers.get("content-type", "")
+                if not tipo.lower().startswith("image/"):
+                    continue
+                phash = imagens.calcular_phash(resposta.content)
+        except Exception:
+            continue
+        shortcode = sites_oficiais.shortcode_instagram(post.get("link", ""))
+        if not shortcode:
+            continue
+        resultado.append(
+            {
+                "shortcode": shortcode,
+                "url": post.get("link", ""),
+                "miniatura": miniatura,
+                "phash": phash,
+            }
+        )
+    return resultado
+
+
 @app.get("/valida", response_class=HTMLResponse)
 def valida(
     request: Request,
@@ -1354,7 +1405,26 @@ def valida(
     alvo = _usuario_alvo_busca(request, target_user_id)
     if status not in STATUS_VALIDA:
         status = "pending"
+
+    # Busca automatica de postagens do Instagram se necessario (max 1 vez por 24h)
+    ultima_busca_instagram = db.obter_ultima_busca_instagram(alvo["id"])
+    if db.deve_buscar_instagram(alvo["id"]):
+        try:
+            posts = _buscar_postagens_instagram(alvo)
+            if posts:
+                db.salvar_postagens_instagram(alvo["id"], posts)
+        except Exception:
+            logger.exception("Falha ao buscar postagens do Instagram para valida")
+        db.registrar_busca_instagram(alvo["id"])
+        ultima_busca_instagram = db.obter_ultima_busca_instagram(alvo["id"])
+
     referencias = _referencias_do_usuario(alvo)
+    # Adicionar postagens do Instagram como referencias de comparacao
+    for post in db.listar_postagens_instagram(alvo["id"]):
+        if post["phash"]:
+            referencias.append(
+                {"phash": post["phash"], "origem": f"Instagram — {post['shortcode']}"}
+            )
     candidatos = []
     for candidato in db.listar_candidatos(alvo["id"], status):
         melhor = candidatos_core.melhor_referencia(candidato["phash"], referencias)
@@ -1396,8 +1466,37 @@ def valida(
             "contagens": db.contar_candidatos_por_status(alvo["id"]),
             "tem_referencias": bool(referencias),
             "mensagem": mensagem,
+            "ultima_busca_instagram": ultima_busca_instagram,
+            "postagens_instagram_count": len(db.listar_postagens_instagram(alvo["id"])),
+            "postagens_instagram": db.listar_postagens_instagram(alvo["id"]),
         },
     )
+
+
+@app.post("/valida/buscar-instagram", dependencies=_csrf())
+async def valida_buscar_instagram_agora(request: Request):
+    """Forca uma nova busca de postagens do Instagram para o usuario alvo."""
+    alvo = _usuario_alvo_busca(request)
+    try:
+        posts = _buscar_postagens_instagram(alvo)
+        salvos = 0
+        if posts:
+            salvos = db.salvar_postagens_instagram(alvo["id"], posts)
+        db.registrar_busca_instagram(alvo["id"])
+        ultima = db.obter_ultima_busca_instagram(alvo["id"])
+        return JSONResponse(
+            {
+                "ok": True,
+                "postagens": len(posts),
+                "salvos": salvos,
+                "ultima_busca": ultima,
+            }
+        )
+    except Exception as erro:
+        logger.exception("Falha ao forcar busca de Instagram para valida")
+        return JSONResponse(
+            {"ok": False, "erro": str(erro)}, status_code=500
+        )
 
 
 @app.get("/analise", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])
