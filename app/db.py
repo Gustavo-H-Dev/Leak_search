@@ -367,7 +367,7 @@ def _iniciar_banco_postgresql():
             UNIQUE (user_id, url)
         )
         """,
-        """,
+        """
         CREATE TABLE IF NOT EXISTS instagram_post_hashes (
             id BIGSERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
