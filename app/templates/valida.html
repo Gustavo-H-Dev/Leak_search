@@ -17,7 +17,7 @@
   <!-- Seletor de usuário para admin -->
   <form class="search-form target-user-form" method="get" action="/valida">
     <label class="field-label" for="valida-target">Usuário</label>
-    <select id="valida-target" name="target_user_id" required style="color: var(--text); background: var(--surface); border: 1px solid var(--border); width: 100%;">
+    <select id="valida-target" name="target_user_id" required style="color: #f5f0f5; background: #19171d; border: 1px solid #302b34; width: 100%;">
       {% for usuario in target_users %}
       <option value="{{ usuario.id }}" {% if target_user_id == usuario.id %}selected{% endif %}
         {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — perfil de busca incompleto{% endif %}>
