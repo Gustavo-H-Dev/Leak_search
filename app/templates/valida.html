@@ -185,66 +185,43 @@
 
   if (btnBuscarInstagram) {
     btnBuscarInstagram.addEventListener("click", async function () {
+      // Estado de carregamento com spinner
       btnBuscarInstagram.disabled = true;
-      btnBuscarInstagram.textContent = "Buscando...";
+      btnBuscarInstagram.innerHTML = '<span class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;border:2px solid #ffffff40;border-top-color:#ffffff;border-radius:50%;animation:spin 0.8s linear infinite;"></span>Buscando postagens...';
+      btnBuscarInstagram.style.opacity = "0.85";
       statusBusca.textContent = "";
+      statusBusca.className = "";
+
       try {
         const resposta = await fetch("/valida/buscar-instagram", {
           method: "POST",
           headers: { Accept: "application/json", "X-CSRFToken": document.querySelector('input[name="csrf_token"]').value },
         });
         const dados = await resposta.json();
+
         if (dados.ok) {
-          statusBusca.textContent = "✓ " + dados.salvos + " postagem(ns) capturada(s).";
-          statusBusca.style.color = "#5ac68a";
-          btnBuscarInstagram.textContent = "Buscar postagens novamente";
-          setTimeout(function () { window.location.reload(); }, 800);
+          // Sucesso
+          statusBusca.innerHTML = '<strong style="color:#5ac68a;">✓ Concluído:</strong> ' + dados.salvos + ' postagem(ns) capturada(s).';
+          btnBuscarInstagram.innerHTML = '<span style="color:#5ac68a;">✓</span> Atualizado';
+          setTimeout(function () {
+            btnBuscarInstagram.innerHTML = 'Buscar postagens novamente';
+            btnBuscarInstagram.style.opacity = "1";
+            btnBuscarInstagram.disabled = false;
+            window.location.reload();
+          }, 1200);
         } else {
-          statusBusca.textContent = "Erro: " + (dados.erro || " desconhecido");
-          statusBusca.style.color = "#ff7b9a";
+          // Erro da API
+          statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro:</strong> ' + (dados.erro || "resposta inesperada do servidor");
+          btnBuscarInstagram.innerHTML = 'Tentar novamente';
           btnBuscarInstagram.disabled = false;
-          btnBuscarInstagram.textContent = "Buscar postagens do Instagram";
+          btnBuscarInstagram.style.opacity = "1";
         }
       } catch (err) {
-        statusBusca.textContent = "Erro ao buscar: " + err.message;
-        statusBusca.style.color = "#ff7b9a";
+        // Erro de rede/exceção
+        statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro de conexão:</strong> ' + err.message;
+        btnBuscarInstagram.innerHTML = 'Tentar novamente';
         btnBuscarInstagram.disabled = false;
-        btnBuscarInstagram.textContent = "Buscar postagens do Instagram";
-      }
-    });
-  }
-
-  // Buscar postagens do Instagram agora (forca nova busca)
-  const btnBuscarInstagram = document.getElementById("btn-buscar-instagram-agora");
-  const statusBusca = document.getElementById("status-busca-instagram");
-
-  if (btnBuscarInstagram) {
-    btnBuscarInstagram.addEventListener("click", async function () {
-      btnBuscarInstagram.disabled = true;
-      btnBuscarInstagram.textContent = "Buscando...";
-      statusBusca.textContent = "";
-      try {
-        const resposta = await fetch("/valida/buscar-instagram", {
-          method: "POST",
-          headers: { Accept: "application/json", "X-CSRFToken": document.querySelector('input[name="csrf_token"]').value },
-        });
-        const dados = await resposta.json();
-        if (dados.ok) {
-          statusBusca.textContent = "✓ " + dados.salvos + " postagem(ns) capturada(s).";
-          statusBusca.style.color = "#5ac68a";
-          btnBuscarInstagram.textContent = "Buscar postagens novamente";
-          setTimeout(function () { window.location.reload(); }, 800);
-        } else {
-          statusBusca.textContent = "Erro: " + (dados.erro || " desconhecido");
-          statusBusca.style.color = "#ff7b9a";
-          btnBuscarInstagram.disabled = false;
-          btnBuscarInstagram.textContent = "Buscar postagens do Instagram";
-        }
-      } catch (err) {
-        statusBusca.textContent = "Erro ao buscar: " + err.message;
-        statusBusca.style.color = "#ff7b9a";
-        btnBuscarInstagram.disabled = false;
-        btnBuscarInstagram.textContent = "Buscar postagens do Instagram";
+        btnBuscarInstagram.style.opacity = "1";
       }
     });
   }
@@ -268,5 +245,14 @@
       if (e.key === "Escape" && modalInstagram.style.display === "flex") modalInstagram.style.display = "none";
     });
   }
+
+  // Estilo da animação de carregamento (spinner)
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
 </script>
 {% endblock %}
