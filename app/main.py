@@ -947,12 +947,15 @@ async def novo_usuario(
     email: str = Form(...),
     nome_publico: str = Form(...),
     arroba: str = Form(...),
+    arroba_confirmado: str = Form(""),
     senha: str = Form(...),
     confirmar_senha: str = Form(...),
 ):
+    # Usar o arroba confirmado via verificação do Instagram, se disponível
+    arroba_final = arroba_confirmado or arroba
     try:
         user_id, username, email = _criar_conta(
-            username, email, nome_publico, arroba, senha, confirmar_senha
+            username, email, nome_publico, arroba_final, senha, confirmar_senha
         )
     except ValueError as erro:
         return templates.TemplateResponse(
