@@ -20,6 +20,7 @@ from fastapi.responses import (
     JSONResponse,
     RedirectResponse,
 )
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -55,6 +56,14 @@ EXTENSOES_PERMITIDAS = {".jpg", ".jpeg", ".png", ".webp"}
 TAMANHO_MAXIMO = 20 * 1024 * 1024  # 20 MB
 logger = logging.getLogger(__name__)
 
+# Vitrine dos componentes em /dev/componentes. Fica desligada por padrao: em
+# producao nenhuma variavel e definida, entao a rota responde 404.
+COMPONENTES_DEV_ATIVO = os.getenv("APP_ENV", "").strip().lower() in {
+    "dev",
+    "development",
+    "local",
+} or os.getenv("DEV_COMPONENTES", "").strip().lower() in {"1", "true", "yes"}
+
 PASTA_OFICIAIS.mkdir(parents=True, exist_ok=True)
 PASTA_FOTOS_BUSCA.mkdir(parents=True, exist_ok=True)
 db.iniciar_banco()
@@ -84,6 +93,7 @@ app.add_middleware(
     same_site="lax",
     https_only=os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes"},
 )
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 def _contexto_template(request: Request):
@@ -755,6 +765,20 @@ def home(request: Request):
     if request.state.user and request.state.user["role"] == "admin":
         contexto["pendencias"] = _pendencias_de_operacao()
     return templates.TemplateResponse(request, "home.html", contexto)
+
+
+@app.get(
+    "/dev/componentes",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def componentes_dev(request: Request):
+    """Vitrine do design system, apenas em desenvolvimento."""
+    if not COMPONENTES_DEV_ATIVO:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return templates.TemplateResponse(
+        request, "dev_componentes.html", {"titulo": "Componentes (dev)"}
+    )
 
 
 def _pendencias_de_operacao():

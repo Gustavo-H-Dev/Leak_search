@@ -1,0 +1,10 @@
+{# Estado vazio honesto: diz o que aconteceu e, se houver, o proximo passo. #}
+{% macro estado_vazio(titulo, texto="", acao_texto="", acao_href="", acao_attrs="") -%}
+<div class="ds-estado-vazio">
+  <p class="ds-estado-vazio__titulo">{{ titulo }}</p>
+  {% if texto %}<p class="ds-estado-vazio__texto">{{ texto }}</p>{% endif %}
+  {% if acao_texto and acao_href %}
+  <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="{{ acao_href }}" {{ acao_attrs|safe }}>{{ acao_texto }}</a>
+  {% endif %}
+</div>
+{%- endmacro %}

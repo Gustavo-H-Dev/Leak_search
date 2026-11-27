@@ -5,6 +5,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-}
       MEDIA_DIR: ${MEDIA_DIR:-/code/media/oficiais}
       SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}

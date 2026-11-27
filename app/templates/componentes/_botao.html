@@ -1,0 +1,8 @@
+{# Botao do design system. Variantes: primario, secundario, fantasma, perigo. #}
+{% macro botao(texto, variante="primario", tipo="button", bloco=false, pequeno=false, attrs="") -%}
+<button type="{{ tipo }}" class="ds-btn ds-btn--{{ variante }}{% if bloco %} ds-btn--bloco{% endif %}{% if pequeno %} ds-btn--pequeno{% endif %}" {{ attrs|safe }}>{{ texto }}</button>
+{%- endmacro %}
+
+{% macro botao_link(texto, href, variante="secundario", bloco=false, pequeno=false, attrs="") -%}
+<a class="ds-btn ds-btn--{{ variante }}{% if bloco %} ds-btn--bloco{% endif %}{% if pequeno %} ds-btn--pequeno{% endif %}" href="{{ href }}" {{ attrs|safe }}>{{ texto }}</a>
+{%- endmacro %}

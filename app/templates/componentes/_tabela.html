@@ -1,0 +1,34 @@
+{# Tabela responsiva: no celular cada linha vira um cartao com o rotulo da
+   coluna ao lado do valor (via data-rotulo). `linhas` e uma lista de listas de
+   textos ja escapados. #}
+{% macro tabela(cabecalhos, linhas) -%}
+<table class="ds-tabela">
+  <thead>
+    <tr>{% for cabecalho in cabecalhos %}<th scope="col">{{ cabecalho }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+    {% for linha in linhas %}
+    <tr>
+      {% for celula in linha %}
+      <td data-rotulo="{{ cabecalhos[loop.index0] }}">{{ celula }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{%- endmacro %}
+
+{# Lista simples de itens com titulo/texto e acao opcional. #}
+{% macro lista(itens) -%}
+<ul class="ds-lista">
+  {% for item in itens %}
+  <li class="ds-lista__item">
+    <div>
+      <p class="ds-lista__titulo">{{ item.titulo }}</p>
+      {% if item.texto %}<p class="ds-lista__texto">{{ item.texto }}</p>{% endif %}
+    </div>
+    {% if item.acao %}{{ item.acao|safe }}{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{%- endmacro %}

@@ -1,0 +1,17 @@
+{# Badge de status. Tons: neutro, sucesso, alerta, perigo, info. #}
+{% macro badge(texto, tom="neutro") -%}
+<span class="ds-badge ds-badge--{{ tom }}">{{ texto }}</span>
+{%- endmacro %}
+
+{# Nomes de status usados na revisao de candidatos. #}
+{% macro badge_status(status) -%}
+{%- set mapa = {
+  "pending": ("Pendente", "alerta"),
+  "abaixo": ("Abaixo do corte", "neutro"),
+  "leaked": ("Vazado", "perigo"),
+  "not_me": ("Não sou eu", "neutro"),
+  "official": ("Oficial", "sucesso"),
+} -%}
+{%- set item = mapa.get(status, (status, "neutro")) -%}
+{{ badge(item[0], item[1]) }}
+{%- endmacro %}

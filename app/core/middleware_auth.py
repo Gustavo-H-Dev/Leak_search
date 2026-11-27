@@ -37,6 +37,10 @@ class AutenticacaoMiddleware(BaseHTTPMiddleware):
                 request.session["csrf_token"] = secrets.token_urlsafe(32)
 
         request.state.user = usuario
+        # CSS e JS do design system precisam carregar tambem nas telas de
+        # visitante (login e cadastro).
+        if request.url.path.startswith("/static/"):
+            return await call_next(request)
         if request.url.path not in ROTAS_PUBLICAS and usuario is None:
             destino = quote(request.url.path)
             return RedirectResponse(f"/login?next={destino}", status_code=303)

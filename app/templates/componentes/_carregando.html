@@ -1,0 +1,19 @@
+{# Skeleton: ocupa o lugar do conteudo enquanto ele carrega. #}
+{% macro skeleton(largura="100%", altura="0.875rem", circulo=false, rotulo="Carregando") -%}
+<span class="ds-skeleton{% if circulo %} ds-skeleton--circulo{% endif %}" style="width: {{ largura }}; height: {{ altura }}" role="status" aria-label="{{ rotulo }}"></span>
+{%- endmacro %}
+
+{# Lista de skeletons para prever a forma de uma lista de resultados. #}
+{% macro lista_carregando(itens=4) -%}
+<div class="grid gap-3" role="status" aria-label="Carregando resultados">
+  {% for _ in range(itens) %}
+  <div class="ds-card" style="padding: 1rem">
+    <div class="grid gap-2">
+      {{ skeleton("45%", "1rem") }}
+      {{ skeleton("75%", "0.75rem") }}
+      {{ skeleton("30%", "0.75rem") }}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{%- endmacro %}

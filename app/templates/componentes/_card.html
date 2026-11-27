@@ -1,0 +1,15 @@
+{# Cartao com titulo/texto opcionais. O conteudo vem pelo {% call %}. #}
+{% macro card(titulo="", texto="", extra_cabecalho="") -%}
+<section class="ds-card">
+  {% if titulo or texto or extra_cabecalho %}
+  <header class="ds-card__cabecalho">
+    <div>
+      {% if titulo %}<h2 class="ds-card__titulo">{{ titulo }}</h2>{% endif %}
+      {% if texto %}<p class="ds-card__texto">{{ texto }}</p>{% endif %}
+    </div>
+    {% if extra_cabecalho %}{{ extra_cabecalho|safe }}{% endif %}
+  </header>
+  {% endif %}
+  {{ caller() }}
+</section>
+{%- endmacro %}

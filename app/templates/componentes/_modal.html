@@ -1,0 +1,15 @@
+{# Modal de confirmacao. O CSS/JS vive em app.css e ui.js:
+   data-abrir-modal="id" abre, data-fechar-modal fecha, Esc fecha.
+   A acao real deve ser um form/botao passado em `acao_html`. #}
+{% macro modal_confirmacao(id, titulo, texto="", acao_html="", fechar_texto="Cancelar") -%}
+<div class="ds-modal" id="{{ id }}" role="dialog" aria-modal="true" aria-labelledby="{{ id }}-titulo" data-modal hidden>
+  <div class="ds-modal__caixa">
+    <h2 class="ds-modal__titulo" id="{{ id }}-titulo">{{ titulo }}</h2>
+    {% if texto %}<p class="ds-card__texto">{{ texto }}</p>{% endif %}
+    <div class="ds-modal__acoes">
+      <button type="button" class="ds-btn ds-btn--secundario" data-fechar-modal>{{ fechar_texto }}</button>
+      {{ acao_html|safe }}
+    </div>
+  </div>
+</div>
+{%- endmacro %}

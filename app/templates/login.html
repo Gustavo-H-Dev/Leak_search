@@ -1,21 +1,31 @@
 {% extends "base.html" %}
+{% from "componentes/_campo.html" import campo %}
+{% from "componentes/_botao.html" import botao %}
 {% block titulo %}Entrar{% endblock %}
 {% block conteudo %}
-<section class="auth-card">
-  <span class="eyebrow">ACESSO RESTRITO</span>
-  <h1>Entrar</h1>
-  {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
-  {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
-  <form method="post" action="/login">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="next" value="{{ next }}">
-    <label class="field-label" for="login-username">Usuário ou e-mail</label>
-    <input id="login-username" name="username" autocomplete="username" required>
-    <label class="field-label" for="login-password">Senha</label>
-    <input id="login-password" name="senha" type="password" autocomplete="current-password" required>
-    <button type="submit">Entrar</button>
-  </form>
-  <p><a href="/esqueci-senha">Esqueci minha senha</a></p>
-  <p>Não tem conta? <a href="/cadastro">Cadastre-se</a>.</p>
-</section>
+<div class="mx-auto grid w-full max-w-md gap-5 py-4">
+  <div>
+    <span class="ds-eyebrow">Acesso restrito</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.75rem,6vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">Entrar</h1>
+    <p class="ds-card__texto">Use sua conta para revisar os resultados do seu monitoramento.</p>
+  </div>
+
+  {% if erro %}<p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>{% endif %}
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso">{{ mensagem }}</p>{% endif %}
+
+  <section class="ds-card">
+    <form method="post" action="/login" class="ds-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ next or '' }}">
+      {{ campo("login-username", "Usuário ou e-mail", "username", autocomplete="username", obrigatorio=true, attrs="autofocus") }}
+      {{ campo("login-password", "Senha", "senha", tipo="password", autocomplete="current-password", obrigatorio=true) }}
+      {{ botao("Entrar", tipo="submit", bloco=true) }}
+    </form>
+  </section>
+
+  <div class="grid gap-2 text-sm">
+    <a class="text-primaria-clara underline-offset-4 hover:underline" href="/esqueci-senha">Esqueci minha senha</a>
+    <p class="ds-card__texto">Não tem conta? <a class="text-primaria-clara underline-offset-4 hover:underline" href="/cadastro">Cadastre-se</a>.</p>
+  </div>
+</div>
 {% endblock %}

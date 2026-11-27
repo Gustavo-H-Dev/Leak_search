@@ -1,0 +1,19 @@
+{# Campo de formulario: rotulo, input, dica e espaco para erro de validacao. #}
+{% macro campo(id, rotulo, nome, tipo="text", valor="", obrigatorio=false, autocomplete="", dica="", erro_id="", readonly=false, attrs="") -%}
+<div class="ds-campo">
+  <label class="ds-rotulo" for="{{ id }}">{{ rotulo }}{% if obrigatorio %} <span aria-hidden="true">*</span>{% endif %}</label>
+  <input
+    class="ds-input"
+    id="{{ id }}"
+    name="{{ nome }}"
+    type="{{ tipo }}"
+    value="{{ valor }}"
+    {%- if obrigatorio %} required{% endif %}
+    {%- if autocomplete %} autocomplete="{{ autocomplete }}"{% endif %}
+    {%- if readonly %} readonly{% endif %}
+    {%- if dica %} aria-describedby="{{ id }}-dica"{% endif %}
+    {{ attrs|safe }}>
+  {% if dica %}<p class="ds-dica" id="{{ id }}-dica">{{ dica }}</p>{% endif %}
+  {% if erro_id %}<span id="{{ erro_id }}" class="ds-erro-campo" style="display:none"></span>{% endif %}
+</div>
+{%- endmacro %}
