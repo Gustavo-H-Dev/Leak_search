@@ -14,8 +14,22 @@ def test_gera_consultas_por_arroba_com_limite():
     assert consultas[0] == '"@ana" "vazado"'
     assert consultas[1] == '"@aninha" "vazado"'
 
-    com_site = cv.gerar_consultas_busca(["ana"], ["vazado"], ["erome.com"], 5)
-    assert com_site[-1] == '"@ana" site:erome.com'
+    com_site = cv.gerar_consultas_busca(["ana"], ["vazado"], ["erome.com"], 8)
+    assert '"@ana" site:erome.com' in com_site
+
+
+def test_consultas_genericas_incluem_arroba_sozinho_e_nome():
+    consultas = cv.gerar_consultas_busca(
+        ["ana"], ["vazado"], [], 18, nome="Ana Silva"
+    )
+    assert '"@ana" "vazado"' in consultas
+    assert '"@ana"' in consultas
+    assert any("privacy" in consulta for consulta in consultas)
+    assert '"Ana Silva"' in consultas
+    assert '"Ana Silva" vazado' in consultas
+    # Sem sites configurados os dominios conhecidos entram sozinhos.
+    assert any("site:erome.com" in consulta for consulta in consultas)
+    assert len(consultas) <= 18
 
 
 def test_agrupa_em_poucas_consultas():

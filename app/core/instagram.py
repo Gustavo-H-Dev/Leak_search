@@ -5,7 +5,8 @@ import re
 
 import httpx
 
-from app.core import imagens, serpapi, sites_oficiais
+from app.core import imagens, pontuacao, serpapi, sites_oficiais
+from app.core.dominios_vazamento import DOMINIOS_VAZAMENTO_PADRAO
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,31 @@ class BuscaInstagramIndisponivel(Exception):
     """Falha ao buscar postagens do Instagram, com mensagem pronta para o usuario."""
 
 
+class PerfilInstagramNaoEncontrado(BuscaInstagramIndisponivel):
+    """O Instagram respondeu e nao existe perfil publico com esse @."""
+
+
+_RE_LINK_BIO = re.compile(
+    r"(?<![\w@.-])(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(/[^\s\"'<>()\]]*)?",
+    re.IGNORECASE,
+)
+_DOMINIOS_IGNORADOS = {
+    "gmail.com",
+    "hotmail.com",
+    "outlook.com",
+    "yahoo.com",
+    "yahoo.com.br",
+    "icloud.com",
+    "protonmail.com",
+    "live.com",
+    "bol.com.br",
+    "uol.com.br",
+    "terra.com.br",
+    *(dominio for dominio, _ in PLATAFORMAS_POR_DOMINIO),
+    *DOMINIOS_VAZAMENTO_PADRAO,
+}
+
+
 def extrair_arrobas(bio: str, arroba_propria: str = "") -> list[dict]:
     """Arrobas citados na bio, com a plataforma quando o link deixa claro."""
     bio = bio or ""
@@ -76,6 +102,29 @@ def extrair_arrobas(bio: str, arroba_propria: str = "") -> list[dict]:
     return list(encontrados.values())
 
 
+def extrair_links(bio: str) -> list[str]:
+    """URLs de sites proprios citadas na bio (linktree, loja, site pessoal).
+
+    Serve para reconhecer automaticamente as paginas oficiais da criadora sem
+    que ela precise cadastrar site nenhum.
+    """
+    links: list[str] = []
+    vistos: set[str] = set()
+    for achado in _RE_LINK_BIO.finditer(bio or ""):
+        dominio = achado.group(1).lower().removeprefix("www.")
+        caminho = (achado.group(2) or "").rstrip(".,;:!?")
+        if dominio in _DOMINIOS_IGNORADOS:
+            continue
+        normalizada = pontuacao.normalizar_url(f"https://{dominio}{caminho}")
+        if not normalizada or normalizada in vistos:
+            continue
+        vistos.add(normalizada)
+        links.append(normalizada)
+        if len(links) >= 15:
+            break
+    return links
+
+
 def baixar_hash_da_miniatura(url: str) -> str:
     """Baixa a miniatura em memoria e devolve o pHash; vazio quando falha."""
     if not url:
@@ -104,9 +153,9 @@ def buscar_perfil(handle: str) -> dict:
     try:
         resposta_api = serpapi.pesquisar("instagram_profile", profile_id=handle)
     except serpapi.SemResultados as erro:
-        raise BuscaInstagramIndisponivel(
-            f"O Instagram nao devolveu dados para @{handle} "
-            "(perfil privado, inexistente ou sem publicacoes publicas)."
+        raise PerfilInstagramNaoEncontrado(
+            f"O Instagram nao encontrou o perfil @{handle}. Confira a grafia do "
+            "arroba ou use um perfil com publicacoes publicas."
         ) from erro
     except serpapi.SerpApiNaoConfigurada as erro:
         raise BuscaInstagramIndisponivel(str(erro)) from erro
@@ -122,17 +171,8 @@ def buscar_perfil(handle: str) -> dict:
     return {"perfil": perfil, "posts": posts}
 
 
-def buscar_postagens(handle: str) -> tuple[dict, list[dict]]:
-    """Perfil e postagens com shortcode, URL, miniatura e pHash."""
-    handle = (handle or "").strip().lstrip("@")
-    if not handle:
-        raise BuscaInstagramIndisponivel(
-            "Esta criadora nao tem o @ do Instagram cadastrado no perfil de busca. "
-            "Preencha o perfil de busca para capturar as postagens."
-        )
-
-    dados = buscar_perfil(handle)
-    perfil, posts = dados["perfil"], dados["posts"]
+def montar_posts(handle: str, posts: list[dict]) -> list[dict]:
+    """Postagens com shortcode, URL, miniatura e pHash (baixa as miniaturas)."""
     if not posts:
         raise BuscaInstagramIndisponivel(
             f"A SerpApi respondeu, mas nao trouxe postagens publicas de @{handle}."
@@ -163,4 +203,16 @@ def buscar_postagens(handle: str) -> tuple[dict, list[dict]]:
             f"A SerpApi encontrou {len(posts)} postagem(ns) de @{handle}, "
             "mas nenhuma miniatura pode ser baixada para calcular o hash."
         )
-    return perfil, resultado
+    return resultado
+
+
+def buscar_postagens(handle: str) -> tuple[dict, list[dict]]:
+    """Perfil e postagens com shortcode, URL, miniatura e pHash."""
+    handle = (handle or "").strip().lstrip("@")
+    if not handle:
+        raise BuscaInstagramIndisponivel(
+            "Esta criadora nao tem o @ do Instagram cadastrado no perfil de busca. "
+            "Preencha o perfil de busca para capturar as postagens."
+        )
+    dados = buscar_perfil(handle)
+    return dados["perfil"], montar_posts(handle, dados["posts"])

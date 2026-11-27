@@ -1,6 +1,7 @@
 """Fluxo unico de busca: Instagram primeiro, provedor de texto depois."""
 
 import logging
+from datetime import datetime, timezone
 
 from app import db
 from app.core import (
@@ -13,15 +14,53 @@ from app.core import (
 )
 
 logger = logging.getLogger(__name__)
+CHAVE_PERFIL_INSTAGRAM = "perfil_instagram"
 
 
 def _consultas_por_execucao(limite: int | None) -> int:
     if limite:
         return max(1, int(limite))
     try:
-        return max(1, int(db.obter_configuracao("busca_maxima_consultas", "12")))
+        return max(1, int(db.obter_configuracao("busca_maxima_consultas", "18")))
     except (TypeError, ValueError):
-        return 12
+        return 18
+
+
+def registrar_perfil_instagram(criadora_id: int, handle: str, perfil: dict) -> list[str]:
+    """Guarda bio, arrobas descobertos e links do perfil para a classificacao.
+
+    Os links citados na bio (site proprio, linktree, loja) viram paginas
+    oficiais automaticas, sem a criadora precisar cadastrar nada.
+    """
+    bio = (perfil or {}).get("biografia", "") or ""
+    for item in instagram.extrair_arrobas(bio, handle):
+        db.salvar_arroba_descoberto(
+            criadora_id,
+            item.get("plataforma", ""),
+            item["arroba"],
+            item.get("origem", ""),
+        )
+    links = instagram.extrair_links(bio)
+    db.salvar_snapshot_busca(
+        criadora_id,
+        CHAVE_PERFIL_INSTAGRAM,
+        {
+            "handle": handle,
+            "nome": (perfil or {}).get("nome", ""),
+            "bio": bio[:4000],
+            "links": links,
+            "atualizado_em": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return links
+
+
+def links_oficiais(criadora_id: int) -> list[str]:
+    snapshot = db.obter_snapshot_busca(criadora_id, CHAVE_PERFIL_INSTAGRAM)
+    if not snapshot:
+        return []
+    dados = snapshot.get("dados") or {}
+    return [str(link) for link in dados.get("links") or [] if link]
 
 
 def _arrobas_da_criadora(criadora: dict) -> list[str]:
@@ -34,13 +73,22 @@ def _arrobas_da_criadora(criadora: dict) -> list[str]:
     return arrobas
 
 
-def _passo_instagram(criadora: dict) -> tuple[str, list[str]]:
-    """Roda o Instagram (respeitando o cache de 24 h) e devolve (erro, arrobas)."""
+def _passo_instagram(criadora: dict) -> tuple[str, list[str], bool]:
+    """Roda o Instagram (respeitando o cache de 24 h).
+
+    Devolve (erro, arrobas, arroba_invalida). `arroba_invalida` interrompe a
+    busca: com o @ errado as consultas nao encontrariam nada util.
+    """
     handle = (criadora.get("public_handle") or "").strip().lstrip("@")
     erro_instagram = ""
+    arroba_invalida = False
     if handle and db.deve_buscar_instagram(criadora["id"]):
         try:
-            perfil, posts = instagram.buscar_postagens(handle)
+            dados = instagram.buscar_perfil(handle)
+        except instagram.PerfilInstagramNaoEncontrado as erro:
+            erro_instagram = str(erro)
+            arroba_invalida = True
+            logger.warning("Perfil do Instagram nao existe: %s", erro)
         except instagram.BuscaInstagramIndisponivel as erro:
             erro_instagram = str(erro)
             logger.warning(
@@ -50,18 +98,17 @@ def _passo_instagram(criadora: dict) -> tuple[str, list[str]]:
             erro_instagram = "Falha inesperada na busca do Instagram."
             logger.exception("Falha inesperada na busca do Instagram")
         else:
-            db.salvar_postagens_instagram(criadora["id"], posts)
-            db.registrar_busca_instagram(criadora["id"])
-            for item in instagram.extrair_arrobas(
-                perfil.get("biografia", ""), handle
-            ):
-                db.salvar_arroba_descoberto(
-                    criadora["id"],
-                    item.get("plataforma", ""),
-                    item["arroba"],
-                    item.get("origem", ""),
-                )
-    return erro_instagram, _arrobas_da_criadora(criadora)
+            perfil = dados["perfil"]
+            registrar_perfil_instagram(criadora["id"], handle, perfil)
+            try:
+                posts = instagram.montar_posts(handle, dados["posts"])
+            except instagram.BuscaInstagramIndisponivel as erro:
+                erro_instagram = str(erro)
+                logger.warning("Instagram sem postagens utilizaveis: %s", erro)
+            else:
+                db.salvar_postagens_instagram(criadora["id"], posts)
+                db.registrar_busca_instagram(criadora["id"])
+    return erro_instagram, _arrobas_da_criadora(criadora), arroba_invalida
 
 
 def executar(
@@ -76,14 +123,17 @@ def executar(
     consultas=None,
 ) -> dict:
     """Executa a busca completa e devolve o resumo final da execucao."""
+    # SQLite devolve sqlite3.Row (sem .get); o fluxo usa dicionario.
+    criadora = dict(criadora)
     criadora_id = criadora["id"]
     total_consultas = _consultas_por_execucao(limite)
     execucao_id = db.criar_busca_execucao(criadora_id, provedor, termos)
 
-    erro_instagram, arrobas = _passo_instagram(criadora)
+    nome = (criadora.get("public_name") or "").strip()
+    erro_instagram, arrobas, arroba_invalida = _passo_instagram(criadora)
     if consultas is None:
         consultas = consultas_vazamento.gerar_consultas_busca(
-            arrobas, termos, sites, total_consultas
+            arrobas, termos, sites, total_consultas, nome=nome
         )
     else:
         consultas = list(consultas)[:total_consultas]
@@ -105,6 +155,20 @@ def executar(
         "por_consulta": [],
         "erro_instagram": erro_instagram,
     }
+
+    if arroba_invalida:
+        mensagem = erro_instagram or (
+            "O Instagram nao encontrou o @ cadastrado. Corrija o perfil de busca."
+        )
+        db.atualizar_busca_execucao(
+            execucao_id,
+            status="erro",
+            erro_instagram=erro_instagram,
+            erro=mensagem,
+            resumo=resumo,
+        )
+        resumo["erro"] = mensagem
+        return resumo
 
     if not consultas:
         mensagem = (
@@ -155,6 +219,8 @@ def executar(
         for pagina in db.listar_paginas_oficiais_com_donos()
         if pagina["user_id"] == criadora_id
     ]
+    # Links do perfil/bio do Instagram entram como paginas oficiais automaticas.
+    paginas_oficiais.extend(links_oficiais(criadora_id))
 
     para_salvar = []
     for candidato in unicos.values():
@@ -165,6 +231,7 @@ def executar(
             arrobas=arrobas,
             dominios_vazamento=sites,
             paginas_oficiais=paginas_oficiais,
+            nome=nome,
         )
         if avaliacao["classificacao"] == "oficial":
             resumo["oficiais"] += 1

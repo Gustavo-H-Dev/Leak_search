@@ -8,6 +8,8 @@ import os
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from app.core.dominios_vazamento import DOMINIOS_VAZAMENTO_PADRAO
+
 PARAMETROS_RASTREIO = {
     "utm_source",
     "utm_medium",
@@ -33,12 +35,28 @@ PARAMETROS_RASTREIO = {
     "_gl",
 }
 
+# Perfis cujo caminho e exatamente o @ da criadora sao dela: nao precisam de
+# cadastro manual de "site oficial" para serem reconhecidos.
 PLATAFORMAS_OFICIAIS = {
     "instagram.com": "instagram",
     "tiktok.com": "tiktok",
     "x.com": "x",
     "twitter.com": "x",
     "youtube.com": "youtube",
+    "facebook.com": "facebook",
+    "threads.net": "threads",
+    "bsky.app": "bluesky",
+    "onlyfans.com": "onlyfans",
+    "privacy.com.br": "privacy",
+    "fansly.com": "fansly",
+    "t.me": "telegram",
+    "telegram.me": "telegram",
+    "linktr.ee": "linktree",
+    "beacons.ai": "beacons",
+    "linkin.bio": "linkinbio",
+    "twitch.tv": "twitch",
+    "kick.com": "kick",
+    "snapchat.com": "snapchat",
 }
 
 PALAVRAS_SUSPEITAS = (
@@ -150,6 +168,15 @@ def _arroba_em_texto(texto: str, arroba: str) -> bool:
     return re.search(padrao, texto, re.IGNORECASE) is not None
 
 
+def _nome_em_texto(texto: str, nome: str) -> bool:
+    """Nome publico como palavra inteira; ignora nomes curtos demais."""
+    nome = " ".join((nome or "").split())
+    if len(nome) < 4 or not texto:
+        return False
+    padrao = rf"(?<!\w){re.escape(nome)}(?!\w)"
+    return re.search(padrao, texto, re.IGNORECASE) is not None
+
+
 def pagina_de_busca(url: str) -> bool:
     """Paginas que listam varios autores e nao provam publicacao."""
     host = dominio_de(url)
@@ -207,6 +234,27 @@ def _pagina_oficial(url: str, paginas_oficiais) -> bool:
     return False
 
 
+def _dominios_de_vazamento(dominios) -> set[str]:
+    """Configurados pela criadora somados aos conhecidos embutidos."""
+    configurados = {
+        d.strip().lower().removeprefix("www.")
+        for d in dominios or ()
+        if d and d.strip()
+    }
+    return configurados | set(DOMINIOS_VAZAMENTO_PADRAO)
+
+
+def _em_dominio(host: str, dominios: set[str]) -> str:
+    if not host:
+        return ""
+    if host in dominios:
+        return host
+    for dominio in dominios:
+        if host.endswith(f".{dominio}"):
+            return dominio
+    return ""
+
+
 def avaliar(
     url: str,
     titulo: str = "",
@@ -214,8 +262,15 @@ def avaliar(
     arrobas=(),
     dominios_vazamento=(),
     paginas_oficiais=(),
+    nome: str = "",
 ) -> dict:
-    """Nota 0-100, motivos e classificacao de um candidato."""
+    """Nota 0-100, motivos e classificacao de um candidato.
+
+    Nao depende de cadastro manual: perfis das proprias plataformas com o @ da
+    criadora sao oficiais, os dominios conhecidos de vazamento ja pontuam e o
+    nome publico tambem conta. Paginas oficiais declaradas (perfil ou bio do
+    Instagram) continuam valendo como reforco.
+    """
     normalizada = normalizar_url(url)
     if not normalizada:
         return {
@@ -226,15 +281,13 @@ def avaliar(
 
     host = dominio_de(normalizada)
     arrobas = [a.strip().lstrip("@").lower() for a in arrobas if a and a.strip()]
-    dominios_vazamento = {
-        d.strip().lower().removeprefix("www.") for d in dominios_vazamento if d and d.strip()
-    }
+    dominios_vazamento = _dominios_de_vazamento(dominios_vazamento)
     motivos = []
 
     if _pagina_oficial(normalizada, paginas_oficiais):
         return {
             "nota": 0,
-            "motivos": ["página oficial cadastrada pela criadora"],
+            "motivos": ["página oficial da própria criadora"],
             "classificacao": "oficial",
         }
 
@@ -253,13 +306,17 @@ def avaliar(
             "classificacao": "falso_positivo",
         }
 
-    for arroba in arrobas:
-        if _espelho_de_perfil(normalizada, arroba):
-            return {
-                "nota": 0,
-                "motivos": [f"espelho do perfil de @{arroba}"],
-                "classificacao": "falso_positivo",
-            }
+    dominio_vazamento = _em_dominio(host, dominios_vazamento)
+    # Em dominio de vazamento uma pagina com o @ no caminho e o vazamento, nao
+    # um espelho do perfil: por isso o teste de espelho so vale fora deles.
+    if not dominio_vazamento:
+        for arroba in arrobas:
+            if _espelho_de_perfil(normalizada, arroba):
+                return {
+                    "nota": 0,
+                    "motivos": [f"espelho do perfil de @{arroba}"],
+                    "classificacao": "falso_positivo",
+                }
 
     nota = 0
     texto = f"{titulo or ''} {trecho or ''}".lower()
@@ -269,12 +326,13 @@ def avaliar(
             motivos.append(f"@{arroba} aparece no título ou na URL")
             break
 
-    if host in dominios_vazamento:
+    if nome and _nome_em_texto(texto, nome):
+        nota += 20
+        motivos.append(f"nome público \"{nome.strip()}\" aparece no resultado")
+
+    if dominio_vazamento:
         nota += 40
-        motivos.append(f"domínio de vazamento configurado ({host})")
-    elif any(host.endswith(f".{dominio}") for dominio in dominios_vazamento):
-        nota += 40
-        motivos.append(f"subdomínio de vazamento configurado ({host})")
+        motivos.append(f"domínio de vazamento conhecido ({dominio_vazamento})")
 
     encontradas = [palavra for palavra in PALAVRAS_SUSPEITAS if palavra in texto]
     if encontradas:

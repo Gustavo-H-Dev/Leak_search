@@ -804,11 +804,11 @@ def perfil_busca(request: Request, erro: str = "", mensagem: str = ""):
 @app.post("/perfil-busca", dependencies=_csrf())
 def salvar_perfil_busca(
     request: Request,
-    nome_publico: str = Form(...),
+    nome_publico: str = Form(""),
     arroba: str = Form(...),
 ):
     nome_publico = nome_publico.strip()
-    if not nome_publico or len(nome_publico) > 80:
+    if len(nome_publico) > 80:
         return RedirectResponse(
             "/perfil-busca?erro="
             + quote("Informe um nome público com até 80 caracteres."),
@@ -821,11 +821,35 @@ def salvar_perfil_busca(
             "/perfil-busca?erro=" + quote(str(erro)),
             status_code=303,
         )
+
+    # O @ e obrigatorio e conferido no proprio Instagram: grafia errada deixa
+    # de virar uma busca inteira sem resultado. A bio tambem alimenta os
+    # arrobas descobertos e as paginas oficiais automaticas.
+    aviso = ""
+    try:
+        dados = instagram.buscar_perfil(arroba_normalizada)
+    except instagram.PerfilInstagramNaoEncontrado as erro:
+        return RedirectResponse(
+            "/perfil-busca?erro=" + quote(str(erro)),
+            status_code=303,
+        )
+    except instagram.BuscaInstagramIndisponivel as erro:
+        aviso = f" Perfil salvo, mas a validacao no Instagram falhou agora: {erro}"
+    else:
+        perfil = dados["perfil"]
+        if not nome_publico:
+            nome_publico = (perfil.get("nome") or "").strip()[:80]
+        fluxo_busca.registrar_perfil_instagram(
+            request.state.user["id"], arroba_normalizada, perfil
+        )
+    if not nome_publico:
+        nome_publico = arroba_normalizada
     db.atualizar_perfil_busca(
         request.state.user["id"], nome_publico, arroba_normalizada
     )
     return RedirectResponse(
-        "/perfil-busca?mensagem=" + quote("Perfil de busca atualizado."),
+        "/perfil-busca?mensagem="
+        + quote("Perfil de busca validado e salvo." + aviso),
         status_code=303,
     )
 
@@ -1913,6 +1937,7 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
                 _arrobas_para_busca(alvo),
                 *_config_vazamentos(),
                 _limite_consultas_busca(),
+                nome=alvo["public_name"] or "",
             )
             if alvo["public_name"] and alvo["public_handle"]
             else []
@@ -2337,7 +2362,11 @@ async def buscar_vazamentos(
     termos, sites = _config_vazamentos()
     limite = _limite_consultas_busca()
     consultas = consultas_vazamento.gerar_consultas_busca(
-        _arrobas_para_busca(alvo), termos, sites, limite
+        _arrobas_para_busca(alvo),
+        termos,
+        sites,
+        limite,
+        nome=alvo["public_name"] or "",
     )
     if not consultas:
         return erro("Cadastre ao menos um termo ou site para pesquisar.")
@@ -2385,9 +2414,9 @@ async def buscar_vazamentos(
 
 def _limite_consultas_busca() -> int:
     try:
-        return max(1, min(int(db.obter_configuracao("busca_maxima_consultas", "12")), 60))
+        return max(1, min(int(db.obter_configuracao("busca_maxima_consultas", "18")), 60))
     except (TypeError, ValueError):
-        return 12
+        return 18
 
 
 def _arrobas_para_busca(alvo) -> list[str]:

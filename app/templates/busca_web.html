@@ -5,9 +5,12 @@
   <span class="eyebrow">BUSCA NA WEB</span>
   <h1>Busca na web</h1>
   <p class="search-intro">
-    Escolha o provedor. O Instagram é consultado primeiro (postagens e arrobas
-    da bio) e só depois a busca por texto roda. Os candidatos pontuados vão para
-    a página <a href="/valida">Valida</a>, onde você revisa manualmente.
+    Escolha o provedor. O Instagram é consultado primeiro (postagens, arrobas e
+    links da bio) e só depois a busca por texto roda em várias formas: o @
+    sozinho, o @ com termos de vazamento, o nome público e os sites conhecidos.
+    A pontuação já separa sozinha o que é oficial do que é vazado — não é
+    preciso cadastrar site oficial. Os candidatos pontuados vão para a página
+    <a href="/valida">Valida</a>, onde você revisa manualmente.
   </p>
 
   {% if current_user.role == "admin" %}
@@ -35,12 +38,6 @@
     {% endif %}
   </p>
   {% endif %}
-  {% if not sites_oficiais_usuario %}
-  <p class="api-status api-status-missing">
-    Cadastre pelo menos um site oficial antes de pesquisar na internet.
-    <a href="/perfil-busca">Adicionar site oficial</a>. As fotos são opcionais.
-  </p>
-  {% endif %}
   {% if not api_key_configurada and not tinyfish_configurada %}
   <p class="api-status api-status-missing">
     Nenhum provedor configurado. Defina <code>SERPAPI_API_KEY</code> e/ou
@@ -53,7 +50,10 @@
   {% endif %}
   <p class="account-usage-note">
     Toda busca consulta primeiro o Instagram da criadora (respeitando o cache de
-    24 h), guarda os arrobas citados na bio e só então pesquisa no provedor.
+    24 h), guarda os arrobas e links da bio e só então pesquisa no provedor.
+    Perfis com o mesmo @ nas plataformas e links próprios da bio são marcados
+    como oficiais automaticamente; domínios e termos de vazamento já vêm
+    configurados por padrão.
     Comparação de imagens: <strong>{{ "ligada" if comparacao_imagem_ativa else "desligada" }}</strong>.
   </p>
 
@@ -125,9 +125,9 @@
       <form class="search-form" method="post" action="/busca-vazamentos/config">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-        <label class="field-label" for="vaz-termos">Termos (um por linha)</label>
+        <label class="field-label" for="vaz-termos">Termos (um por linha, opcional)</label>
         <textarea id="vaz-termos" name="termos" rows="4">{{ vazamento_termos|join("\n") }}</textarea>
-        <label class="field-label" for="vaz-sites">Sites (um domínio por linha)</label>
+        <label class="field-label" for="vaz-sites">Sites (um domínio por linha, opcional)</label>
         <textarea id="vaz-sites" name="sites" rows="4">{{ vazamento_sites|join("\n") }}</textarea>
         <label class="field-label" for="vaz-limite">Máximo de consultas por execução</label>
         <input id="vaz-limite" type="number" name="limite" min="1" max="60" value="{{ busca_maxima_consultas }}">

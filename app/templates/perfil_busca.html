@@ -4,16 +4,17 @@
 <section class="search-page">
   <span class="eyebrow">MEU PERFIL</span>
   <h1>Perfil de busca</h1>
-  <p>Esses dados são usados para pesquisar sua presença pública na internet. Fotos salvas ficam privadas e só podem ser acessadas por você e administradores.</p>
+  <p>Esses dados são usados para pesquisar sua presença pública na internet. O @ é obrigatório e validado no Instagram ao salvar: assim a busca usa a grafia certa. Fotos salvas ficam privadas e só podem ser acessadas por você e administradores.</p>
   {% if erro %}<p class="erro" role="alert">{{ erro }}</p>{% endif %}
   {% if mensagem %}<p class="sucesso">{{ mensagem }}</p>{% endif %}
 
   <form class="search-form profile-search-form" method="post" action="/perfil-busca">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="field-label" for="public-name">Nome de usuário público</label>
-    <input id="public-name" name="nome_publico" maxlength="80" value="{{ usuario.public_name or '' }}" placeholder="Ex.: BlackDragon" required>
-    <label class="field-label" for="public-handle">Arroba</label>
+    <input id="public-name" name="nome_publico" maxlength="80" value="{{ usuario.public_name or '' }}" placeholder="Deixe em branco para usar o nome do Instagram">
+    <label class="field-label" for="public-handle">Arroba do Instagram</label>
     <input id="public-handle" name="arroba" maxlength="31" value="{{ '@' ~ usuario.public_handle if usuario.public_handle else '' }}" placeholder="@user875s" required>
+    <p class="account-usage-note">Ao salvar, o perfil é conferido no Instagram. Se o @ não existir, nada é gravado.</p>
     <button type="submit">Salvar perfil</button>
   </form>
 
@@ -60,7 +61,8 @@
   </section>
 
   <section class="profile-section">
-    <h2>Sites oficiais</h2>
+    <h2>Sites oficiais (opcional)</h2>
+    <p>Não é obrigatório: a busca já reconhece como oficiais os perfis com o seu @ e os links da sua bio do Instagram. Use esta lista apenas para reforçar algum site próprio.</p>
     <form class="search-form" method="post" action="/perfil-busca/sites-oficiais">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="field-label" for="site-nome">Nome do site (opcional)</label>
@@ -83,7 +85,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p>Adicione acima ou marque um resultado da busca como site oficial para ele aparecer aqui.</p>
+    <p>Nenhum site extra cadastrado — a busca já identifica automaticamente seus perfis e os links da bio.</p>
     {% endif %}
   </section>
 </section>
