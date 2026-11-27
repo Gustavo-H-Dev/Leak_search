@@ -1,0 +1,46 @@
+{
+  "hosts": [
+    {
+      "host": "bunkr.cr",
+      "tipo": "hospedagem_arquivos",
+      "nome_consulta": "bunkr",
+      "padroes_grupo": ["^/a/([A-Za-z0-9]+)"]
+    },
+    {
+      "host": "bunkr.si",
+      "tipo": "hospedagem_arquivos",
+      "nome_consulta": "bunkr",
+      "padroes_grupo": ["^/a/([A-Za-z0-9]+)"]
+    },
+    {
+      "host": "bunkr.sk",
+      "tipo": "hospedagem_arquivos",
+      "nome_consulta": "bunkr",
+      "padroes_grupo": ["^/a/([A-Za-z0-9]+)"]
+    },
+    {
+      "host": "bunkrsearch.com",
+      "tipo": "indice_albuns",
+      "nome_consulta": "bunkrsearch",
+      "padroes_grupo": ["^/albums?/([A-Za-z0-9]+)"]
+    },
+    {
+      "host": "cyberdrop.me",
+      "tipo": "hospedagem_arquivos",
+      "nome_consulta": "cyberdrop",
+      "padroes_grupo": ["^/a/([A-Za-z0-9]+)"]
+    },
+    {
+      "host": "gofile.io",
+      "tipo": "hospedagem_arquivos",
+      "nome_consulta": "gofile",
+      "padroes_grupo": []
+    },
+    {
+      "host": "pixeldrain.com",
+      "tipo": "hospedagem_arquivos",
+      "nome_consulta": "pixeldrain",
+      "padroes_grupo": []
+    }
+  ]
+}

@@ -34,6 +34,8 @@
     <summary>Como a nota é calculada</summary>
     <ul>
       <li>+30 quando o arroba aparece no título ou na URL;</li>
+      <li>+45 quando o nome-base aparece no título de um domínio de hospedagem de arquivos ou índice de álbuns (ex.: <code>bunkr</code>);</li>
+      <li>+25 quando qualquer variante do nome aparece no título, na URL ou no trecho;</li>
       <li>+40 quando o domínio está na lista de sites de vazamento;</li>
       <li>+10 por palavra suspeita no trecho/título (até +30);</li>
       <li>perfis oficiais da criadora, páginas de busca e espelhos de perfil são descartados.</li>
@@ -71,7 +73,7 @@
   </nav>
 
   <section class="search-results" aria-live="polite">
-    <h2>Candidatos por nota ({{ candidatos|length }})</h2>
+    <h2>Candidatos por nota ({{ candidatos|length }}){% if grupos %} · {{ grupos }} álbum(ns)/grupo(s){% endif %}</h2>
     {% if candidatos %}
     <ul class="search-result-list">
       {% for candidato in candidatos %}
@@ -82,6 +84,8 @@
           <span>{{ classificacao_nomes.get(candidato.classificacao, candidato.classificacao) }}</span>
           {% if candidato.novo %}<span class="profile-badge">novo</span>{% endif %}
           {% if candidato.dominio %}<span>{{ candidato.dominio }}</span>{% endif %}
+          {% if candidato.chave_grupo %}<span title="Mesmo álbum em sites diferentes">{{ candidato.chave_grupo }}</span>{% endif %}
+          {% if candidato.consulta_modelo %}<span title="Modelo e consulta que encontraram este candidato">via {{ candidato.consulta_modelo }}{% if candidato.posicao_busca %} · pos. {{ candidato.posicao_busca }}{% endif %}</span>{% endif %}
         </div>
         <a href="{{ candidato.url }}" target="_blank" rel="noopener noreferrer">{{ candidato.title }}</a>
         <span>{{ candidato.url }}</span>
@@ -91,6 +95,19 @@
         <ul class="result-motivos" style="margin:.3rem 0 0; padding-left:1.1rem; font-size:.82rem;">
           {% for motivo in candidato.motivos %}<li>{{ motivo }}</li>{% endfor %}
         </ul>
+        {% endif %}
+        {% if candidato.consulta_texto %}
+        <span style="font-size:.78rem;">Consulta: <code>{{ candidato.consulta_texto }}</code></span>
+        {% endif %}
+        {% if candidato.duplicados %}
+        <details class="collapsible" style="margin-top:.3rem;">
+          <summary>{{ candidato.duplicados|length }} resultado(s) do mesmo álbum em outros sites</summary>
+          <ul>
+            {% for outro in candidato.duplicados %}
+            <li><a href="{{ outro.url }}" target="_blank" rel="noopener noreferrer">{{ outro.title }}</a> — {{ outro.dominio }} ({{ outro.nota }}/100)</li>
+            {% endfor %}
+          </ul>
+        </details>
         {% endif %}
         {% if comparacao_imagem_ativa and candidato.distancia is not none %}
         <span><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>

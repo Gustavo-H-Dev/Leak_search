@@ -8,6 +8,7 @@ import os
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from app.core import hosts_busca
 from app.core.dominios_vazamento import DOMINIOS_VAZAMENTO_PADRAO
 
 PARAMETROS_RASTREIO = {
@@ -234,6 +235,30 @@ def _pagina_oficial(url: str, paginas_oficiais) -> bool:
     return False
 
 
+def chave_grupo(url: str) -> str:
+    """Chave para agrupar o mesmo album publicado em sites diferentes.
+
+    O ID sai do caminho, com regras por dominio do arquivo de hosts aprovados
+    (`/a/<id>` no bunkr, `/albums/<id>` no indice). Assim `bunkr.cr/a/<id>` e
+    `bunkrsearch.com/albums/<id>` viram a mesma `album:<id>`.
+    """
+    host = dominio_de(url)
+    if not host:
+        return ""
+    try:
+        caminho = urlsplit(url).path
+    except ValueError:
+        return ""
+    for entrada in hosts_busca.hosts():
+        if not (host == entrada["host"] or host.endswith("." + entrada["host"])):
+            continue
+        for padrao in entrada.get("padroes") or ():
+            achado = padrao.search(caminho)
+            if achado:
+                return f"album:{achado.group(1)}"
+    return ""
+
+
 def _dominios_de_vazamento(dominios) -> set[str]:
     """Configurados pela criadora somados aos conhecidos embutidos."""
     configurados = {
@@ -263,6 +288,8 @@ def avaliar(
     dominios_vazamento=(),
     paginas_oficiais=(),
     nome: str = "",
+    variantes=(),
+    nome_base: str = "",
 ) -> dict:
     """Nota 0-100, motivos e classificacao de um candidato.
 
@@ -329,6 +356,36 @@ def avaliar(
     if nome and _nome_em_texto(texto, nome):
         nota += 20
         motivos.append(f"nome público \"{nome.strip()}\" aparece no resultado")
+
+    # Variantes do arroba: o titulo do album costuma usar so o nome-base
+    # ("morph1ne - Videos"), sem o @ completo.
+    variantes = [
+        str(v).strip().lower() for v in variantes or () if str(v).strip()
+    ]
+    base = " ".join((nome_base or "").split()).lower()
+    tipo_host = hosts_busca.tipo_do_host(host)
+    if base and tipo_host in hosts_busca.TIPOS_SINAL_FORTE and _nome_em_texto(
+        titulo or "", base
+    ):
+        nota += 45
+        motivos.append(
+            f'nome-base \"{base}\" no título de {tipo_host} ({host}) — sinal mais forte'
+        )
+    elif variantes:
+        achada = next(
+            (
+                variante
+                for variante in variantes
+                if _nome_em_texto(texto, variante)
+                or _nome_em_texto(normalizada.lower(), variante)
+            ),
+            "",
+        )
+        if achada:
+            nota += 25
+            motivos.append(
+                f'variante do nome \"{achada}\" aparece no título, na URL ou no trecho'
+            )
 
     if dominio_vazamento:
         nota += 40

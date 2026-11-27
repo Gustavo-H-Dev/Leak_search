@@ -11,6 +11,7 @@ from app.core import (
     pontuacao,
     serpapi,
     tinyfish,
+    variantes_nome,
 )
 
 logger = logging.getLogger(__name__)
@@ -131,12 +132,18 @@ def executar(
 
     nome = (criadora.get("public_name") or "").strip()
     erro_instagram, arrobas, arroba_invalida = _passo_instagram(criadora)
+    variantes = variantes_nome.variantes_dos_arrobas(arrobas)
+    nome_base = variantes_nome.nome_base(arrobas)
     if consultas is None:
-        consultas = consultas_vazamento.gerar_consultas_busca(
+        planos = consultas_vazamento.gerar_consultas_priorizadas(
             arrobas, termos, sites, total_consultas, nome=nome
         )
     else:
-        consultas = list(consultas)[:total_consultas]
+        planos = [
+            {"modelo": "manual", "consulta": consulta, "parametros": {}}
+            for consulta in list(consultas)[:total_consultas]
+        ]
+    consultas = [plano["consulta"] for plano in planos]
 
     resumo = {
         "execucao_id": execucao_id,
@@ -154,6 +161,9 @@ def executar(
         "erros": [],
         "por_consulta": [],
         "erro_instagram": erro_instagram,
+        "variantes": variantes,
+        "nome_base": nome_base,
+        "grupos": 0,
     }
 
     if arroba_invalida:
@@ -186,7 +196,9 @@ def executar(
 
     encontrados = []
     falhas = 0
-    for consulta in consultas:
+    origem_consulta: dict[str, tuple[int | None, int]] = {}
+    for plano in planos:
+        consulta = plano["consulta"]
         try:
             resultados = busca_provedores.buscar(
                 provedor,
@@ -200,8 +212,29 @@ def executar(
             falhas += 1
             resumo["erros"].append(f"{consulta}: {erro}")
             resultados = []
+        try:
+            log_id = db.registrar_consulta_log(
+                execucao_id,
+                plano["modelo"],
+                consulta,
+                plano.get("parametros"),
+                [
+                    {"url": candidato.url, "posicao": posicao}
+                    for posicao, candidato in enumerate(resultados, start=1)
+                ],
+                resultados[0].resposta_bruta if resultados else {},
+            )
+        except Exception:
+            logger.exception("Falha ao registrar a consulta no log")
+            log_id = None
+        for posicao, candidato in enumerate(resultados, start=1):
+            origem_consulta.setdefault(candidato.url, (log_id, posicao))
         resumo["por_consulta"].append(
-            {"consulta": consulta, "resultados": len(resultados)}
+            {
+                "consulta": consulta,
+                "modelo": plano["modelo"],
+                "resultados": len(resultados),
+            }
         )
         resumo["total_resultados"] += len(resultados)
         encontrados.extend(resultados)
@@ -223,6 +256,7 @@ def executar(
     paginas_oficiais.extend(links_oficiais(criadora_id))
 
     para_salvar = []
+    chaves_vistas: set[str] = set()
     for candidato in unicos.values():
         avaliacao = pontuacao.avaliar(
             candidato.url,
@@ -232,6 +266,8 @@ def executar(
             dominios_vazamento=sites,
             paginas_oficiais=paginas_oficiais,
             nome=nome,
+            variantes=variantes,
+            nome_base=nome_base,
         )
         if avaliacao["classificacao"] == "oficial":
             resumo["oficiais"] += 1
@@ -239,6 +275,10 @@ def executar(
         if avaliacao["nota"] < resumo["nota_minima"]:
             resumo["descartados"] += 1
             continue
+        log_id, posicao = origem_consulta.get(candidato.url, (None, 0))
+        chave = pontuacao.chave_grupo(candidato.url)
+        if chave:
+            chaves_vistas.add(chave)
         para_salvar.append(
             {
                 "url_normalizada": candidato.url,
@@ -252,8 +292,12 @@ def executar(
                 "motivos": avaliacao["motivos"],
                 "classificacao": avaliacao["classificacao"],
                 "resposta_bruta": candidato.resposta_bruta,
+                "chave_grupo": chave,
+                "consulta_log_id": log_id,
+                "posicao_busca": posicao,
             }
         )
+    resumo["grupos"] = len(chaves_vistas)
 
     novos, atualizados = db.salvar_candidatos_busca(
         criadora_id, execucao_id, para_salvar

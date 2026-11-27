@@ -528,6 +528,9 @@ COLUNAS_BUSCA_PROVEDORES = {
     "ultima_vez_em": "TEXT",
     "resposta_bruta_json": "JSONB NOT NULL DEFAULT '{}'",
     "novo_para_criadora": "BOOLEAN NOT NULL DEFAULT TRUE",
+    "chave_grupo": "TEXT NOT NULL DEFAULT ''",
+    "consulta_log_id": "BIGINT",
+    "posicao_busca": "INTEGER",
 }
 _COLUNAS_BUSCA_PROVEDORES_SQLITE = {
     "execucao_id": "INTEGER",
@@ -540,6 +543,9 @@ _COLUNAS_BUSCA_PROVEDORES_SQLITE = {
     "ultima_vez_em": "TEXT",
     "resposta_bruta_json": "TEXT NOT NULL DEFAULT '{}'",
     "novo_para_criadora": "INTEGER NOT NULL DEFAULT 1",
+    "chave_grupo": "TEXT NOT NULL DEFAULT ''",
+    "consulta_log_id": "INTEGER",
+    "posicao_busca": "INTEGER",
 }
 
 
@@ -577,6 +583,54 @@ def _migrar_busca_provedores():
             "UPDATE search_candidates SET ultima_vez_em = created_at"
             " WHERE ultima_vez_em IS NULL"
         )
+        _criar_tabela_consulta_log(conn)
+
+
+def _criar_tabela_consulta_log(conn):
+    """Log de cada consulta executada: modelo, texto, parametros e posicoes."""
+    id_execucao = "BIGSERIAL" if usando_postgresql() else "INTEGER"
+    json_padrao = "'{}'" if usando_postgresql() else "'{}'"
+    json_lista = "'[]'"
+    if usando_postgresql():
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS consulta_log (
+                id BIGSERIAL PRIMARY KEY,
+                execucao_id BIGINT REFERENCES busca_execucao(id) ON DELETE CASCADE,
+                modelo TEXT NOT NULL DEFAULT '',
+                consulta_exata TEXT NOT NULL,
+                parametros_json JSONB NOT NULL DEFAULT {json_padrao},
+                posicao_do_candidato INTEGER,
+                posicoes_json JSONB NOT NULL DEFAULT {json_lista},
+                resposta_bruta_json JSONB NOT NULL DEFAULT {json_padrao},
+                criada_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS consulta_log_execucao"
+            " ON consulta_log (execucao_id, id)"
+        )
+        return
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS consulta_log (
+            id {id_execucao} PRIMARY KEY AUTOINCREMENT,
+            execucao_id INTEGER REFERENCES busca_execucao(id) ON DELETE CASCADE,
+            modelo TEXT NOT NULL DEFAULT '',
+            consulta_exata TEXT NOT NULL,
+            parametros_json TEXT NOT NULL DEFAULT {json_padrao},
+            posicao_do_candidato INTEGER,
+            posicoes_json TEXT NOT NULL DEFAULT {json_lista},
+            resposta_bruta_json TEXT NOT NULL DEFAULT {json_padrao},
+            criada_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS consulta_log_execucao"
+        " ON consulta_log (execucao_id, id)"
+    )
 
 
 def _migrar_sites_oficiais():
@@ -1075,7 +1129,11 @@ def listar_candidatos(user_id, status=None):
         SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
                phash, status, created_at, execucao_id, url_normalizada, dominio,
                nota, motivos_json, classificacao, primeira_vez_em, ultima_vez_em,
-               novo_para_criadora
+               novo_para_criadora, chave_grupo, consulta_log_id, posicao_busca,
+               (SELECT modelo FROM consulta_log
+                 WHERE id = search_candidates.consulta_log_id) AS consulta_modelo,
+               (SELECT consulta_exata FROM consulta_log
+                 WHERE id = search_candidates.consulta_log_id) AS consulta_texto
         FROM search_candidates
         WHERE user_id = ?
     """
@@ -1094,7 +1152,11 @@ def listar_candidatos_revisao(user_id, status=None, nota_minima=None):
         SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
                phash, status, created_at, execucao_id, url_normalizada, dominio,
                nota, motivos_json, classificacao, primeira_vez_em, ultima_vez_em,
-               novo_para_criadora
+               novo_para_criadora, chave_grupo, consulta_log_id, posicao_busca,
+               (SELECT modelo FROM consulta_log
+                 WHERE id = search_candidates.consulta_log_id) AS consulta_modelo,
+               (SELECT consulta_exata FROM consulta_log
+                 WHERE id = search_candidates.consulta_log_id) AS consulta_texto
         FROM search_candidates
         WHERE user_id = ?
     """
@@ -1193,6 +1255,53 @@ def obter_busca_execucao(execucao_id):
     return registro
 
 
+def registrar_consulta_log(
+    execucao_id, modelo, consulta, parametros=None, posicoes=None, resposta_bruta=None
+):
+    """Grava a consulta executada com o que ela usou e onde cada resultado veio.
+
+    `posicoes` e a lista [{"url": ..., "posicao": 1}, ...] na ordem em que o
+    provedor devolveu. O candidato guarda o id deste log em `consulta_log_id`.
+    """
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO consulta_log (
+                execucao_id, modelo, consulta_exata, parametros_json,
+                posicoes_json, resposta_bruta_json, criada_em
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (
+                execucao_id,
+                (modelo or "")[:40],
+                (consulta or "")[:1000],
+                _valor_json(parametros or {}),
+                _valor_json(posicoes or []),
+                _valor_json(resposta_bruta or {}),
+                _agora_utc(),
+            ),
+        )
+        return cur.fetchone()["id"]
+
+
+def listar_consulta_log(execucao_id):
+    """Historico das consultas de uma execucao, na ordem em que rodaram."""
+    with conexao() as conn:
+        return [
+            dict(linha)
+            for linha in conn.execute(
+                """
+                SELECT id, execucao_id, modelo, consulta_exata, parametros_json,
+                       posicao_do_candidato, posicoes_json, criada_em
+                FROM consulta_log WHERE execucao_id = ? ORDER BY id
+                """,
+                (execucao_id,),
+            ).fetchall()
+        ]
+
+
 def salvar_arroba_descoberto(criadora_id, plataforma, arroba, origem=""):
     arroba = (arroba or "").strip().lstrip("@").lower()
     if not arroba:
@@ -1249,9 +1358,10 @@ def salvar_candidatos_busca(criadora_id, execucao_id, candidatos):
                         phash, status, created_at, execucao_id, url_normalizada,
                         dominio, nota, motivos_json, classificacao,
                         primeira_vez_em, ultima_vez_em, resposta_bruta_json,
-                        novo_para_criadora
+                        novo_para_criadora, chave_grupo, consulta_log_id,
+                        posicao_busca
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, '', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, '', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (user_id, url) DO UPDATE SET
                         title = excluded.title,
                         source = excluded.source,
@@ -1266,7 +1376,10 @@ def salvar_candidatos_busca(criadora_id, execucao_id, candidatos):
                         classificacao = excluded.classificacao,
                         ultima_vez_em = excluded.ultima_vez_em,
                         resposta_bruta_json = excluded.resposta_bruta_json,
-                        novo_para_criadora = ?
+                        novo_para_criadora = ?,
+                        chave_grupo = excluded.chave_grupo,
+                        consulta_log_id = excluded.consulta_log_id,
+                        posicao_busca = excluded.posicao_busca
                     """,
                     (
                         criadora_id,
@@ -1287,12 +1400,24 @@ def salvar_candidatos_busca(criadora_id, execucao_id, candidatos):
                         agora,
                         _valor_json(item.get("resposta_bruta") or {}),
                         True,
+                        item.get("chave_grupo") or "",
+                        item.get("consulta_log_id"),
+                        item.get("posicao_busca"),
                         False,
                     ),
                 )
             except Exception:
                 logger.exception("Falha ao salvar candidato %s", url)
                 continue
+            log_id = item.get("consulta_log_id")
+            posicao = item.get("posicao_busca")
+            if log_id and posicao:
+                conn.execute(
+                    "UPDATE consulta_log SET posicao_do_candidato = ?"
+                    " WHERE id = ? AND (posicao_do_candidato IS NULL"
+                    " OR posicao_do_candidato > ?)",
+                    (posicao, log_id, posicao),
+                )
             if url in conhecidas:
                 atualizados += 1
             else:

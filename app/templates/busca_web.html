@@ -6,8 +6,11 @@
   <h1>Busca na web</h1>
   <p class="search-intro">
     Escolha o provedor. O Instagram é consultado primeiro (postagens, arrobas e
-    links da bio) e só depois a busca por texto roda em várias formas: o @
-    sozinho, o @ com termos de vazamento, o nome público e os sites conhecidos.
+    links da bio) e só depois a busca por texto roda em modelos, na ordem M1 →
+    M5: os arrobas juntos com OR + termo de vazamento, o nome-base com
+    "videos" e cada hospedagem de arquivos/índice de álbuns (ex.:
+    <code>morph1ne videos bunkr</code>), o nome-base com fotos/videos/album/solo
+    e, por fim, as formas genéricas (@ sozinho, nome público e sites).
     A pontuação já separa sozinha o que é oficial do que é vazado — não é
     preciso cadastrar site oficial. Os candidatos pontuados vão para a página
     <a href="/valida">Valida</a>, onde você revisa manualmente.
@@ -153,14 +156,14 @@
         <p class="api-status api-status-missing">Instagram não consultado: {{ vazamento_status.erro_instagram }}</p>
         {% endif %}
         {% if vazamento_status.por_consulta %}
-        <ul>{% for item in vazamento_status.por_consulta %}<li><code>{{ item.consulta }}</code>: {{ item.resultados }} resultado(s)</li>{% endfor %}</ul>
+        <ul>{% for item in vazamento_status.por_consulta %}<li>{% if item.modelo %}<strong>{{ item.modelo }}</strong> · {% endif %}<code>{{ item.consulta }}</code>: {{ item.resultados }} resultado(s)</li>{% endfor %}</ul>
         {% endif %}
         {% endif %}
       </div>
       {% endif %}
       {% if vazamento_consultas %}
-      <p><strong>A busca por texto usa {{ vazamento_consultas|length }} consulta(s)</strong> (limite por execução: {{ busca_maxima_consultas }}):</p>
-      <ul>{% for consulta in vazamento_consultas %}<li><code>{{ consulta }}</code></li>{% endfor %}</ul>
+      <p><strong>A busca por texto usa {{ vazamento_consultas|length }} consulta(s)</strong> (limite por execução: {{ busca_maxima_consultas }}), na ordem M1 → M5:</p>
+      <ul>{% for plano in vazamento_consultas %}<li><strong>{{ plano.modelo }}</strong> · <code>{{ plano.consulta }}</code></li>{% endfor %}</ul>
       {% endif %}
       <form id="endpoint-form" class="search-form" method="post" action="/buscar-vazamentos" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

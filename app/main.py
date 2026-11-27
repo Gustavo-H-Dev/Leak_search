@@ -1476,6 +1476,21 @@ def valida(
                 }
             )
         candidatos.append(item)
+
+    # O mesmo album em sites diferentes (bunkr.cr/a/<id> e
+    # bunkrsearch.com/albums/<id>) vira um item principal com duplicados.
+    principais = []
+    por_chave: dict[str, dict] = {}
+    for item in candidatos:
+        chave = item.get("chave_grupo") or ""
+        item["duplicados"] = []
+        if chave and chave in por_chave:
+            por_chave[chave]["duplicados"].append(item)
+            continue
+        if chave:
+            por_chave[chave] = item
+        principais.append(item)
+    candidatos = principais
     if comparacao:
         candidatos = candidatos_core.ordenar_por_atencao(candidatos)
 
@@ -1491,6 +1506,7 @@ def valida(
                 else []
             ),
             "candidatos": candidatos,
+            "grupos": len(por_chave),
             "pontuacao_atencao": imagens.pontuacao(imagens.LIMITE_PROVAVEL),
             "pontuacao_possivel": imagens.pontuacao(imagens.LIMITE_POSSIVEL),
             "status_atual": status,
@@ -1933,7 +1949,7 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
             _status_vazamento(target_user_id)
         ),
         "vazamento_consultas": (
-            consultas_vazamento.gerar_consultas_busca(
+            consultas_vazamento.gerar_consultas_priorizadas(
                 _arrobas_para_busca(alvo),
                 *_config_vazamentos(),
                 _limite_consultas_busca(),

@@ -1,5 +1,7 @@
+import os
 import re
 
+from app.core import hosts_busca, variantes_nome
 from app.core.dominios_vazamento import DOMINIOS_VAZAMENTO_PADRAO
 
 TERMOS_PADRAO = ("vazado", "vazada", "leaked", "nude", "nudes", "exposed")
@@ -12,8 +14,11 @@ SITES_PADRAO = (
 )
 # Plataformas de conteudo que costumam aparecer nas consultas genericas.
 PLATAFORMAS_PADRAO = ("privacy", "onlyfans", "telegram", "pack", "xvideos")
+PALAVRAS_NOME_BASE = ("fotos", "videos", "album", "solo")
 MAXIMO_TERMOS = 15
 MAXIMO_SITES = 20
+MAXIMO_MODELOS_M1 = 4
+MAXIMO_ARROBAS_CONSULTA = 10
 SITES_POR_CONSULTA = 5
 MAXIMO_CONSULTAS_SITES = 2
 PERIODOS = {
@@ -58,62 +63,189 @@ def _sites_para_consulta(sites) -> list[str]:
     return todos
 
 
-def gerar_consultas_busca(
-    arrobas, termos, sites, limite: int = 18, nome: str = ""
-) -> list[str]:
-    """Consultas diversificadas: arroba+termo, arroba sozinha, nome e sites.
+def _arrobas_limpos(arrobas) -> list[str]:
+    """Mantem a grafia informada (M1 depende disso) e remove duplicatas."""
+    limpos = []
+    for arroba in arrobas or ():
+        valor = " ".join(str(arroba or "").split()).lstrip("@")
+        if valor and valor.lower() not in {a.lower() for a in limpos}:
+            limpos.append(valor)
+    return limpos[:MAXIMO_ARROBAS_CONSULTA]
 
-    A ideia e cobrir "todas as formas": o @ com palavras de vazamento, o @ puro
-    (para achar paginas que so citam o perfil), o @ combinado com plataformas,
-    o nome publico e, por fim, os dominios de vazamento.
+
+def _site_ativo(site_ativo) -> bool:
+    if site_ativo is not None:
+        return bool(site_ativo)
+    return os.getenv("CONSULTAS_SITE_ATIVAS", "0").strip().lower() in {
+        "1",
+        "true",
+        "on",
+        "sim",
+    }
+
+
+def gerar_consultas_priorizadas(
+    arrobas,
+    termos,
+    sites,
+    limite: int = 18,
+    nome: str = "",
+    *,
+    hosts=None,
+    site_ativo=None,
+) -> list[dict]:
+    """Consultas em modelos, na ordem de prioridade M1, M2, M3, M4, M5.
+
+    Cada item traz `modelo`, `consulta` e `parametros` (o que a consulta usou),
+    para o log registrar qual modelo achou cada candidato.
+
+    M1  todos os arrobas conhecidos com OR + termo de vazamento
+    M2  {nome_base} videos {host} para hospedagem/indice aprovados
+    M3  {nome_base} {fotos|videos|album|solo}
+    M4  {nome_base} site:{dominio} (experimental, desligado por padrao)
+    M5  consultas complementares ja usadas antes (@, termos, nome publico)
     """
-    arrobas = [a.strip().lstrip("@") for a in arrobas if a and a.strip()][:10]
     limite = max(1, int(limite))
-    consultas: list[str] = []
+    arrobas = _arrobas_limpos(arrobas)
+    termos_limpos = []
+    for termo in termos or ():
+        termo = " ".join(str(termo or "").split())
+        if termo and termo.lower() not in {t.lower() for t in termos_limpos}:
+            termos_limpos.append(termo)
+    nome = " ".join((nome or "").split())
+
+    base = variantes_nome.nome_base(arrobas)
+    hosts_aprovados = (
+        [dict(item) for item in hosts]
+        if hosts is not None
+        else hosts_busca.hosts(hosts_busca.TIPOS_CONSULTA)
+    )
+
+    planos: list[dict] = []
     vistos: set[str] = set()
 
-    def adicionar(consulta: str) -> None:
+    def adicionar(modelo: str, consulta: str, parametros: dict | None = None) -> None:
         consulta = " ".join(consulta.split())
         chave = consulta.lower()
-        if consulta and chave not in vistos and len(consultas) < limite:
-            vistos.add(chave)
-            consultas.append(consulta)
+        if not consulta or chave in vistos or len(planos) >= limite:
+            return
+        vistos.add(chave)
+        planos.append(
+            {
+                "modelo": modelo,
+                "consulta": consulta,
+                "parametros": parametros or {},
+            }
+        )
 
-    # 1. Cada arroba com cada termo, mas sem consumir o orcamento inteiro:
-    #    sobra espaco para as consultas genericas.
-    teto_termos = max(1, (limite + 1) // 2)
-    for termo in termos:
-        termo = " ".join(str(termo).split())
-        if not termo:
-            continue
+    # M1: o arroba completo citado por inteiro costuma ser o unico jeito de
+    # achar paginas que usam o @ como titulo. O OR junta as grafias conhecidas.
+    if arrobas:
+        grupo = " OR ".join(arrobas)
+        for termo in termos_limpos[:MAXIMO_MODELOS_M1]:
+            adicionar(
+                "M1",
+                f"{grupo} {termo}",
+                {"arrobas": list(arrobas), "termo": termo},
+            )
+
+    # M2: o titulo do album costuma usar o nome-base, e o indice do host e
+    # encontravel pelo nome do host ("bunkr") junto de "videos".
+    if base:
+        for host in hosts_aprovados:
+            termo_host = (host.get("termo") or "").strip()
+            if not termo_host:
+                continue
+            adicionar(
+                "M2",
+                f"{base} videos {termo_host}",
+                {
+                    "nome_base": base,
+                    "host": host.get("host", ""),
+                    "host_tipo": host.get("tipo", ""),
+                },
+            )
+
+    # M3: variacoes simples do tipo de conteudo do album.
+    if base:
+        for palavra in PALAVRAS_NOME_BASE:
+            adicionar(
+                "M3",
+                f"{base} {palavra}",
+                {"nome_base": base, "termo": palavra},
+            )
+
+    # M4: operador site: e experimental no TinyFish; so entra com a flag.
+    if base and _site_ativo(site_ativo):
+        for host in hosts_aprovados:
+            adicionar(
+                "M4",
+                f"{base} site:{host.get('host', '')}",
+                {
+                    "nome_base": base,
+                    "host": host.get("host", ""),
+                    "experimental": True,
+                },
+            )
+
+    # M5: rede de seguranca com as consultas genericas que ja existiam.
+    _adicionar_complementares(adicionar, arrobas, termos_limpos, sites, nome)
+
+    return planos
+
+
+def _adicionar_complementares(adicionar, arrobas, termos, sites, nome) -> None:
+    """Formas genericas: @ com termos, @ sozinho, plataformas, nome e sites."""
+    teto_termos = max(1, len(termos))
+    for termo in termos[:teto_termos]:
         for arroba in arrobas:
-            if len(consultas) >= teto_termos:
-                break
-            adicionar(f'"@{arroba}" "{termo}"')
+            adicionar(
+                "M5",
+                f'"@{arroba}" "{termo}"',
+                {"arroba": arroba, "termo": termo, "forma": "arroba_termo"},
+            )
 
-    # 2. O @ sozinho: encontra paginas que apenas citam o perfil.
     for arroba in arrobas:
-        adicionar(f'"@{arroba}"')
+        adicionar(
+            "M5", f'"@{arroba}"', {"arroba": arroba, "forma": "arroba_sozinho"}
+        )
 
-    # 3. O @ com plataformas onde conteudo costuma ser redistribuido.
     grupo_plataformas = " OR ".join(PLATAFORMAS_PADRAO)
     for arroba in arrobas:
-        adicionar(f'"@{arroba}" ({grupo_plataformas})')
+        adicionar(
+            "M5",
+            f'"@{arroba}" ({grupo_plataformas})',
+            {"arroba": arroba, "forma": "arroba_plataformas"},
+        )
 
-    # 4. O nome publico, sozinho e junto do @.
     nome_limpo = re.sub(r'["()]', "", nome or "").strip()
     if nome_limpo:
-        adicionar(f'"{nome_limpo}"')
-        adicionar(f'"{nome_limpo}" vazado')
+        adicionar("M5", f'"{nome_limpo}"', {"forma": "nome"})
+        adicionar("M5", f'"{nome_limpo}" vazado', {"forma": "nome_vazado"})
         for arroba in arrobas[:2]:
-            adicionar(f'"{nome_limpo}" "@{arroba}"')
+            adicionar(
+                "M5",
+                f'"{nome_limpo}" "@{arroba}"',
+                {"arroba": arroba, "forma": "nome_arroba"},
+            )
 
-    # 5. Dominios: os configurados e os conhecidos de vazamento.
     for site in _sites_para_consulta(sites):
         for arroba in arrobas:
-            adicionar(f'"@{arroba}" site:{site}')
+            adicionar(
+                "M5",
+                f'"@{arroba}" site:{site}',
+                {"arroba": arroba, "site": site, "forma": "site"},
+            )
 
-    return consultas
+
+def gerar_consultas_busca(arrobas, termos, sites, limite: int = 18, nome: str = ""):
+    """Lista de consultas (texto) na ordem priorizada dos modelos."""
+    return [
+        plano["consulta"]
+        for plano in gerar_consultas_priorizadas(
+            arrobas, termos, sites, limite, nome=nome
+        )
+    ]
 
 
 def montar_consultas(nome: str, handle: str, termos, sites) -> list[str]:
