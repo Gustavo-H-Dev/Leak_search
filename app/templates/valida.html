@@ -72,10 +72,6 @@
     {% endfor %}
   </nav>
 
-  <p class="account-usage-note">
-    <a class="button button-secondary" href="/valida/exportar.csv?target_user_id={{ target_user_id }}&status={{ status_atual }}">Exportar esta lista em CSV</a>
-  </p>
-
   <section class="search-results" aria-live="polite">
     <h2>{% if status_atual == "abaixo" %}Abaixo do corte{% else %}Candidatos por nota{% endif %} ({{ candidatos|length }}){% if grupos %} · {{ grupos }} álbum(ns)/grupo(s){% endif %}</h2>
     {% if candidatos %}

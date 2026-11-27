@@ -1,5 +1,3 @@
-import csv
-import io
 import json
 import logging
 import mimetypes
@@ -21,7 +19,6 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
-    Response,
 )
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -1792,72 +1789,6 @@ def validar_candidato(
         f"/valida?target_user_id={alvo['id']}"
         f"&mensagem={quote('Candidato atualizado.')}",
         status_code=303,
-    )
-
-
-@app.get("/valida/exportar.csv")
-def exportar_candidatos(
-    request: Request, target_user_id: int = 0, status: str = "pending"
-):
-    """Baixa a fila atual em CSV, para arquivar ou levar a um advogado."""
-    alvo = _usuario_alvo_busca(request, target_user_id)
-    if status not in STATUS_VALIDA:
-        status = "pending"
-    comparacao = comparacao_imagem_ativa()
-    limite = pontuacao.limiar_revisao()
-    linhas = db.listar_candidatos_revisao(
-        alvo["id"], "pending" if status == "abaixo" else status, None
-    )
-    if status == "abaixo":
-        linhas = [item for item in linhas if int(item["nota"] or 0) < limite]
-    elif status == "pending" and not comparacao:
-        linhas = [item for item in linhas if int(item["nota"] or 0) >= limite]
-
-    buffer = io.StringIO()
-    escritor = csv.writer(buffer, delimiter=";")
-    escritor.writerow(
-        [
-            "id",
-            "nota",
-            "status",
-            "classificacao",
-            "dominio",
-            "chave_grupo",
-            "modelo",
-            "consulta",
-            "posicao",
-            "url",
-            "titulo",
-            "primeira_vez_em",
-            "ultima_vez_em",
-        ]
-    )
-    for item in linhas:
-        escritor.writerow(
-            [
-                item["id"],
-                item["nota"] or 0,
-                STATUS_VALIDA.get(item["status"], item["status"]),
-                CLASSIFICACAO_NOMES.get(
-                    item["classificacao"], item["classificacao"] or ""
-                ),
-                item["dominio"] or "",
-                item["chave_grupo"] or "",
-                item["consulta_modelo"] or "",
-                item["consulta_texto"] or "",
-                item["posicao_busca"] or "",
-                item["url"],
-                item["title"] or "",
-                item["primeira_vez_em"] or "",
-                item["ultima_vez_em"] or "",
-            ]
-        )
-    usuario = re.sub(r"[^A-Za-z0-9_-]+", "-", str(alvo["username"] or "criadora"))
-    nome = f"candidatos-{usuario}-{status}.csv"
-    return Response(
-        "\ufeff" + buffer.getvalue(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
     )
 
 

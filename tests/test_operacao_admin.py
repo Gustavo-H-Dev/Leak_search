@@ -130,22 +130,6 @@ def test_valida_explica_fila_vazia_e_mostra_abaixo_do_corte(ambiente):
     assert limiar > 5
 
 
-def test_valida_exporta_csv_da_lista(ambiente):
-    alvo = ambiente["admin"]
-    admin = TestClient(app)
-    _entrar(admin, "admin_operacao")
-    resposta = admin.get(
-        f"/valida/exportar.csv?target_user_id={alvo}&status=abaixo"
-    )
-    assert resposta.status_code == 200
-    assert resposta.headers["content-type"].startswith("text/csv")
-    assert "attachment" in resposta.headers["content-disposition"]
-    corpo = resposta.text
-    assert "id;nota;status;classificacao" in corpo
-    assert "https://exemplo.example/ana-antigo" in corpo
-    assert "https://bunkr.cr/a/7W7gu1yU" not in corpo
-
-
 def test_execucoes_lista_modelo_e_consulta_para_admin(ambiente):
     admin = TestClient(app)
     _entrar(admin, "admin_operacao")
