@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block titulo %}Pedir remoção — {{ dominio }}{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-3xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Remoções</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Pedir remoção em {{ dominio }}
+    </h1>
+    <p class="ds-card__texto">
+      O texto abaixo é um modelo. Leia, ajuste se quiser e copie antes de
+      enviar pelo contato do site. O pedido fica registrado com data e status.
+    </p>
+  </header>
+
+  {% if erro %}
+  <p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>
+  {% endif %}
+
+  <p class="ds-badge ds-badge--alerta">{{ aviso_modelo }}</p>
+
+  <section class="ds-card" aria-labelledby="contato-site">
+    <header class="ds-card__cabecalho">
+      <h2 class="ds-card__titulo" id="contato-site">Contato do site</h2>
+    </header>
+    {% if contato %}
+    <ul class="ds-lista">
+      {% if contato.email %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">E-mail</p>
+          <p class="ds-lista__texto break-all">{{ contato.email }}</p>
+        </div>
+      </li>
+      {% endif %}
+      {% if contato.url_formulario %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">Formulário</p>
+          <details class="mt-1">
+            <summary class="cursor-pointer text-sm font-semibold text-primaria-clara">
+              Mostrar link do formulário (site externo)
+            </summary>
+            <p class="ds-dica mt-2">
+              Você está saindo do Monitoramento. O site é externo, não é
+              verificado por nós e pode mostrar conteúdo adulto.
+            </p>
+            <a class="ds-btn ds-btn--secundario ds-btn--pequeno break-all"
+               href="{{ contato.url_formulario }}" target="_blank"
+               rel="noopener noreferrer nofollow">{{ contato.url_formulario }}</a>
+          </details>
+        </div>
+      </li>
+      {% endif %}
+      {% if contato.observacao %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">Observação</p>
+          <p class="ds-lista__texto break-words">{{ contato.observacao }}</p>
+        </div>
+      </li>
+      {% endif %}
+    </ul>
+    {% else %}
+    <p class="ds-alerta ds-alerta--erro" role="status">
+      Cadastre o contato deste site.
+    </p>
+    <p class="ds-card__texto">
+      Ainda não temos e-mail nem formulário de abuso para {{ dominio }}. O texto
+      do pedido continua disponível para copiar; quando o contato for
+      cadastrado, ele aparece aqui.
+      {% if current_user.role == "admin" %}
+      <a class="text-primaria-clara" href="/contatos-abuso?dominio={{ dominio }}">Cadastrar contato</a>.
+      {% endif %}
+    </p>
+    {% endif %}
+  </section>
+
+  <section class="ds-card" aria-labelledby="google-remocao">
+    <h2 class="ds-card__titulo" id="google-remocao">Pedido ao Google</h2>
+    <p class="ds-card__texto">
+      Para tirar o resultado da busca do Google, use o formulário oficial.
+      Ele é separado do pedido ao site e não substitui um ao outro.
+    </p>
+    <details class="mt-2">
+      <summary class="cursor-pointer text-sm font-semibold text-primaria-clara">
+        Abrir o formulário oficial do Google (site externo)
+      </summary>
+      <p class="ds-dica mt-2">
+        Você está saindo do Monitoramento. O formulário é do Google e não é
+        verificado por nós.
+      </p>
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="{{ google_url }}"
+         target="_blank" rel="noopener noreferrer">{{ google_texto }}</a>
+    </details>
+  </section>
+
+  {% if pedidos_dominio %}
+  <p class="ds-dica">
+    Já existe pedido para este site:
+    {% for anterior in pedidos_dominio %}
+    <a class="text-primaria-clara" href="/remocao/{{ anterior.id }}?target_user_id={{ target_user_id }}">#{{ anterior.id }}</a>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+
+  <form class="grid gap-4" method="post" action="/remocao">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+    <input type="hidden" name="url" value="{{ leak.url }}">
+
+    <section class="ds-card grid gap-3" aria-labelledby="dados-pedido">
+      <h2 class="ds-card__titulo" id="dados-pedido">Seus dados</h2>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="nome">Nome</label>
+        <input class="ds-input" id="nome" name="nome" value="{{ nome }}" autocomplete="name" required>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="arroba">Arroba</label>
+        <input class="ds-input" id="arroba" name="arroba" value="{{ arroba }}" autocapitalize="none" spellcheck="false" required>
+        <p class="ds-dica">Aparece no texto como @{{ arroba or "sua-arroba" }}.</p>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="descricao">Descrição</label>
+        <textarea class="ds-input" id="descricao" name="descricao" rows="3">{{ descricao_padrao }}</textarea>
+      </div>
+    </section>
+
+    <section class="ds-card grid gap-3" aria-labelledby="links-pedido">
+      <h2 class="ds-card__titulo" id="links-pedido">Links deste pedido</h2>
+      <p class="ds-card__texto">
+        Um pedido pode cobrir vários links do mesmo site. O texto final inclui
+        só os links marcados.
+      </p>
+      {% for link in links %}
+      <label class="flex items-start gap-3 text-sm">
+        <input class="mt-1" type="checkbox" name="urls" value="{{ link.url }}"
+               {% if link.url == leak.url %}checked{% endif %}>
+        <span class="min-w-0 break-words">
+          {{ link.url }}
+          <span class="block text-xs text-texto-suave">
+            {{ link.situacao|replace("_", " ") }} · {{ (link.created_at|string)[:10] }}
+          </span>
+        </span>
+      </label>
+      {% endfor %}
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="notas">Anotação (opcional)</label>
+        <textarea class="ds-input" id="notas" name="notas" rows="2"
+                  placeholder="Ex.: enviado pelo formulário do site"></textarea>
+      </div>
+    </section>
+
+    <section class="ds-card grid gap-3" aria-labelledby="modelo-pedido">
+      <h2 class="ds-card__titulo" id="modelo-pedido">Modelo do texto</h2>
+      <div class="grid gap-2">
+        {% for codigo, rotulo in modelos.items() %}
+        <label class="flex items-center gap-2 text-sm">
+          <input type="radio" name="modelo" value="{{ codigo }}"
+                 {% if modelo == codigo %}checked{% endif %}>
+          {{ rotulo }}
+        </label>
+        {% endfor %}
+      </div>
+      {% for codigo, rotulo in modelos.items() %}
+      <details class="mt-1">
+        <summary class="cursor-pointer text-sm font-semibold text-primaria-clara">
+          Ver e copiar o modelo em {{ rotulo }}
+        </summary>
+        <p class="ds-badge ds-badge--alerta mt-2">{{ aviso_modelo }}</p>
+        <textarea class="ds-input mt-2 font-mono text-xs" id="texto-{{ codigo }}" rows="12" readonly>{{ textos[codigo] }}</textarea>
+        <button type="button" class="ds-btn ds-btn--secundario ds-btn--pequeno mt-2"
+                data-copiar="#texto-{{ codigo }}">Copiar texto ({{ rotulo }})</button>
+      </details>
+      {% endfor %}
+    </section>
+
+    <button type="submit" class="ds-btn ds-btn--primario w-full justify-center">
+      Criar pedido e ver o texto final
+    </button>
+  </form>
+
+  <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/revisao?status=leaked&target_user_id={{ target_user_id }}">
+    Voltar aos links confirmados
+  </a>
+</div>
+{% endblock %}

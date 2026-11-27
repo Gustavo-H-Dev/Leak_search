@@ -22,11 +22,11 @@
       <p class="m-0 text-[2rem] font-bold leading-none text-texto">{{ contadores.no_ar }}</p>
       <p class="ds-card__texto mb-0 mt-2">No ar</p>
     </a>
-    <a class="ds-card min-w-0 no-underline" href="/revisao?status=leaked">
+    <a class="ds-card min-w-0 no-underline" href="/remocao">
       <p class="m-0 text-[2rem] font-bold leading-none text-texto">{{ contadores.em_remocao }}</p>
       <p class="ds-card__texto mb-0 mt-2">Em remoção</p>
     </a>
-    <a class="ds-card min-w-0 no-underline" href="/revisao?status=leaked">
+    <a class="ds-card min-w-0 no-underline" href="/remocao?status=removido">
       <p class="m-0 text-[2rem] font-bold leading-none text-texto">{{ contadores.removidos }}</p>
       <p class="ds-card__texto mb-0 mt-2">Removidos</p>
     </a>
@@ -71,6 +71,13 @@
           </p>
         </div>
         <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/configuracoes/historico">Histórico</a>
+      </li>
+      <li class="ds-lista__item">
+        <div>
+          <p class="ds-lista__titulo">Remoções</p>
+          <p class="ds-lista__texto">Pedidos enviados, prazos de checagem e histórico.</p>
+        </div>
+        <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/remocao">Acompanhar</a>
       </li>
       <li class="ds-lista__item">
         <div>

@@ -348,3 +348,60 @@ A ordenação por semelhança de imagem que existia só nessa tela não foi leva
 para a fila nova: a comparação por pHash continua no cálculo de pontuação e na
 tela de análise; a fila prioriza nota, data e agrupamento. O histórico por
 consulta em `/execucoes` não mudou.
+
+## Fase 5 — Kit de remoção e acompanhamento (27/11/2026)
+
+### D34 — Contato é dado do admin, nunca inventado
+
+`contato_abuso_dominio` (dominio, url_formulario, email, observacao) é
+preenchida à mão em **Operação > Contatos**. O código não preenche nem sugere
+e-mail ou URL de formulário. Sem contato cadastrado, a criadora vê "cadastre o
+contato deste site" e o texto continua copiável; quando o admin cadastra, o
+contato aparece na hora seguinte, sem migração.
+
+### D35 — Modelos em arquivos editáveis, sem base legal nossa
+
+Os textos ficam em `app/modelos_remocao/pt.txt` e `en.txt`, com marcadores
+`{{nome}}`, `{{arroba}}`, `{{urls}}`, `{{descricao}}` e `{{data}}`. Dá para
+editar o arquivo sem mexer em código. A interface marca os dois como
+"Modelo a ser revisado por advogado" e o texto é genérico: pede a remoção,
+oferece confirmar a titularidade e pede resposta por e-mail. Nenhum artigo,
+lei ou prazo jurídico é citado pelo app — esses trechos são preenchidos pela
+criadora ou pelo advogado dela.
+
+### D36 — Status do pedido e reflexo no painel
+
+`pedido_remocao.status` usa `a_enviar`, `enviado`, `aguardando`, `removido` e
+`recusado`. Cada mudança grava uma linha em `pedido_remocao_evento` (status,
+nota, data), que é o histórico mostrado na tela. O mesmo evento atualiza
+`leak_reports.situacao` dos links do pedido: `a_enviar`/`enviado`/`aguardando`
+→ `em_remocao`, `removido` → `removido`, `recusado` → `no_ar`. O texto gerado é
+salvo como snapshot no pedido e pode ser editado antes ou depois de enviar.
+
+### D37 — Um pedido, vários links do mesmo site
+
+O pedido tem domínio único e uma lista de itens (`pedido_remocao_item`). Na
+criação, a tela lista todos os links confirmados daquele domínio e deixa
+marcar mais de um; só os marcados entram no texto e no pedido. Links de outra
+criadora nem aparecem: a consulta é sempre pelo id da sessão (admin escolhe a
+criadora) e um id de outra conta responde 404, com teste.
+
+### D38 — Checagem depois de N dias, sem abrir a página
+
+Enviar um pedido agenda `proxima_checagem_em` para hoje + N dias. O N vem de
+`REMOCAO_DIAS_CHECAGEM`, depois de `app_settings.remocao_dias_checagem`
+(editável em **Contatos**) e, por fim, 7 dias. "Checar agora" roda uma busca
+pelo link no provedor do vazamento (uma consulta por link, no máximo 5),
+compara a URL normalizada e grava `checagem_resultado`/`checagem_json` mais um
+evento. Se a URL não aparecer, o pedido ganha `sugestao_removido = 1` e a tela
+pergunta se quer marcar como removido — nada muda sozinho. A checagem nunca
+abre a página do site, só consulta o buscador; abrir link externo continua
+exigindo o `<details>` com o aviso de conteúdo adulto.
+
+### D39 — Atalho do Google (URL conferida em 27/11/2026)
+
+O atalho aponta para `https://support.google.com/websearch/contact/content_removal_form?hl=pt-BR`,
+o formulário oficial de remoção de conteúdo pessoal da Pesquisa Google
+(confirmado na Central de Ajuda do Google em 27/11/2026). Ele é apresentado
+como caminho separado do pedido ao site e não substitui um ao outro; o link só
+abre dentro do aviso de site externo.

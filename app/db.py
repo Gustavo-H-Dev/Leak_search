@@ -208,6 +208,51 @@ def iniciar_banco():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, url)
             );
+            CREATE TABLE IF NOT EXISTS contato_abuso_dominio (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dominio TEXT NOT NULL UNIQUE,
+                url_formulario TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                observacao TEXT NOT NULL DEFAULT '',
+                atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS pedido_remocao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                dominio TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'a_enviar',
+                modelo TEXT NOT NULL DEFAULT 'pt',
+                texto TEXT NOT NULL DEFAULT '',
+                contato_email TEXT NOT NULL DEFAULT '',
+                contato_url TEXT NOT NULL DEFAULT '',
+                provedor TEXT NOT NULL DEFAULT 'serpapi',
+                notas TEXT NOT NULL DEFAULT '',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                enviado_em TEXT,
+                removido_em TEXT,
+                checagem_em TEXT,
+                checagem_resultado TEXT NOT NULL DEFAULT '',
+                checagem_json TEXT NOT NULL DEFAULT '{}',
+                proxima_checagem_em TEXT,
+                sugestao_removido INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS pedido_remocao_criadora
+            ON pedido_remocao (user_id, status);
+            CREATE TABLE IF NOT EXISTS pedido_remocao_item (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pedido_id INTEGER NOT NULL REFERENCES pedido_remocao(id) ON DELETE CASCADE,
+                url TEXT NOT NULL,
+                titulo TEXT NOT NULL DEFAULT '',
+                UNIQUE (pedido_id, url)
+            );
+            CREATE TABLE IF NOT EXISTS pedido_remocao_evento (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pedido_id INTEGER NOT NULL REFERENCES pedido_remocao(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                nota TEXT NOT NULL DEFAULT '',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS image_candidates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -459,6 +504,58 @@ def _iniciar_banco_postgresql():
             situacao_em TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, url)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS contato_abuso_dominio (
+            id BIGSERIAL PRIMARY KEY,
+            dominio TEXT NOT NULL UNIQUE,
+            url_formulario TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            observacao TEXT NOT NULL DEFAULT '',
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS pedido_remocao (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            dominio TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'a_enviar',
+            modelo TEXT NOT NULL DEFAULT 'pt',
+            texto TEXT NOT NULL DEFAULT '',
+            contato_email TEXT NOT NULL DEFAULT '',
+            contato_url TEXT NOT NULL DEFAULT '',
+            provedor TEXT NOT NULL DEFAULT 'serpapi',
+            notas TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            enviado_em TEXT,
+            removido_em TEXT,
+            checagem_em TEXT,
+            checagem_resultado TEXT NOT NULL DEFAULT '',
+            checagem_json TEXT NOT NULL DEFAULT '{}',
+            proxima_checagem_em TEXT,
+            sugestao_removido INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS pedido_remocao_criadora ON pedido_remocao (user_id, status)",
+        """
+        CREATE TABLE IF NOT EXISTS pedido_remocao_item (
+            id BIGSERIAL PRIMARY KEY,
+            pedido_id BIGINT NOT NULL REFERENCES pedido_remocao(id) ON DELETE CASCADE,
+            url TEXT NOT NULL,
+            titulo TEXT NOT NULL DEFAULT '',
+            UNIQUE (pedido_id, url)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS pedido_remocao_evento (
+            id BIGSERIAL PRIMARY KEY,
+            pedido_id BIGINT NOT NULL REFERENCES pedido_remocao(id) ON DELETE CASCADE,
+            status TEXT NOT NULL,
+            nota TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
         """
@@ -3415,3 +3512,389 @@ def listar_hashes_criadora_do_usuario(user_id):
             """,
             (user_id,),
         ).fetchall()
+
+# --- Kit de remocao: contatos de abuso e pedidos da criadora ----------------
+
+STATUS_PEDIDO_REMOCAO = ("a_enviar", "enviado", "aguardando", "removido", "recusado")
+SITUACAO_POR_STATUS_PEDIDO = {
+    "a_enviar": "em_remocao",
+    "enviado": "em_remocao",
+    "aguardando": "em_remocao",
+    "removido": "removido",
+    "recusado": "no_ar",
+}
+
+
+def _normalizar_dominio(dominio) -> str:
+    return (dominio or "").strip().lower().removeprefix("www.")
+
+
+def listar_contatos_abuso():
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, dominio, url_formulario, email, observacao, atualizado_em
+            FROM contato_abuso_dominio ORDER BY dominio
+            """
+        ).fetchall()
+
+
+def obter_contato_abuso(dominio):
+    dominio = _normalizar_dominio(dominio)
+    if not dominio:
+        return None
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, dominio, url_formulario, email, observacao, atualizado_em
+            FROM contato_abuso_dominio WHERE dominio = ?
+            """,
+            (dominio,),
+        ).fetchone()
+
+
+def salvar_contato_abuso(dominio, url_formulario="", email="", observacao=""):
+    """Cadastro manual do admin: nada aqui e preenchido pelo codigo."""
+    dominio = _normalizar_dominio(dominio)
+    if not dominio or " " in dominio:
+        raise ValueError("Informe o domínio do site (sem http e sem caminho).")
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO contato_abuso_dominio
+                (dominio, url_formulario, email, observacao, atualizado_em)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (dominio) DO UPDATE SET
+                url_formulario = excluded.url_formulario,
+                email = excluded.email,
+                observacao = excluded.observacao,
+                atualizado_em = excluded.atualizado_em
+            """,
+            (
+                dominio,
+                (url_formulario or "").strip(),
+                (email or "").strip(),
+                (observacao or "").strip(),
+                _agora_utc(),
+            ),
+        )
+    return dominio
+
+
+def excluir_contato_abuso(contato_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM contato_abuso_dominio WHERE id = ?", (contato_id,)
+        )
+        return cur.rowcount > 0
+
+
+def _dominio_da_url(url) -> str:
+    """`leak_reports` guarda a URL; o dominio sai dela na hora de agrupar."""
+    from urllib.parse import urlsplit
+
+    try:
+        host = urlsplit((url or "").strip()).hostname or ""
+    except ValueError:
+        host = ""
+    return _normalizar_dominio(host)
+
+
+def _leaks_da_criadora(user_id):
+    with conexao() as conn:
+        linhas = conn.execute(
+            """
+            SELECT id, user_id, url, title, source, snippet, engine, situacao,
+                   situacao_em, created_at
+            FROM leak_reports WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    return [{**dict(linha), "dominio": _dominio_da_url(linha["url"])} for linha in linhas]
+
+
+def dominios_confirmados(user_id):
+    """Dominios com pelo menos um link confirmado como vazamento."""
+    contagens = {}
+    for item in _leaks_da_criadora(user_id):
+        registro = contagens.setdefault(
+            item["dominio"], {"dominio": item["dominio"], "total": 0, "removidos": 0}
+        )
+        registro["total"] += 1
+        if item["situacao"] == "removido":
+            registro["removidos"] += 1
+    return sorted(contagens.values(), key=lambda item: (-item["total"], item["dominio"]))
+
+
+def listar_leaks_por_dominio(user_id, dominio):
+    dominio = _normalizar_dominio(dominio)
+    return [
+        item
+        for item in _leaks_da_criadora(user_id)
+        if item["dominio"] == dominio
+    ]
+
+
+def obter_leak(user_id, url):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT id, user_id, url, title, source, snippet, engine,
+                   situacao, situacao_em, created_at
+            FROM leak_reports WHERE user_id = ? AND url = ?
+            """,
+            (user_id, url),
+        ).fetchone()
+    if linha is None:
+        return None
+    return {**dict(linha), "dominio": _dominio_da_url(linha["url"])}
+
+
+def _atualizar_situacao_urls(conn, user_id, urls, situacao):
+    if situacao not in SITUACOES_REMOCAO:
+        raise ValueError("Situacao de remocao invalida.")
+    for url in urls:
+        conn.execute(
+            """
+            UPDATE leak_reports SET situacao = ?, situacao_em = ?
+            WHERE user_id = ? AND url = ?
+            """,
+            (situacao, _agora_utc(), user_id, url),
+        )
+
+
+def criar_pedido_remocao(
+    user_id,
+    dominio,
+    modelo,
+    texto,
+    contato_email,
+    contato_url,
+    provedor,
+    itens,
+    notas="",
+):
+    """Cria um pedido que pode cobrir varios links do mesmo dominio."""
+    urls = [item["url"] for item in itens]
+    if not urls:
+        raise ValueError("Escolha pelo menos um link para o pedido.")
+    agora = _agora_utc()
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO pedido_remocao (
+                user_id, dominio, status, modelo, texto, contato_email,
+                contato_url, provedor, notas, criado_em, atualizado_em
+            )
+            VALUES (?, ?, 'a_enviar', ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (
+                user_id,
+                _normalizar_dominio(dominio),
+                modelo,
+                texto,
+                (contato_email or "").strip(),
+                (contato_url or "").strip(),
+                (provedor or "serpapi").strip(),
+                (notas or "").strip(),
+                agora,
+                agora,
+            ),
+        )
+        pedido_id = cur.fetchone()["id"]
+        for item in itens:
+            conn.execute(
+                """
+                INSERT INTO pedido_remocao_item (pedido_id, url, titulo)
+                VALUES (?, ?, ?)
+                ON CONFLICT (pedido_id, url) DO NOTHING
+                """,
+                (pedido_id, item["url"], item.get("titulo", "")),
+            )
+        conn.execute(
+            "INSERT INTO pedido_remocao_evento (pedido_id, status, nota)"
+            " VALUES (?, 'criado', ?)",
+            (pedido_id, (notas or "").strip()),
+        )
+        _atualizar_situacao_urls(conn, user_id, urls, "em_remocao")
+    return pedido_id
+
+
+def listar_itens_pedido(pedido_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, pedido_id, url, titulo FROM pedido_remocao_item
+            WHERE pedido_id = ? ORDER BY id
+            """,
+            (pedido_id,),
+        ).fetchall()
+
+
+def listar_eventos_pedido(pedido_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, pedido_id, status, nota, criado_em
+            FROM pedido_remocao_evento WHERE pedido_id = ?
+            ORDER BY criado_em, id
+            """,
+            (pedido_id,),
+        ).fetchall()
+
+
+def _pedido_com_itens(conn, linha):
+    pedido = dict(linha)
+    pedido["itens"] = [
+        dict(item)
+        for item in conn.execute(
+            "SELECT id, url, titulo FROM pedido_remocao_item"
+            " WHERE pedido_id = ? ORDER BY id",
+            (pedido["id"],),
+        ).fetchall()
+    ]
+    return pedido
+
+
+def listar_pedidos_remocao(user_id, status=""):
+    sql = (
+        "SELECT id, user_id, dominio, status, modelo, contato_email,"
+        " contato_url, provedor, notas, criado_em, atualizado_em, enviado_em,"
+        " removido_em, checagem_em, checagem_resultado, proxima_checagem_em,"
+        " sugestao_removido FROM pedido_remocao WHERE user_id = ?"
+    )
+    parametros = [user_id]
+    if status:
+        sql += " AND status = ?"
+        parametros.append(status)
+    sql += " ORDER BY criado_em DESC, id DESC"
+    with conexao() as conn:
+        return [
+            _pedido_com_itens(conn, linha)
+            for linha in conn.execute(sql, parametros).fetchall()
+        ]
+
+
+def obter_pedido_remocao(user_id, pedido_id):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT id, user_id, dominio, status, modelo, texto, contato_email,
+                   contato_url, provedor, notas, criado_em, atualizado_em,
+                   enviado_em, removido_em, checagem_em, checagem_resultado,
+                   checagem_json, proxima_checagem_em, sugestao_removido
+            FROM pedido_remocao WHERE user_id = ? AND id = ?
+            """,
+            (user_id, pedido_id),
+        ).fetchone()
+        if linha is None:
+            return None
+        pedido = _pedido_com_itens(conn, linha)
+        pedido["eventos"] = [
+            dict(evento)
+            for evento in conn.execute(
+                "SELECT id, status, nota, criado_em FROM pedido_remocao_evento"
+                " WHERE pedido_id = ? ORDER BY criado_em, id",
+                (pedido_id,),
+            ).fetchall()
+        ]
+        return pedido
+
+
+def atualizar_pedido_status(
+    user_id, pedido_id, status, nota="", proxima_checagem_em=None
+):
+    if status not in STATUS_PEDIDO_REMOCAO:
+        raise ValueError("Status de pedido inválido.")
+    agora = _agora_utc()
+    with conexao() as conn:
+        linha = conn.execute(
+            "SELECT id, enviado_em FROM pedido_remocao WHERE user_id = ? AND id = ?",
+            (user_id, pedido_id),
+        ).fetchone()
+        if linha is None:
+            return None
+        enviado_em = linha["enviado_em"]
+        if status in ("enviado", "aguardando") and not enviado_em:
+            enviado_em = agora
+        removido_em = agora if status == "removido" else None
+        prazo = proxima_checagem_em if status in ("enviado", "aguardando") else None
+        # Removido/recusado encerram a sugestao pendente; os demais mantem.
+        sugestao = 0 if status in ("removido", "recusado") else None
+        conn.execute(
+            """
+            UPDATE pedido_remocao SET status = ?, atualizado_em = ?,
+                enviado_em = ?, removido_em = ?, proxima_checagem_em = ?,
+                sugestao_removido = COALESCE(?, sugestao_removido)
+            WHERE user_id = ? AND id = ?
+            """,
+            (
+                status,
+                agora,
+                enviado_em,
+                removido_em,
+                prazo,
+                sugestao,
+                user_id,
+                pedido_id,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO pedido_remocao_evento (pedido_id, status, nota)"
+            " VALUES (?, ?, ?)",
+            (pedido_id, status, (nota or "").strip()),
+        )
+        urls = [
+            item["url"]
+            for item in conn.execute(
+                "SELECT url FROM pedido_remocao_item WHERE pedido_id = ?",
+                (pedido_id,),
+            ).fetchall()
+        ]
+        _atualizar_situacao_urls(
+            conn, user_id, urls, SITUACAO_POR_STATUS_PEDIDO[status]
+        )
+    return obter_pedido_remocao(user_id, pedido_id)
+
+
+def salvar_texto_pedido(user_id, pedido_id, texto):
+    with conexao() as conn:
+        cur = conn.execute(
+            "UPDATE pedido_remocao SET texto = ?, atualizado_em = ?"
+            " WHERE user_id = ? AND id = ?",
+            ((texto or "").strip(), _agora_utc(), user_id, pedido_id),
+        )
+        return cur.rowcount > 0
+
+
+def registrar_checagem_pedido(
+    user_id, pedido_id, resultado, detalhes, proxima_checagem_em, resumo
+):
+    """Guarda o resultado da checagem; nunca muda o status sozinho."""
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE pedido_remocao SET checagem_em = ?, checagem_resultado = ?,
+                checagem_json = ?, proxima_checagem_em = ?,
+                sugestao_removido = ?
+            WHERE user_id = ? AND id = ?
+            """,
+            (
+                _agora_utc(),
+                resultado,
+                json.dumps(detalhes, ensure_ascii=False, default=str),
+                proxima_checagem_em,
+                1 if resultado == "ausente" else 0,
+                user_id,
+                pedido_id,
+            ),
+        )
+        if cur.rowcount:
+            conn.execute(
+                "INSERT INTO pedido_remocao_evento (pedido_id, status, nota)"
+                " VALUES (?, 'checagem', ?)",
+                (pedido_id, resumo),
+            )
+        return cur.rowcount > 0

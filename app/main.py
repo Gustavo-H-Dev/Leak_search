@@ -41,6 +41,7 @@ from app.core import (
     perfis_monitorados as perfis_core,
     pontuacao,
     provedores_busca,
+    remocao as remocao_core,
     revisao as revisao_core,
     serpapi,
     sites_oficiais,
@@ -3229,4 +3230,400 @@ async def buscar_instagram(
         api_ativa=api,
         username=contexto["username"],
         keyword=contexto["keyword"],
+    )
+
+# --- Kit de remocao e acompanhamento ---------------------------------------
+
+
+def _pedidos_com_prazo(pedidos):
+    for pedido in pedidos:
+        pedido["vencido"] = (
+            pedido["status"] in remocao_core.STATUS_ATIVOS
+            and remocao_core.prazo_vencido(pedido.get("proxima_checagem_em"))
+        )
+    return pedidos
+
+
+@app.get("/remocao", response_class=HTMLResponse)
+def lista_de_remocoes(
+    request: Request,
+    target_user_id: int = 0,
+    status: str = "",
+    mensagem: str = "",
+):
+    """Pedidos de remocao da criadora, com status e prazos de checagem."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if status and status not in remocao_core.STATUS:
+        status = ""
+    todos = _pedidos_com_prazo(db.listar_pedidos_remocao(alvo["id"]))
+    pedidos = [pedido for pedido in todos if not status or pedido["status"] == status]
+    contagens = {chave: 0 for chave in remocao_core.STATUS}
+    for pedido in todos:
+        contagens[pedido["status"]] = contagens.get(pedido["status"], 0) + 1
+    return templates.TemplateResponse(
+        request,
+        "remocao_lista.html",
+        {
+            "titulo": "Remoções",
+            "target_user": alvo,
+            "target_user_id": alvo["id"],
+            "target_users": (
+                db.listar_usuarios_para_busca()
+                if request.state.user["role"] == "admin"
+                else []
+            ),
+            "pedidos": pedidos,
+            "total": len(todos),
+            "contagens": contagens,
+            "status_atual": status,
+            "status_nomes": remocao_core.STATUS,
+            "dominios": db.dominios_confirmados(alvo["id"]),
+            "dias_checagem": remocao_core.dias_checagem(),
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.get("/remocao/novo", response_class=HTMLResponse)
+def nova_remocao(
+    request: Request,
+    url: str = "",
+    target_user_id: int = 0,
+    modelo: str = "pt",
+    erro: str = "",
+):
+    """Texto do pedido para um link confirmado, com contato do site."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if not url:
+        return RedirectResponse(
+            f"/revisao?status=leaked&target_user_id={alvo['id']}"
+            f"&mensagem={quote('Escolha um link confirmado para pedir a remoção.')}",
+            status_code=303,
+        )
+    leak = db.obter_leak(alvo["id"], url)
+    if leak is None:
+        raise HTTPException(status_code=404, detail="Link confirmado não encontrado.")
+    dominio = leak["dominio"]
+    links = db.listar_leaks_por_dominio(alvo["id"], dominio)
+    contato = db.obter_contato_abuso(dominio)
+    if modelo not in remocao_core.MODELOS:
+        modelo = "pt"
+    nome = alvo["public_name"] or alvo["username"]
+    arroba = (alvo["public_handle"] or "").lstrip("@")
+    textos = {
+        codigo: remocao_core.gerar_texto(
+            codigo,
+            nome=nome,
+            arroba=arroba,
+            urls=[item["url"] for item in links],
+        )
+        for codigo in remocao_core.MODELOS
+    }
+    return templates.TemplateResponse(
+        request,
+        "remocao_nova.html",
+        {
+            "titulo": "Pedir remoção",
+            "target_user": alvo,
+            "target_user_id": alvo["id"],
+            "leak": leak,
+            "dominio": dominio,
+            "links": links,
+            "contato": contato,
+            "modelo": modelo,
+            "modelos": remocao_core.MODELOS,
+            "textos": textos,
+            "nome": nome,
+            "arroba": arroba,
+            "aviso_modelo": remocao_core.AVISO_MODELO,
+            "google_url": remocao_core.GOOGLE_REMOCAO_URL,
+            "google_texto": remocao_core.GOOGLE_REMOCAO_TEXTO,
+            "descricao_padrao": remocao_core.DESCRICAO_PADRAO,
+            "pedidos_dominio": [
+                pedido
+                for pedido in db.listar_pedidos_remocao(alvo["id"])
+                if pedido["dominio"] == dominio
+            ],
+            "erro": erro,
+        },
+    )
+
+
+@app.post("/remocao", dependencies=_csrf())
+def criar_pedido_de_remocao(
+    request: Request,
+    url: str = Form(""),
+    modelo: str = Form("pt"),
+    nome: str = Form(""),
+    arroba: str = Form(""),
+    descricao: str = Form(""),
+    urls: list[str] = Form([]),
+    notas: str = Form(""),
+    target_user_id: int = Form(0),
+):
+    """Um pedido pode cobrir varios links do mesmo dominio."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    leak = db.obter_leak(alvo["id"], url)
+    if leak is None:
+        raise HTTPException(status_code=404, detail="Link confirmado não encontrado.")
+    dominio = leak["dominio"]
+    links = {
+        item["url"]: item
+        for item in db.listar_leaks_por_dominio(alvo["id"], dominio)
+    }
+    escolhidas = [item for item in urls if item in links]
+    if not escolhidas:
+        escolhidas = [leak["url"]]
+    if modelo not in remocao_core.MODELOS:
+        raise HTTPException(status_code=400, detail="Modelo de pedido inválido.")
+    texto = remocao_core.gerar_texto(
+        modelo,
+        nome=nome or alvo["public_name"] or alvo["username"],
+        arroba=arroba or alvo["public_handle"] or "",
+        urls=escolhidas,
+        descricao=descricao,
+    )
+    contato = db.obter_contato_abuso(dominio)
+    provedor = (
+        leak["engine"]
+        if (leak["engine"] or "") in busca_provedores.PROVEDORES_TEXTO
+        else "serpapi"
+    )
+    pedido_id = db.criar_pedido_remocao(
+        alvo["id"],
+        dominio,
+        modelo,
+        texto,
+        contato["email"] if contato else "",
+        contato["url_formulario"] if contato else "",
+        provedor,
+        [
+            {"url": item, "titulo": (links[item]["title"] or "")[:500]}
+            for item in escolhidas
+        ],
+        notas=notas,
+    )
+    return RedirectResponse(
+        f"/remocao/{pedido_id}?target_user_id={alvo['id']}"
+        f"&mensagem={quote('Pedido criado. Copie o texto antes de enviar.')}",
+        status_code=303,
+    )
+
+
+@app.get("/remocao/{pedido_id}", response_class=HTMLResponse)
+def detalhe_da_remocao(
+    request: Request,
+    pedido_id: int,
+    target_user_id: int = 0,
+    mensagem: str = "",
+    erro: str = "",
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    pedido = db.obter_pedido_remocao(alvo["id"], pedido_id)
+    if pedido is None:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+    pedido["vencido"] = (
+        pedido["status"] in remocao_core.STATUS_ATIVOS
+        and remocao_core.prazo_vencido(pedido.get("proxima_checagem_em"))
+    )
+    return templates.TemplateResponse(
+        request,
+        "remocao_detalhe.html",
+        {
+            "titulo": f"Pedido — {pedido['dominio']}",
+            "target_user": alvo,
+            "target_user_id": alvo["id"],
+            "pedido": pedido,
+            "contato": db.obter_contato_abuso(pedido["dominio"]),
+            "status_nomes": remocao_core.STATUS,
+            "status_ordem": remocao_core.STATUS_PEDIDO,
+            "aviso_modelo": remocao_core.AVISO_MODELO,
+            "google_url": remocao_core.GOOGLE_REMOCAO_URL,
+            "google_texto": remocao_core.GOOGLE_REMOCAO_TEXTO,
+            "dias_checagem": remocao_core.dias_checagem(),
+            "mensagem": mensagem,
+            "erro": erro,
+        },
+    )
+
+
+@app.post("/remocao/{pedido_id}/status", dependencies=_csrf())
+def atualizar_status_pedido(
+    request: Request,
+    pedido_id: int,
+    status: str = Form(...),
+    nota: str = Form(""),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if status not in remocao_core.STATUS:
+        raise HTTPException(status_code=400, detail="Status inválido.")
+    prazo = (
+        remocao_core.proxima_checagem()
+        if status in remocao_core.STATUS_ATIVOS
+        else None
+    )
+    try:
+        pedido = db.atualizar_pedido_status(
+            alvo["id"], pedido_id, status, nota, prazo
+        )
+    except ValueError as falha:
+        raise HTTPException(status_code=400, detail=str(falha))
+    if pedido is None:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+    return RedirectResponse(
+        f"/remocao/{pedido_id}?target_user_id={alvo['id']}"
+        f"&mensagem={quote('Status atualizado.')}",
+        status_code=303,
+    )
+
+
+@app.post("/remocao/{pedido_id}/texto", dependencies=_csrf())
+def salvar_texto_do_pedido(
+    request: Request,
+    pedido_id: int,
+    texto: str = Form(""),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if not db.salvar_texto_pedido(alvo["id"], pedido_id, texto):
+        raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+    return RedirectResponse(
+        f"/remocao/{pedido_id}?target_user_id={alvo['id']}"
+        f"&mensagem={quote('Texto salvo.')}",
+        status_code=303,
+    )
+
+
+@app.post("/remocao/{pedido_id}/checar", dependencies=_csrf())
+def checar_pedido_de_remocao(
+    request: Request,
+    pedido_id: int,
+    target_user_id: int = Form(0),
+):
+    """Roda uma busca pelas URLs do pedido; nunca abre a pagina do site.
+
+    Cada URL consome uma consulta do provedor (limitado a 5 por checagem).
+    """
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    pedido = db.obter_pedido_remocao(alvo["id"], pedido_id)
+    if pedido is None:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+    if pedido["status"] not in remocao_core.STATUS_ATIVOS:
+        return RedirectResponse(
+            f"/remocao/{pedido_id}?target_user_id={alvo['id']}"
+            f"&mensagem={quote('Marque o pedido como enviado antes de checar.')}",
+            status_code=303,
+        )
+    provedor = pedido["provedor"]
+    if provedor not in busca_provedores.PROVEDORES_TEXTO:
+        provedor = "serpapi"
+    detalhes = {}
+    encontrados = 0
+    erros = 0
+    itens = pedido["itens"][:5]
+    for item in itens:
+        try:
+            achados = busca_provedores.buscar(provedor, item["url"])
+        except Exception as falha:
+            logger.warning("Checagem de remoção falhou para %s: %s", item["url"], falha)
+            detalhes[item["url"]] = {
+                "resultado": "erro",
+                "mensagem": str(falha)[:300],
+            }
+            erros += 1
+            continue
+        alvo_url = pontuacao.normalizar_url(item["url"])
+        presente = any(
+            pontuacao.normalizar_url(candidato.url) == alvo_url
+            for candidato in achados
+        )
+        detalhes[item["url"]] = {
+            "resultado": "presente" if presente else "ausente",
+            "resultados": len(achados),
+        }
+        if presente:
+            encontrados += 1
+    if itens and erros == len(itens):
+        resultado = "erro"
+    elif encontrados:
+        resultado = "presente"
+    else:
+        resultado = "ausente"
+    resumo = remocao_core.resumo_checagem(resultado, detalhes)
+    db.registrar_checagem_pedido(
+        alvo["id"],
+        pedido_id,
+        resultado,
+        detalhes,
+        remocao_core.proxima_checagem(),
+        resumo,
+    )
+    return RedirectResponse(
+        f"/remocao/{pedido_id}?target_user_id={alvo['id']}"
+        f"&mensagem={quote(resumo)}",
+        status_code=303,
+    )
+
+
+@app.get(
+    "/contatos-abuso",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def contatos_abuso_admin(
+    request: Request,
+    mensagem: str = "",
+    erro: str = "",
+    dominio: str = "",
+):
+    """Cadastro manual dos contatos de abuso, sempre preenchido pelo admin."""
+    return templates.TemplateResponse(
+        request,
+        "contatos_abuso.html",
+        {
+            "titulo": "Contatos de abuso",
+            "contatos": db.listar_contatos_abuso(),
+            "dominio_prefill": dominio,
+            "dias_checagem": remocao_core.dias_checagem(),
+            "mensagem": mensagem,
+            "erro": erro,
+        },
+    )
+
+
+@app.post("/contatos-abuso", dependencies=_admin_csrf())
+def salvar_contato_de_abuso(
+    dominio: str = Form(...),
+    url_formulario: str = Form(""),
+    email: str = Form(""),
+    observacao: str = Form(""),
+    dias: str = Form(""),
+):
+    try:
+        db.salvar_contato_abuso(dominio, url_formulario, email, observacao)
+    except ValueError as falha:
+        return RedirectResponse(
+            f"/contatos-abuso?erro={quote(str(falha))}", status_code=303
+        )
+    if dias.strip():
+        try:
+            db.salvar_configuracao(
+                "remocao_dias_checagem", str(max(1, int(dias.strip())))
+            )
+        except ValueError:
+            return RedirectResponse(
+                f"/contatos-abuso?erro={quote('Prazo de checagem inválido.')}",
+                status_code=303,
+            )
+    return RedirectResponse(
+        f"/contatos-abuso?mensagem={quote('Contato salvo.')}", status_code=303
+    )
+
+
+@app.post("/contatos-abuso/{contato_id}/excluir", dependencies=_admin_csrf())
+def excluir_contato_de_abuso(contato_id: int):
+    db.excluir_contato_abuso(contato_id)
+    return RedirectResponse(
+        f"/contatos-abuso?mensagem={quote('Contato removido.')}", status_code=303
     )

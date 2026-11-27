@@ -222,6 +222,29 @@ a chave e monitore os custos.
    `COMPARACAO_IMAGEM_ATIVA=false`: nesse modo nenhuma miniatura é baixada,
    processada ou comparada e a SerpAPI também usa a pontuação por regras.
 
+### Remoção e acompanhamento
+
+Cada link confirmado na fila tem o botão **Remover**, que abre
+`/remocao/novo`: o texto do pedido já vem com nome, arroba, links e descrição,
+com botão de copiar. Os modelos ficam em `app/modelos_remocao/pt.txt` e
+`en.txt` (editáveis) e a tela avisa **"Modelo a ser revisado por advogado"**;
+o app não cita base legal. Um pedido pode cobrir vários links do mesmo site.
+
+O contato de abuso de cada site (e-mail, formulário, observação) é cadastrado
+pelo admin em **Operação > Contatos** — nada é inventado pelo código. Sem
+contato, a criadora vê "cadastre o contato deste site" e ainda pode copiar o
+texto. O atalho para o formulário oficial do Google (remoção de informações
+pessoais) fica na mesma tela, separado do pedido ao site.
+
+Em `/remocao` ficam os pedidos com status **A enviar**, **Enviado**,
+**Aguardando**, **Removido** ou **Recusado**, com data e anotação. Cada mudança
+grava um evento no histórico e atualiza a situação dos links no painel (em
+remoção/removido). Ao marcar como enviado, o pedido agenda uma checagem para
+daqui a N dias (`REMOCAO_DIAS_CHECAGEM`, depois
+`app_settings.remocao_dias_checagem`, padrão 7). **Checar agora** consulta o
+buscador pelo link, nunca abre a página do site, e, se a URL não aparecer,
+apenas sugere marcar como removido.
+
 ### Domínios suspeitos (revisão humana)
 
 A lista de domínios usada pela pontuação e pelas consultas M2 fica na tabela

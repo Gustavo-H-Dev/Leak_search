@@ -11,6 +11,7 @@
   <script src="/static/js/ui.js" defer></script>
   <script src="/static/js/wizard.js" defer></script>
   <script src="/static/js/revisao.js" defer></script>
+  <script src="/static/js/remocao.js" defer></script>
 </head>
 {% from "componentes/_toast.html" import area_toast %}
 <body>
@@ -20,7 +21,7 @@
 {% set itens_principais = [
   {"nome": "Painel", "href": "/", "icone": "painel", "ativo": caminho == "/"},
   {"nome": "Revisão", "href": "/revisao", "icone": "revisao", "ativo": caminho.startswith("/revisao") and not em_remocoes},
-  {"nome": "Remoções", "href": "/revisao?status=leaked", "icone": "remocoes", "ativo": em_remocoes},
+  {"nome": "Remoções", "href": "/remocao", "icone": "remocoes", "ativo": caminho.startswith("/remocao") or em_remocoes},
   {"nome": "Histórico", "href": "/execucoes", "icone": "historico", "ativo": caminho.startswith("/execucoes"), "admin": true},
   {"nome": "Configurações", "href": "/perfil-busca", "icone": "config", "ativo": caminho.startswith("/perfil-busca") or caminho.startswith("/configuracoes")}
 ] %}
@@ -28,6 +29,7 @@
   {"nome": "Busca na web", "href": "/busca-web", "icone": "busca", "ativo": caminho.startswith("/busca-web")},
   {"nome": "Usuários", "href": "/usuarios", "icone": "usuarios", "ativo": caminho.startswith("/usuarios"), "admin": true},
   {"nome": "Domínios", "href": "/dominios", "icone": "dominios", "ativo": caminho.startswith("/dominios"), "admin": true},
+  {"nome": "Contatos", "href": "/contatos-abuso", "icone": "dominios", "ativo": caminho.startswith("/contatos-abuso"), "admin": true},
   {"nome": "Análise", "href": "/analise", "icone": "analise", "ativo": caminho.startswith("/analise"), "admin": true}
 ] %}
 

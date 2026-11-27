@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block titulo %}Pedido #{{ pedido.id }} — {{ pedido.dominio }}{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-3xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Remoções</span>
+    <h1 class="mt-2 mb-1 break-words text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      {{ pedido.dominio }}
+    </h1>
+    <p class="ds-lista__texto m-0">
+      Pedido #{{ pedido.id }} · criado em {{ (pedido.criado_em|string)[:10] }}
+      {% if pedido.enviado_em %}· enviado em {{ (pedido.enviado_em|string)[:10] }}{% endif %}
+      {% if pedido.removido_em %}· removido em {{ (pedido.removido_em|string)[:10] }}{% endif %}
+    </p>
+    <p class="mt-2">
+      <span class="ds-badge ds-badge--{% if pedido.status == 'removido' %}sucesso{% elif pedido.status == 'recusado' %}perigo{% elif pedido.status == 'a_enviar' %}alerta{% elif pedido.status == 'enviado' %}info{% else %}neutro{% endif %}">
+        {{ status_nomes.get(pedido.status, pedido.status) }}
+      </span>
+    </p>
+  </header>
+
+  {% if mensagem %}
+  <p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>
+  {% endif %}
+  {% if erro %}
+  <p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>
+  {% endif %}
+
+  {% if pedido.sugestao_removido %}
+  <section class="ds-card" aria-labelledby="sugestao-removido">
+    <h2 class="ds-card__titulo" id="sugestao-removido">Talvez já tenha saído do ar</h2>
+    <p class="ds-card__texto">
+      A última checagem não encontrou a URL. Isso não prova a remoção, mas
+      pode ser a hora de marcar o pedido como removido — só se você confirmar.
+    </p>
+    <div class="flex flex-wrap gap-2">
+      <form method="post" action="/remocao/{{ pedido.id }}/status">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+        <input type="hidden" name="status" value="removido">
+        <input type="hidden" name="nota" value="Confirmado após a checagem não encontrar a URL.">
+        <button type="submit" class="ds-btn ds-btn--primario ds-btn--pequeno">Marcar como removido</button>
+      </form>
+      <form method="post" action="/remocao/{{ pedido.id }}/checar">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+        <button type="submit" class="ds-btn ds-btn--fantasma ds-btn--pequeno">Checar de novo</button>
+      </form>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if pedido.vencido %}
+  <p class="ds-alerta ds-alerta--sucesso" role="status">
+    A checagem de {{ dias_checagem }} dias venceu. Rode a checagem abaixo para
+    ver se a URL ainda aparece.
+  </p>
+  {% endif %}
+
+  <section class="ds-card" aria-labelledby="texto-pedido">
+    <header class="ds-card__cabecalho">
+      <div>
+        <h2 class="ds-card__titulo" id="texto-pedido">Texto do pedido</h2>
+        <p class="ds-card__texto">Copie e envie pelo contato do site.</p>
+      </div>
+      <span class="ds-badge ds-badge--alerta shrink-0">{{ aviso_modelo }}</span>
+    </header>
+    <form method="post" action="/remocao/{{ pedido.id }}/texto" class="grid gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <textarea class="ds-input font-mono text-xs" id="texto-pedido-area" name="texto" rows="14">{{ pedido.texto }}</textarea>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="ds-btn ds-btn--primario ds-btn--pequeno"
+                data-copiar="#texto-pedido-area">Copiar texto</button>
+        <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Salvar edição</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="ds-card" aria-labelledby="contato-dominio">
+    <h2 class="ds-card__titulo" id="contato-dominio">Contato do site</h2>
+    {% if contato %}
+    <ul class="ds-lista">
+      {% if contato.email %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">E-mail</p>
+          <p class="ds-lista__texto break-all">{{ contato.email }}</p>
+        </div>
+      </li>
+      {% endif %}
+      {% if contato.url_formulario %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">Formulário</p>
+          <details class="mt-1">
+            <summary class="cursor-pointer text-sm font-semibold text-primaria-clara">
+              Mostrar link do formulário (site externo)
+            </summary>
+            <p class="ds-dica mt-2">
+              Você está saindo do Monitoramento. O site é externo, não é
+              verificado por nós e pode mostrar conteúdo adulto.
+            </p>
+            <a class="ds-btn ds-btn--secundario ds-btn--pequeno break-all"
+               href="{{ contato.url_formulario }}" target="_blank"
+               rel="noopener noreferrer nofollow">{{ contato.url_formulario }}</a>
+          </details>
+        </div>
+      </li>
+      {% endif %}
+      {% if contato.observacao %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">Observação</p>
+          <p class="ds-lista__texto break-words">{{ contato.observacao }}</p>
+        </div>
+      </li>
+      {% endif %}
+    </ul>
+    {% else %}
+    <p class="ds-alerta ds-alerta--erro" role="status">Cadastre o contato deste site.</p>
+    <p class="ds-card__texto">
+      Sem e-mail ou formulário cadastrado para {{ pedido.dominio }}, use o texto
+      acima no canal que você encontrar. Nada é inventado pelo app.
+      {% if current_user.role == "admin" %}
+      <a class="text-primaria-clara" href="/contatos-abuso?dominio={{ pedido.dominio }}">Cadastrar contato</a>.
+      {% endif %}
+    </p>
+    {% endif %}
+  </section>
+
+  <section class="ds-card" aria-labelledby="google">
+    <h2 class="ds-card__titulo" id="google">Pedido ao Google</h2>
+    <p class="ds-card__texto">
+      Para remover o resultado da busca do Google, use o formulário oficial.
+    </p>
+    <details class="mt-2">
+      <summary class="cursor-pointer text-sm font-semibold text-primaria-clara">
+        Abrir o formulário oficial do Google (site externo)
+      </summary>
+      <p class="ds-dica mt-2">O formulário é do Google, não é verificado por nós.</p>
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="{{ google_url }}"
+         target="_blank" rel="noopener noreferrer">{{ google_texto }}</a>
+    </details>
+  </section>
+
+  <section class="ds-card" aria-labelledby="status-pedido">
+    <h2 class="ds-card__titulo" id="status-pedido">Status e anotação</h2>
+    <form class="grid gap-3" method="post" action="/remocao/{{ pedido.id }}/status">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="status">Status</label>
+        <select class="ds-input" id="status" name="status">
+          {% for chave in status_ordem %}
+          <option value="{{ chave }}"{% if pedido.status == chave %} selected{% endif %}>
+            {{ status_nomes.get(chave, chave) }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="nota">Anotação do momento (opcional)</label>
+        <textarea class="ds-input" id="nota" name="nota" rows="2"
+                  placeholder="Ex.: enviado pelo formulário, protocolo 123"></textarea>
+      </div>
+      <button type="submit" class="ds-btn ds-btn--primario ds-btn--pequeno">Atualizar status</button>
+    </form>
+  </section>
+
+  <section class="ds-card" aria-labelledby="checagem">
+    <h2 class="ds-card__titulo" id="checagem">Checagem</h2>
+    <p class="ds-card__texto">
+      A checagem roda uma busca pelo link e vê se ele ainda aparece. Ela não
+      abre a página do site. Cada link consome uma consulta do provedor (até 5
+      por checagem), e o resultado é só um indício.
+    </p>
+    <ul class="ds-lista">
+      <li class="ds-lista__item">
+        <div>
+          <p class="ds-lista__titulo">Última checagem</p>
+          <p class="ds-lista__texto">
+            {% if pedido.checagem_em %}
+            {{ (pedido.checagem_em|string)[:16]|replace("T", " ") }} UTC ·
+            {% if pedido.checagem_resultado == "presente" %}URL ainda aparece
+            {% elif pedido.checagem_resultado == "ausente" %}URL não apareceu
+            {% elif pedido.checagem_resultado == "erro" %}erro na consulta
+            {% else %}registrada{% endif %}
+            {% else %}Ainda não checado.{% endif %}
+          </p>
+        </div>
+      </li>
+      <li class="ds-lista__item">
+        <div>
+          <p class="ds-lista__titulo">Próxima checagem</p>
+          <p class="ds-lista__texto">
+            {% if pedido.proxima_checagem_em %}{{ (pedido.proxima_checagem_em|string)[:10] }}
+            {% else %}Definida quando o pedido for enviado.{% endif %}
+          </p>
+        </div>
+      </li>
+    </ul>
+    <form method="post" action="/remocao/{{ pedido.id }}/checar" class="mt-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Checar agora</button>
+    </form>
+  </section>
+
+  <section class="ds-card" aria-labelledby="links-confirmados">
+    <h2 class="ds-card__titulo" id="links-confirmados">Links do pedido</h2>
+    <ul class="grid gap-2">
+      {% for item in pedido.itens %}
+      <li class="break-words text-sm">
+        {{ item.url }}
+        <details class="mt-1">
+          <summary class="cursor-pointer text-xs text-primaria-clara">Abrir link (pode conter conteúdo adulto)</summary>
+          <p class="ds-dica mt-1">Site externo, não verificado por nós.</p>
+          <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="{{ item.url }}"
+             target="_blank" rel="noopener noreferrer nofollow">Abrir {{ pedido.dominio }}</a>
+        </details>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="ds-card" aria-labelledby="historico-pedido">
+    <h2 class="ds-card__titulo" id="historico-pedido">Histórico</h2>
+    <ul class="ds-lista">
+      {% for evento in pedido.eventos %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo">
+            {{ status_nomes.get(evento.status) or ("Pedido criado" if evento.status == "criado" else "Checagem") }}
+          </p>
+          <p class="ds-lista__texto break-words">
+            {{ (evento.criado_em|string)[:16]|replace("T", " ") }} UTC
+            {% if evento.nota %}· {{ evento.nota }}{% endif %}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <div class="flex flex-wrap gap-2">
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/remocao?target_user_id={{ target_user_id }}">Todos os pedidos</a>
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/revisao?status=leaked&target_user_id={{ target_user_id }}">Links confirmados</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block titulo %}Contatos de abuso{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-4xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Operação</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Contatos de abuso
+    </h1>
+    <p class="ds-card__texto">
+      Quem preenche é você: o app não inventa e-mail, formulário nem URL. Sem
+      contato cadastrado, a criadora vê "cadastre o contato deste site" e o
+      texto para copiar.
+    </p>
+  </header>
+
+  {% if mensagem %}
+  <p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>
+  {% endif %}
+  {% if erro %}
+  <p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>
+  {% endif %}
+
+  <form class="ds-card grid gap-3" method="post" action="/contatos-abuso">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h2 class="ds-card__titulo">Cadastrar ou atualizar</h2>
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="dominio">Domínio</label>
+        <input class="ds-input" id="dominio" name="dominio" value="{{ dominio_prefill or '' }}"
+               placeholder="exemplo.com" required autocapitalize="none" spellcheck="false">
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="email">E-mail de abuso</label>
+        <input class="ds-input" id="email" name="email" type="email"
+               placeholder="abuso@exemplo.com" autocapitalize="none">
+      </div>
+    </div>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="url_formulario">URL do formulário</label>
+      <input class="ds-input" id="url_formulario" name="url_formulario" type="url"
+             placeholder="https://exemplo.com/abuso" autocapitalize="none" spellcheck="false">
+    </div>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="observacao">Observação</label>
+      <textarea class="ds-input" id="observacao" name="observacao" rows="2"
+                placeholder="Ex.: pede o link completo e o e-mail de contato"></textarea>
+    </div>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="dias">Checar pedidos enviados após (dias)</label>
+      <input class="ds-input" id="dias" name="dias" type="number" min="1" max="365"
+             value="{{ dias_checagem }}">
+      <p class="ds-dica">Vale para todos os pedidos desta instalação.</p>
+    </div>
+    <button type="submit" class="ds-btn ds-btn--primario ds-btn--pequeno">Salvar contato</button>
+  </form>
+
+  {% if contatos %}
+  <section class="ds-card" aria-labelledby="lista-contatos">
+    <h2 class="ds-card__titulo" id="lista-contatos">Cadastrados ({{ contatos|length }})</h2>
+    <ul class="ds-lista">
+      {% for contato in contatos %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ contato.dominio }}</p>
+          <p class="ds-lista__texto break-words">
+            {% if contato.email %}E-mail: {{ contato.email }}{% endif %}
+            {% if contato.email and contato.url_formulario %} · {% endif %}
+            {% if contato.url_formulario %}Formulário: {{ contato.url_formulario }}{% endif %}
+            {% if not contato.email and not contato.url_formulario %}Sem e-mail nem formulário{% endif %}
+          </p>
+          {% if contato.observacao %}
+          <p class="ds-lista__texto break-words">{{ contato.observacao }}</p>
+          {% endif %}
+        </div>
+        <form method="post" action="/contatos-abuso/{{ contato.id }}/excluir">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="ds-btn ds-btn--fantasma ds-btn--pequeno">Excluir</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p class="ds-card__texto">Nenhum contato cadastrado ainda.</p>
+  {% endif %}
+</div>
+{% endblock %}

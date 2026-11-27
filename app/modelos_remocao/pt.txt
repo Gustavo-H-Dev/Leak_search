@@ -1,0 +1,17 @@
+Assunto: pedido de remoção de conteúdo
+
+Olá,
+
+Meu nome é {{nome}} e meu arroba é @{{arroba}}.
+
+Peço a remoção do conteúdo publicado sem a minha autorização:
+
+{{urls}}
+
+Descrição: {{descricao}}
+
+Peço que a remoção seja confirmada por e-mail. Posso enviar as informações necessárias para confirmar que o conteúdo é meu, se for preciso.
+
+Obrigada,
+{{nome}} (@{{arroba}})
+{{data}}

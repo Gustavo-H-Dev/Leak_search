@@ -182,7 +182,11 @@
     {% endif %}
 
     {% if status_atual == "leaked" %}
-    <form class="mt-4 flex flex-wrap items-end gap-2" method="post"
+    <a class="ds-btn ds-btn--primario ds-btn--pequeno mt-4"
+       href="/remocao/novo?url={{ candidato.url|urlencode }}&target_user_id={{ target_user_id }}">
+      Remover
+    </a>
+    <form class="mt-2 flex flex-wrap items-end gap-2" method="post"
           action="/revisao/{{ candidato.id }}/remocao">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="target_user_id" value="{{ target_user_id }}">

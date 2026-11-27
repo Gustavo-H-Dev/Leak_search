@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block titulo %}Remoções{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-3xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Remoções</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Pedidos de remoção
+    </h1>
+    <p class="ds-card__texto">
+      Do link confirmado ao pedido enviado. O texto é copiado por você e enviado
+      ao site; aqui ficam o status, as datas e as anotações.
+    </p>
+  </header>
+
+  {% if current_user.role == "admin" and target_users %}
+  <form class="ds-card flex flex-wrap items-end gap-3" method="get" action="/remocao">
+    <div class="ds-campo min-w-0 flex-1">
+      <label class="ds-rotulo" for="target_user_id">Criadora</label>
+      <select class="ds-input" id="target_user_id" name="target_user_id">
+        {% for usuario in target_users %}
+        <option value="{{ usuario.id }}"{% if usuario.id == target_user_id %} selected{% endif %}>
+          {{ usuario.public_name or usuario.username }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Ver</button>
+  </form>
+  {% endif %}
+
+  {% if mensagem %}
+  <p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>
+  {% endif %}
+
+  <nav class="flex flex-wrap gap-2" aria-label="Filtrar pedidos por status">
+    <a class="ds-btn ds-btn--{% if not status_atual %}primario{% else %}fantasma{% endif %} ds-btn--pequeno"
+       href="/remocao?target_user_id={{ target_user_id }}">
+      Todos ({{ total }})
+    </a>
+    {% for chave, rotulo in status_nomes.items() %}
+    <a class="ds-btn ds-btn--{% if status_atual == chave %}primario{% else %}fantasma{% endif %} ds-btn--pequeno"
+       href="/remocao?target_user_id={{ target_user_id }}&status={{ chave }}">
+      {{ rotulo }} ({{ contagens.get(chave, 0) }})
+    </a>
+    {% endfor %}
+  </nav>
+
+  {% if pedidos %}
+  <ul class="grid gap-3">
+    {% for pedido in pedidos %}
+    <li class="ds-card min-w-0">
+      <header class="ds-card__cabecalho">
+        <div class="min-w-0">
+          <p class="ds-lista__texto m-0 break-words">
+            {{ pedido.dominio }} · {{ pedido.itens|length }} link(s)
+            · {{ (pedido.criado_em|string)[:10] }}
+          </p>
+          <h2 class="ds-card__titulo mt-1 break-words">
+            <a class="text-texto no-underline" href="/remocao/{{ pedido.id }}?target_user_id={{ target_user_id }}">
+              Pedido #{{ pedido.id }} — {{ pedido.dominio }}
+            </a>
+          </h2>
+        </div>
+        <span class="ds-badge ds-badge--{% if pedido.status == 'removido' %}sucesso{% elif pedido.status == 'recusado' %}perigo{% elif pedido.status == 'a_enviar' %}alerta{% elif pedido.status == 'enviado' %}info{% else %}neutro{% endif %} shrink-0">
+          {{ status_nomes.get(pedido.status, pedido.status) }}
+        </span>
+      </header>
+
+      <p class="ds-card__texto break-words">
+        {% for item in pedido.itens[:2] %}{{ item.url }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+        {% if pedido.itens|length > 2 %}<br>+ {{ pedido.itens|length - 2 }} outro(s){% endif %}
+      </p>
+
+      {% if pedido.vencido %}
+      <p class="ds-alerta ds-alerta--sucesso" role="status">
+        Checagem de {{ dias_checagem }} dias venceu. Vale rodar a checagem.
+      </p>
+      {% elif pedido.proxima_checagem_em and pedido.status in ("enviado", "aguardando") %}
+      <p class="ds-dica">
+        Próxima checagem: {{ (pedido.proxima_checagem_em|string)[:10] }}.
+      </p>
+      {% endif %}
+
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno mt-2" href="/remocao/{{ pedido.id }}?target_user_id={{ target_user_id }}">
+        Abrir pedido
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <section class="ds-card">
+    <h2 class="ds-card__titulo">Nenhum pedido por aqui</h2>
+    <p class="ds-card__texto">
+      Pedidos nascem de um link confirmado como seu. Marque "É meu" na revisão
+      e use o botão "Remover" no card.
+    </p>
+    <a class="ds-btn ds-btn--primario ds-btn--pequeno" href="/revisao?status=leaked&target_user_id={{ target_user_id }}">
+      Ver links confirmados
+    </a>
+  </section>
+  {% endif %}
+
+  {% if dominios %}
+  <section class="ds-card" aria-labelledby="dominios-confirmados">
+    <h2 class="ds-card__titulo" id="dominios-confirmados">Sites com links confirmados</h2>
+    <ul class="ds-lista">
+      {% for dominio in dominios %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ dominio.dominio }}</p>
+          <p class="ds-lista__texto">
+            {{ dominio.total }} link(s) confirmado(s)
+            {% if dominio.removidos %}· {{ dominio.removidos }} removido(s){% endif %}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

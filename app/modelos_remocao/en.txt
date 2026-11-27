@@ -1,0 +1,17 @@
+Subject: content removal request
+
+Hello,
+
+My name is {{nome}} and my handle is @{{arroba}}.
+
+I am requesting the removal of the content below, which was published without my permission:
+
+{{urls}}
+
+Description: {{descricao}}
+
+Please confirm the removal by email. I can provide whatever information is needed to confirm that the content is mine.
+
+Thank you,
+{{nome}} (@{{arroba}})
+{{data}}
