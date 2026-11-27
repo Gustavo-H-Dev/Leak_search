@@ -249,7 +249,6 @@
 
   // Modal de imagens do Instagram (conteudo ja renderizado no HTML)
   const modalInstagram = document.getElementById("modal-imagens-instagram");
-  const btnVerImagens = document.getElementById("btn-ver-imagens-instagram");
   const fecharModalInstagram = document.getElementById("fechar-modal-instagram");
 
   if (btnVerImagens && modalInstagram) {
@@ -273,15 +272,6 @@
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-<script>
-  document.addEventListener("DOMContentLoaded", function() {
-    var input = document.querySelector("input[name="csrf_token"]");
-    var meta = document.querySelector("meta[name="csrf-token"]");
-    if (meta && input) {
-      input.value = meta.getAttribute("content") || "";
-    }
-  });
-</script>
   `;
   document.head.appendChild(style);
 </script>
