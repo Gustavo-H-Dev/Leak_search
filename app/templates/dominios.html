@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block titulo %}Domínios{% endblock %}
+{% block conteudo %}
+<section class="search-page">
+  <span class="eyebrow">DOMÍNIOS</span>
+  <h1>Domínios suspeitos</h1>
+  <p>
+    Lista global usada na pontuação e nas consultas M2. As sugestões vêm de
+    sinais mensuráveis (nome da criadora no título/URL, termos de vazamento e
+    padrão de hospedagem de arquivos) e <strong>nunca são aprovadas
+    automaticamente</strong>: só depois de
+    {{ minimo_execucoes }} execuções distintas (ou {{ minimo_criadoras }} criadoras)
+    e nota ≥ {{ limiar }}.
+  </p>
+
+  {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
+
+  <nav class="analise-status" aria-label="Filtrar por status">
+    {% for chave in ["sugerido", "aprovado", "rejeitado", "todos"] %}
+    <a class="botao" href="/dominios?status={{ chave }}"
+       {% if status_atual == chave %}aria-current="page"{% endif %}>
+      {% if chave == "todos" %}Todos{% else %}{{ chave|capitalize }}s{% endif %}
+      ({{ contagens.get(chave, dominios|length if chave == "todos" else 0) }})
+    </a>
+    {% endfor %}
+  </nav>
+
+  {% for item in dominios %}
+  <article class="serpapi-card">
+    <h2>{{ item.dominio }}</h2>
+    <p>
+      <strong>Status:</strong> {{ item.status }} ·
+      <strong>Tipo:</strong> {{ item.tipo }} ·
+      <strong>Origem:</strong> {{ item.origem }} ·
+      <strong>Nota:</strong> {{ item.nota }}
+    </p>
+    <p>
+      {{ item.n_aparicoes }} aparições ·
+      {{ item.n_execucoes_distintas }} execuções ·
+      {{ item.n_criadoras_distintas }} criadoras ·
+      {{ item.n_confirmados }} confirmados · {{ item.n_falsos }} falsos
+    </p>
+    {% if item.sinais %}
+    <ul>{% for sinal in item.sinais %}<li>{{ sinal }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if item.exemplo_url %}
+    <p><strong>Exemplo:</strong> <code>{{ item.exemplo_url }}</code></p>
+    {% endif %}
+    {% if item.observacao %}
+    <p class="erro"><strong>Observação:</strong> {{ item.observacao }}</p>
+    {% endif %}
+    {% if item.status == "sugerido" %}
+    <div class="analise-status">
+      <form method="post" action="/dominios/{{ item.dominio }}/status">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="acao" value="aprovar">
+        <label class="field-label" for="tipo-{{ loop.index }}">Tipo ao aprovar</label>
+        <select id="tipo-{{ loop.index }}" name="tipo" required>
+          {% for tipo in tipos %}
+          <option value="{{ tipo }}" {% if tipo == item.tipo %}selected{% endif %}>{{ tipo }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Aprovar</button>
+      </form>
+      <form method="post" action="/dominios/{{ item.dominio }}/status">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="acao" value="rejeitar">
+        <button type="submit">Rejeitar</button>
+      </form>
+    </div>
+    {% endif %}
+  </article>
+  {% else %}
+  <p>Nenhum domínio neste status.</p>
+  {% endfor %}
+</section>
+{% endblock %}

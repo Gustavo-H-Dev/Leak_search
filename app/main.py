@@ -27,6 +27,7 @@ from app.core import (
     analise,
     candidatos as candidatos_core,
     consultas_vazamento,
+    dominios_suspeitos as dominios_core,
     fluxo_busca,
     imagens,
     instagram,
@@ -1597,6 +1598,72 @@ def analise_dados(request: Request):
     )
 
 
+@app.get(
+    "/dominios",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def dominios_suspeitos_pagina(
+    request: Request, status: str = "sugerido", mensagem: str = ""
+):
+    """Revisao humana dos dominios: aprovar (com tipo) ou rejeitar."""
+    if status not in {"sugerido", "aprovado", "rejeitado", "todos"}:
+        status = "sugerido"
+    itens = db.listar_dominios_suspeitos(None if status == "todos" else status)
+    itens.sort(
+        key=lambda item: (
+            -int(item.get("nota") or 0),
+            -int(item["n_execucoes_distintas"] or 0),
+            item["dominio"],
+        )
+    )
+    return templates.TemplateResponse(
+        request,
+        "dominios.html",
+        {
+            "dominios": itens,
+            "status_atual": status,
+            "tipos": dominios_core.TIPOS,
+            "status_opcoes": dominios_core.STATUS,
+            "contagens": {
+                chave: len(db.listar_dominios_suspeitos(chave))
+                for chave in dominios_core.STATUS
+            },
+            "limiar": dominios_core.limiar(),
+            "minimo_execucoes": dominios_core.minimo_execucoes(),
+            "minimo_criadoras": dominios_core.minimo_criadoras(),
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.post("/dominios/{dominio}/status", dependencies=_admin_csrf())
+def atualizar_dominio_suspeito(
+    request: Request,
+    dominio: str,
+    acao: str = Form(...),
+    tipo: str = Form(""),
+):
+    if acao not in {"aprovar", "rejeitar"}:
+        raise HTTPException(status_code=400, detail="Ação inválida.")
+    if acao == "aprovar":
+        # Aprovar exige o tipo escolhido pelo revisor; sem isso nada e gravado.
+        if tipo not in dominios_core.TIPOS:
+            raise HTTPException(status_code=400, detail="Tipo de domínio inválido.")
+        atualizado = db.atualizar_status_dominio(
+            dominio, "aprovado", tipo=tipo
+        )
+        texto = "Domínio aprovado."
+    else:
+        atualizado = db.atualizar_status_dominio(dominio, "rejeitado")
+        texto = "Domínio rejeitado."
+    if not atualizado:
+        raise HTTPException(status_code=404, detail="Domínio não encontrado.")
+    return RedirectResponse(
+        f"/dominios?mensagem={quote(texto)}", status_code=303
+    )
+
+
 @app.get("/candidatos-imagem")
 def candidatos_imagem_legado():
     return RedirectResponse("/valida", status_code=307)
@@ -1616,6 +1683,10 @@ def validar_candidato(
     if candidato is None:
         raise HTTPException(status_code=404, detail="Candidato não encontrado.")
     db.atualizar_status_candidato(candidate_id, alvo["id"], status)
+    try:
+        dominios_core.registrar_feedback(candidato["url"], status)
+    except Exception:
+        logger.exception("Falha ao atualizar o feedback do domínio")
     if status == "leaked":
         db.adicionar_site_vazado(
             alvo["id"],

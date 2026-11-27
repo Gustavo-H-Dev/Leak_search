@@ -7,6 +7,7 @@ from app import db
 from app.core import (
     busca_provedores,
     consultas_vazamento,
+    dominios_suspeitos,
     instagram,
     pontuacao,
     serpapi,
@@ -164,6 +165,7 @@ def executar(
         "variantes": variantes,
         "nome_base": nome_base,
         "grupos": 0,
+        "dominios_sugeridos": 0,
     }
 
     if arroba_invalida:
@@ -255,6 +257,8 @@ def executar(
     # Links do perfil/bio do Instagram entram como paginas oficiais automaticas.
     paginas_oficiais.extend(links_oficiais(criadora_id))
 
+    # Lista aprovada na revisao humana: usada na pontuacao e nas consultas.
+    contexto_dominios = dominios_suspeitos.contexto_aprovado()
     para_salvar = []
     chaves_vistas: set[str] = set()
     for candidato in unicos.values():
@@ -268,6 +272,8 @@ def executar(
             nome=nome,
             variantes=variantes,
             nome_base=nome_base,
+            dominios_aprovados=contexto_dominios["vazamento"],
+            tipos_aprovados=contexto_dominios["tipos"],
         )
         if avaliacao["classificacao"] == "oficial":
             resumo["oficiais"] += 1
@@ -304,6 +310,19 @@ def executar(
     )
     resumo["novos"] = novos
     resumo["atualizados"] = atualizados
+
+    # Sugere dominios novos para revisao humana; nunca aprova sozinho.
+    try:
+        resumo["dominios_sugeridos"] = len(
+            dominios_suspeitos.avaliar_dominios(
+                execucao_id,
+                arrobas=arrobas,
+                variantes=variantes,
+                nome_base=nome_base,
+            )
+        )
+    except Exception:
+        logger.exception("Falha ao avaliar dominios suspeitos da execucao")
 
     if not encontrados and falhas == len(consultas):
         resumo["erro"] = resumo["erros"][0] if resumo["erros"] else "A busca falhou."

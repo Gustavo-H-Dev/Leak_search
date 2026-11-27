@@ -104,6 +104,7 @@ def iniciar_banco():
                 )
         except Exception:
             pass
+        _semear_dominios_iniciais()
         return
 
     with conexao() as conn:
@@ -284,10 +285,12 @@ def iniciar_banco():
             )
         except Exception:
             pass
+        _criar_tabelas_dominios(conn)
     _migrar_sites_oficiais()
     _migrar_usuarios()
     _migrar_criadoras()
     _migrar_busca_provedores()
+    _semear_dominios_iniciais()
 
 
 def _iniciar_banco_postgresql():
@@ -515,6 +518,7 @@ def _iniciar_banco_postgresql():
     with conexao() as conn:
         for comando in comandos:
             conn.execute(comando)
+        _criar_tabelas_dominios(conn)
 
 
 COLUNAS_BUSCA_PROVEDORES = {
@@ -631,6 +635,353 @@ def _criar_tabela_consulta_log(conn):
         "CREATE INDEX IF NOT EXISTS consulta_log_execucao"
         " ON consulta_log (execucao_id, id)"
     )
+
+
+TIPOS_DOMINIO = ("hospedagem_arquivos", "indice_albuns", "agregador_vazamento", "outro")
+STATUS_DOMINIO = ("sugerido", "aprovado", "rejeitado")
+
+
+def _criar_tabelas_dominios(conn):
+    """Dominios suspeitos, ignorados e aparicoes por execucao.
+
+    O registro por execucao (`dominio_execucao`) e o que permite contar
+    execucoes/criadoras distintas sem expor quais criadoras viram o dominio.
+    """
+    tipo_json = "JSONB" if usando_postgresql() else "TEXT"
+    id_execucao = "BIGINT" if usando_postgresql() else "INTEGER"
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS dominio_suspeito (
+            dominio TEXT PRIMARY KEY,
+            tipo TEXT NOT NULL DEFAULT 'outro',
+            status TEXT NOT NULL DEFAULT 'sugerido',
+            origem TEXT NOT NULL DEFAULT 'auto',
+            n_aparicoes INTEGER NOT NULL DEFAULT 0,
+            n_execucoes_distintas INTEGER NOT NULL DEFAULT 0,
+            n_criadoras_distintas INTEGER NOT NULL DEFAULT 0,
+            n_confirmados INTEGER NOT NULL DEFAULT 0,
+            n_falsos INTEGER NOT NULL DEFAULT 0,
+            motivos {tipo_json} NOT NULL DEFAULT '{{}}',
+            exemplo_url TEXT NOT NULL DEFAULT '',
+            primeira_vez_em TEXT,
+            ultima_vez_em TEXT,
+            observacao TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS dominio_suspeito_status"
+        " ON dominio_suspeito (status)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dominio_ignorado (
+            dominio TEXT PRIMARY KEY
+        )
+        """
+    )
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS dominio_execucao (
+            dominio TEXT NOT NULL,
+            execucao_id {id_execucao} NOT NULL,
+            criadora_id {id_execucao},
+            aparicoes INTEGER NOT NULL DEFAULT 0,
+            nota INTEGER NOT NULL DEFAULT 0,
+            criada_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (dominio, execucao_id)
+        )
+        """
+    )
+
+
+def _semear_dominios_iniciais():
+    """Aplica o seed uma vez por boot; falha nunca impede a aplicacao de subir."""
+    try:
+        from app.core import dominios_suspeitos
+
+        dominios_suspeitos.garantir_seed()
+    except Exception:
+        logger.exception("Falha ao semear a lista de dominios suspeitos")
+
+
+def semear_dominios(itens, ignorados=()):
+    """Insere seed/ignorados sem sobrescrever decisao humana (ON CONFLICT)."""
+    agora = _agora_utc()
+    with conexao() as conn:
+        for item in itens or ():
+            dominio = (item.get("dominio") or "").strip().lower()
+            if not dominio:
+                continue
+            tipo = item.get("tipo") if item.get("tipo") in TIPOS_DOMINIO else "outro"
+            status = item.get("status") if item.get("status") in STATUS_DOMINIO else "sugerido"
+            conn.execute(
+                """
+                INSERT INTO dominio_suspeito
+                    (dominio, tipo, status, origem, motivos, primeira_vez_em, ultima_vez_em)
+                VALUES (?, ?, ?, 'seed', ?, ?, ?)
+                ON CONFLICT (dominio) DO NOTHING
+                """,
+                (dominio, tipo, status, _valor_json({}), agora, agora),
+            )
+        for dominio in ignorados or ():
+            dominio = (dominio or "").strip().lower()
+            if not dominio:
+                continue
+            conn.execute(
+                "INSERT INTO dominio_ignorado (dominio) VALUES (?)"
+                " ON CONFLICT (dominio) DO NOTHING",
+                (dominio,),
+            )
+
+
+def _dominio_com_motivos(linha) -> dict:
+    item = dict(linha)
+    motivos = item.get("motivos")
+    if not isinstance(motivos, dict):
+        try:
+            motivos = json.loads(motivos or "{}")
+        except (TypeError, ValueError):
+            motivos = {}
+    item["motivos"] = motivos if isinstance(motivos, dict) else {}
+    item["nota"] = int(item["motivos"].get("nota") or 0)
+    item["sinais"] = item["motivos"].get("sinais") or []
+    return item
+
+
+def obter_dominio_suspeito(dominio):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT dominio, tipo, status, origem, n_aparicoes,
+                   n_execucoes_distintas, n_criadoras_distintas, n_confirmados,
+                   n_falsos, motivos, exemplo_url, primeira_vez_em,
+                   ultima_vez_em, observacao
+            FROM dominio_suspeito WHERE dominio = ?
+            """,
+            ((dominio or "").strip().lower(),),
+        ).fetchone()
+    return _dominio_com_motivos(linha) if linha else None
+
+
+def listar_dominios_suspeitos(status=None):
+    consulta = """
+        SELECT dominio, tipo, status, origem, n_aparicoes,
+               n_execucoes_distintas, n_criadoras_distintas, n_confirmados,
+               n_falsos, motivos, exemplo_url, primeira_vez_em,
+               ultima_vez_em, observacao
+        FROM dominio_suspeito
+    """
+    parametros = ()
+    if status:
+        consulta += " WHERE status = ?"
+        parametros = (status,)
+    consulta += " ORDER BY n_aparicoes DESC, dominio"
+    with conexao() as conn:
+        linhas = conn.execute(consulta, parametros).fetchall()
+    return [_dominio_com_motivos(linha) for linha in linhas]
+
+
+def dominios_aprovados(tipos=None):
+    consulta = (
+        "SELECT dominio, tipo FROM dominio_suspeito WHERE status = 'aprovado'"
+    )
+    parametros = ()
+    if tipos:
+        marcadores = ", ".join("?" for _ in tipos)
+        consulta += f" AND tipo IN ({marcadores})"
+        parametros = tuple(tipos)
+    consulta += " ORDER BY dominio"
+    with conexao() as conn:
+        return [dict(linha) for linha in conn.execute(consulta, parametros).fetchall()]
+
+
+def dominio_ignorado(dominio):
+    with conexao() as conn:
+        return (
+            conn.execute(
+                "SELECT 1 FROM dominio_ignorado WHERE dominio = ?",
+                ((dominio or "").strip().lower(),),
+            ).fetchone()
+            is not None
+        )
+
+
+def listar_dominios_ignorados():
+    with conexao() as conn:
+        return [
+            linha["dominio"]
+            for linha in conn.execute(
+                "SELECT dominio FROM dominio_ignorado ORDER BY dominio"
+            ).fetchall()
+        ]
+
+
+def registrar_execucao_dominio(dominio, execucao_id, criadora_id, aparicoes, nota):
+    """Guarda (uma vez por execucao) que o dominio apareceu, para as contagens."""
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO dominio_execucao
+                (dominio, execucao_id, criadora_id, aparicoes, nota, criada_em)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (dominio, execucao_id) DO UPDATE SET
+                criadora_id = excluded.criadora_id,
+                aparicoes = excluded.aparicoes,
+                nota = excluded.nota
+            """,
+            (
+                (dominio or "").strip().lower(),
+                execucao_id,
+                criadora_id,
+                max(0, int(aparicoes or 0)),
+                int(nota or 0),
+                _agora_utc(),
+            ),
+        )
+
+
+def contagens_do_dominio(dominio):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT COUNT(DISTINCT execucao_id) AS execucoes,
+                   COUNT(DISTINCT criadora_id) AS criadoras,
+                   COALESCE(SUM(aparicoes), 0) AS aparicoes
+            FROM dominio_execucao WHERE dominio = ?
+            """,
+            ((dominio or "").strip().lower(),),
+        ).fetchone()
+    return {
+        "execucoes": int(linha["execucoes"] or 0),
+        "criadoras": int(linha["criadoras"] or 0),
+        "aparicoes": int(linha["aparicoes"] or 0),
+    }
+
+
+def registrar_sugestao_dominio(
+    dominio, nota, sinais, exemplo_url, contagens, observacao=""
+):
+    """Cria ou atualiza a sugestao. Nunca mexe em aprovado/rejeitado."""
+    dominio = (dominio or "").strip().lower()
+    if not dominio:
+        return False
+    agora = _agora_utc()
+    motivos = _valor_json({"nota": int(nota or 0), "sinais": list(sinais or [])})
+    with conexao() as conn:
+        existente = conn.execute(
+            "SELECT status FROM dominio_suspeito WHERE dominio = ?", (dominio,)
+        ).fetchone()
+        if existente is None:
+            conn.execute(
+                """
+                INSERT INTO dominio_suspeito
+                    (dominio, tipo, status, origem, n_aparicoes,
+                     n_execucoes_distintas, n_criadoras_distintas, motivos,
+                     exemplo_url, primeira_vez_em, ultima_vez_em, observacao)
+                VALUES (?, 'outro', 'sugerido', 'auto', ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    dominio,
+                    int(contagens.get("aparicoes") or 0),
+                    int(contagens.get("execucoes") or 0),
+                    int(contagens.get("criadoras") or 0),
+                    motivos,
+                    (exemplo_url or "")[:1000],
+                    agora,
+                    agora,
+                    (observacao or "")[:500],
+                ),
+            )
+            return True
+        if existente["status"] != "sugerido":
+            return False
+        conn.execute(
+            """
+            UPDATE dominio_suspeito SET
+                n_aparicoes = ?, n_execucoes_distintas = ?,
+                n_criadoras_distintas = ?, motivos = ?,
+                exemplo_url = CASE WHEN exemplo_url = '' THEN ? ELSE exemplo_url END,
+                ultima_vez_em = ?,
+                observacao = CASE WHEN observacao = '' THEN ? ELSE observacao END
+            WHERE dominio = ? AND status = 'sugerido'
+            """,
+            (
+                int(contagens.get("aparicoes") or 0),
+                int(contagens.get("execucoes") or 0),
+                int(contagens.get("criadoras") or 0),
+                motivos,
+                (exemplo_url or "")[:1000],
+                agora,
+                (observacao or "")[:500],
+                dominio,
+            ),
+        )
+        return True
+
+
+def atualizar_status_dominio(dominio, status, tipo=None, observacao=None):
+    if status not in STATUS_DOMINIO:
+        raise ValueError("Status de dominio invalido.")
+    campos = ["status = ?", "origem = 'revisao'"]
+    parametros = [status]
+    if tipo:
+        if tipo not in TIPOS_DOMINIO:
+            raise ValueError("Tipo de dominio invalido.")
+        campos.append("tipo = ?")
+        parametros.append(tipo)
+    if observacao is not None:
+        campos.append("observacao = ?")
+        parametros.append(observacao[:500])
+    parametros.append((dominio or "").strip().lower())
+    with conexao() as conn:
+        cur = conn.execute(
+            f"UPDATE dominio_suspeito SET {', '.join(campos)} WHERE dominio = ?",
+            tuple(parametros),
+        )
+        return cur.rowcount > 0
+
+
+def registrar_feedback_dominio(dominio, confirmado, limite=10):
+    """Soma confirmado/falso e marca para revisao quando os falsos dominam."""
+    dominio = (dominio or "").strip().lower()
+    campo = "n_confirmados" if confirmado else "n_falsos"
+    with conexao() as conn:
+        cur = conn.execute(
+            f"UPDATE dominio_suspeito SET {campo} = {campo} + 1 WHERE dominio = ?",
+            (dominio,),
+        )
+        if cur.rowcount == 0:
+            return False
+        linha = conn.execute(
+            "SELECT status, n_confirmados, n_falsos FROM dominio_suspeito"
+            " WHERE dominio = ?",
+            (dominio,),
+        ).fetchone()
+        if (
+            linha["status"] == "aprovado"
+            and int(linha["n_confirmados"] or 0) + int(linha["n_falsos"] or 0) >= limite
+            and int(linha["n_falsos"] or 0) > int(linha["n_confirmados"] or 0)
+        ):
+            conn.execute(
+                "UPDATE dominio_suspeito SET observacao = 'revisar' WHERE dominio = ?",
+                (dominio,),
+            )
+        return True
+
+
+def listar_candidatos_da_execucao(execucao_id):
+    with conexao() as conn:
+        return [
+            dict(linha)
+            for linha in conn.execute(
+                """
+                SELECT url, dominio, title AS titulo, snippet AS trecho
+                FROM search_candidates WHERE execucao_id = ?
+                """,
+                (execucao_id,),
+            ).fetchall()
+        ]
 
 
 def _migrar_sites_oficiais():

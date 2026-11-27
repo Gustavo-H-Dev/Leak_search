@@ -219,6 +219,36 @@ a chave e monitore os custos.
    `COMPARACAO_IMAGEM_ATIVA=false`: nesse modo nenhuma miniatura é baixada,
    processada ou comparada e a SerpAPI também usa a pontuação por regras.
 
+### Domínios suspeitos (revisão humana)
+
+A lista de domínios usada pela pontuação e pelas consultas M2 fica na tabela
+`dominio_suspeito` (status `sugerido`, `aprovado` ou `rejeitado`). Só domínios
+`aprovado` contam: a pontuação soma o sinal de vazamento e as consultas
+`{nome_base} videos {host}` usam os aprovados dos tipos `hospedagem_arquivos` e
+`indice_albuns`. A lista é global e não expõe qual criadora viu cada domínio.
+
+Ao fim de cada execução, `avaliar_dominios` mede sinais objetivos nos
+resultados daquela execução — nome-base/arroba da criadora no título ou URL,
+termos de vazamento no título/trecho e padrão de hospedagem de arquivos
+(`/a/<id>`, `/album/`, `/albums/`, `/f/<id>`, "files", "MB", "GB") — e registra
+em `dominio_execucao`. O domínio só vira `sugerido` quando passa do limite e
+aparece em pelo menos 2 execuções distintas (ou 2 criadoras distintas),
+**nunca** é aprovado automaticamente. Nada é visitado ou baixado: usamos só os
+metadados que o buscador devolveu.
+
+O administrador revisa em `/dominios`, com motivos, contagens e `exemplo_url`,
+e escolhe o tipo ao aprovar. O seed inicial fica em
+`app/core/dominios_seed.yaml` (não no código) e as plataformas que nunca devem
+ser sugeridas em `dominio_ignorado`. Quando um candidato marcado na Valida é
+`leaked`, o domínio soma `n_confirmados`; `not_me`/`official` somam `n_falsos`;
+um domínio aprovado com mais falsos que confirmados após 10 revisões recebe
+`observacao = "revisar"` (nada é removido).
+
+Ajustes por variável de ambiente, todos opcionais: `DOMINIOS_LIMIAR_SUGESTAO`
+(padrão 50), `DOMINIOS_MIN_EXECUCOES` (2), `DOMINIOS_MIN_CRIADORAS` (2),
+`DOMINIOS_LIMITE_REVISOES` (10), `DOMINIOS_TERMOS_VAZAMENTO`,
+`DOMINIOS_PADROES_HOSPEDAGEM`, `DOMINIOS_IGNORADOS`, `DOMINIOS_SEED_ARQUIVO`.
+
 Para administradores, ao carregar a página, o uso do mês, a cota e as consultas restantes são
 consultados automaticamente; o botão **Atualizar saldo** repete a consulta pela
 [Account API](https://serpapi.com/account-api). Essa é uma chamada HTTP separada

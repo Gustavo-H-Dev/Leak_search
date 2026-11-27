@@ -1,3 +1,4 @@
+from app import db
 from app.core import instagram, pontuacao
 
 
@@ -13,7 +14,12 @@ def test_perfil_em_plataforma_diferente_e_oficial_sem_cadastro():
         assert resultado["nota"] == 0
 
 
-def test_pagina_em_dominio_de_vazamento_conhecido_ja_pontua():
+def test_pagina_em_dominio_aprovado_na_revisao_ja_pontua():
+    # A lista deixou de ser fixa no codigo: so dominio aprovado na revisao soma.
+    db.iniciar_banco()
+    db.semear_dominios(
+        [{"dominio": "fapello.com", "tipo": "agregador_vazamento", "status": "aprovado"}]
+    )
     resultado = pontuacao.avaliar(
         "https://fapello.com/ana/",
         "Ana",

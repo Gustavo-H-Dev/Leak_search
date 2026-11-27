@@ -1,0 +1,35 @@
+# Seed inicial da lista de dominios suspeitos de hospedar/indexar vazamentos.
+# Cada dominio do seed entra uma unica vez (ON CONFLICT DO NOTHING); a revisao
+# humana e que muda status depois. Nao acrescente dominios sem revisar.
+seed:
+  - dominio: bunkr.cr
+    tipo: hospedagem_arquivos
+    status: aprovado
+  - dominio: bunkrsearch.com
+    tipo: indice_albuns
+    status: aprovado
+  - dominio: masterfap.net
+    tipo: agregador_vazamento
+    status: aprovado
+  - dominio: thefap.net
+    tipo: outro
+    status: sugerido
+  - dominio: erome.com
+    tipo: outro
+    status: sugerido
+  - dominio: xamadores.com
+    tipo: outro
+    status: sugerido
+
+# Plataformas que nunca devem ser sugeridas. A lista base tambem existe no
+# codigo (dominios_suspeitos.IGNORADOS_PADRAO); o que estiver aqui e somado.
+ignorados:
+  - instagram.com
+  - tiktok.com
+  - x.com
+  - twitter.com
+  - facebook.com
+  - youtube.com
+  - google.com
+  - wikipedia.org
+  - github.com

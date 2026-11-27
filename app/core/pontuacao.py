@@ -9,7 +9,6 @@ import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.core import hosts_busca
-from app.core.dominios_vazamento import DOMINIOS_VAZAMENTO_PADRAO
 
 PARAMETROS_RASTREIO = {
     "utm_source",
@@ -259,15 +258,41 @@ def chave_grupo(url: str) -> str:
     return ""
 
 
-def _dominios_de_vazamento(dominios) -> set[str]:
-    """Configurados pela criadora somados aos conhecidos embutidos."""
+def _contexto_aprovado() -> dict:
+    """Dominios/hosts aprovados na revisao humana (tabela dominio_suspeito).
+
+    Sem banco disponivel devolve contexto vazio: a pontuacao segue apenas com
+    os sites que a propria criadora configurou.
+    """
+    from app.core import dominios_suspeitos
+
+    return dominios_suspeitos.contexto_aprovado()
+
+
+def _dominios_de_vazamento(dominios, aprovados=()) -> set[str]:
+    """So contam os dominios aprovados na revisao, mais os da criadora."""
     configurados = {
         d.strip().lower().removeprefix("www.")
         for d in dominios or ()
         if d and d.strip()
     }
-    return configurados | set(DOMINIOS_VAZAMENTO_PADRAO)
+    aprovados = {
+        d.strip().lower().removeprefix("www.")
+        for d in aprovados or ()
+        if d and d.strip()
+    }
+    return configurados | aprovados
 
+
+def _tipo_aprovado(host: str, tipos: dict) -> str:
+    if not host or not tipos:
+        return ""
+    if host in tipos:
+        return tipos[host]
+    for dominio, tipo in tipos.items():
+        if host.endswith(f".{dominio}"):
+            return tipo
+    return ""
 
 def _em_dominio(host: str, dominios: set[str]) -> str:
     if not host:
@@ -290,6 +315,8 @@ def avaliar(
     nome: str = "",
     variantes=(),
     nome_base: str = "",
+    dominios_aprovados=None,
+    tipos_aprovados=None,
 ) -> dict:
     """Nota 0-100, motivos e classificacao de um candidato.
 
@@ -308,7 +335,15 @@ def avaliar(
 
     host = dominio_de(normalizada)
     arrobas = [a.strip().lstrip("@").lower() for a in arrobas if a and a.strip()]
-    dominios_vazamento = _dominios_de_vazamento(dominios_vazamento)
+    if dominios_aprovados is None or tipos_aprovados is None:
+        contexto = _contexto_aprovado()
+        if dominios_aprovados is None:
+            dominios_aprovados = contexto.get("vazamento") or ()
+        if tipos_aprovados is None:
+            tipos_aprovados = contexto.get("tipos") or {}
+    dominios_vazamento = _dominios_de_vazamento(
+        dominios_vazamento, dominios_aprovados
+    )
     motivos = []
 
     if _pagina_oficial(normalizada, paginas_oficiais):
@@ -363,7 +398,7 @@ def avaliar(
         str(v).strip().lower() for v in variantes or () if str(v).strip()
     ]
     base = " ".join((nome_base or "").split()).lower()
-    tipo_host = hosts_busca.tipo_do_host(host)
+    tipo_host = hosts_busca.tipo_do_host(host) or _tipo_aprovado(host, tipos_aprovados)
     if base and tipo_host in hosts_busca.TIPOS_SINAL_FORTE and _nome_em_texto(
         titulo or "", base
     ):

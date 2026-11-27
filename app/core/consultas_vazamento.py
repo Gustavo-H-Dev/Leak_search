@@ -73,6 +73,23 @@ def _arrobas_limpos(arrobas) -> list[str]:
     return limpos[:MAXIMO_ARROBAS_CONSULTA]
 
 
+def _hosts_aprovados() -> list[dict]:
+    """Hosts dos tipos de arquivos/indice aprovados na revisao humana.
+
+    Usa a lista do banco e mantem os hosts ja configurados em
+    `hosts_busca.json`; sem banco (ou sem tabelas) cai direto no arquivo.
+    """
+    try:
+        from app.core import dominios_suspeitos
+
+        hosts = dominios_suspeitos.hosts_para_consulta()
+        if hosts:
+            return hosts
+    except Exception:
+        pass
+    return [dict(item) for item in hosts_busca.hosts(hosts_busca.TIPOS_CONSULTA)]
+
+
 def _site_ativo(site_ativo) -> bool:
     if site_ativo is not None:
         return bool(site_ativo)
@@ -116,9 +133,7 @@ def gerar_consultas_priorizadas(
 
     base = variantes_nome.nome_base(arrobas)
     hosts_aprovados = (
-        [dict(item) for item in hosts]
-        if hosts is not None
-        else hosts_busca.hosts(hosts_busca.TIPOS_CONSULTA)
+        [dict(item) for item in hosts] if hosts is not None else _hosts_aprovados()
     )
 
     planos: list[dict] = []
