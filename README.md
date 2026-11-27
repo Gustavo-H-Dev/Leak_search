@@ -310,6 +310,43 @@ Para levar um banco SQLite antigo ao PostgreSQL:
 DATABASE_URL='postgresql://...' python -m scripts.migrar_sqlite_para_postgres
 ```
 
+## Escaneamento agendado (fase 3)
+
+Cada criadora agenda uma busca diária ou semanal (padrão: **semanal**) em
+Configurações > Perfis, com horário de Brasília, além do botão **Escanear
+agora**. O site só enfileira; quem executa é um worker separado (RQ + Redis) e
+quem dispara os horários vencidos é o scheduler.
+
+```bash
+docker compose up --build -d
+```
+
+Sobem quatro serviços: `web`, `redis`, `worker` (`python -m app.worker`) e
+`scheduler` (`python -m app.scheduler`). Fora do compose, rode os três processos
+apontando para o mesmo banco e o mesmo Redis.
+
+- `REDIS_URL` — fila (no compose, `redis://redis:6379/0`). Sem ela o botão
+  avisa que a fila não está configurada e nenhuma busca roda.
+- `TINYFISH_REQUISICOES_POR_MINUTO` (padrão 30) — teto **global** de consultas
+  ao TinyFish, compartilhado por todas as criadoras. A janela deslizante fica
+  no Redis, então continua valendo com web, worker e scheduler separados.
+- `BUSCAS_POR_DIA_LIMITE` (padrão 4) — limite diário por criadora.
+  `app_settings.buscas_por_dia_limite` sobrescreve sem reiniciar.
+- `AGENDAMENTO_INTERVALO_SEGUNDOS` (padrão 30) — de quanto em quanto tempo o
+  scheduler procura horários vencidos.
+
+Estados de cada execução: **na fila**, **rodando**, **concluída**, **concluída
+com avisos** e **falhou**. A falha guarda o motivo: `sem_creditos` (HTTP 402),
+`limite_provedor` (HTTP 429), `instagram_bloqueado`, `configuracao`,
+`interrompida` (container caiu no meio) e `fila` (Redis indisponível).
+Configurações > Histórico mostra data, provedor, nº de buscas, novos, duração e
+erro de cada execução.
+
+Reiniciar o container não duplica nada: o horário é reservado no banco antes de
+enfileirar, e o worker só assume a linha que ainda está em "na fila". Uma
+execução presa por mais de `EXECUCAO_ABANDONADA_MINUTOS` (padrão 90) é fechada
+como interrompida para não bloquear a conta.
+
 Para rodar os testes (o `conftest.py` liga um SQLite temporário só na suíte):
 
 ```bash

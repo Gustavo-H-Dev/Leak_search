@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block titulo %}Histórico de execuções{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-4xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Configurações</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Histórico de execuções
+    </h1>
+    <p class="ds-card__texto">
+      Toda busca desta conta, agendada ou disparada no botão: quando rodou,
+      qual provedor, quantas consultas, quantos candidatos novos, quanto tempo
+      levou e o que deu errado.
+    </p>
+  </header>
+
+  {% if execucoes %}
+  <div class="ds-card">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead>
+          <tr class="text-texto-suave">
+            <th class="py-2 pr-3 font-medium">Data (UTC)</th>
+            <th class="py-2 pr-3 font-medium">Status</th>
+            <th class="py-2 pr-3 font-medium">Provedor</th>
+            <th class="py-2 pr-3 font-medium">Buscas</th>
+            <th class="py-2 pr-3 font-medium">Novos</th>
+            <th class="py-2 pr-3 font-medium">Duração</th>
+            <th class="py-2 font-medium">Erros</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for execucao in execucoes %}
+          <tr class="border-t border-borda align-top">
+            <td class="py-2 pr-3 whitespace-nowrap">
+              {{ (execucao.criada_em|string)[:16]|replace("T", " ") }}
+            </td>
+            <td class="py-2 pr-3 whitespace-nowrap">
+              {{ status_textos.get(execucao.status, execucao.status) }}
+              <span class="block text-xs text-texto-suave">{{ execucao.origem }}</span>
+            </td>
+            <td class="py-2 pr-3">{{ provedores.get(execucao.provedor, execucao.provedor) }}</td>
+            <td class="py-2 pr-3">{{ execucao.resumo_json.get("consultas", [])|length }}</td>
+            <td class="py-2 pr-3">{{ execucao.resumo_json.get("novos", 0) }}</td>
+            <td class="py-2 pr-3 whitespace-nowrap">
+              {% if execucao.duracao_ms is not none %}
+              {{ "%.1f"|format(execucao.duracao_ms / 1000) }} s
+              {% else %}—{% endif %}
+            </td>
+            <td class="py-2">
+              {% if execucao.erro %}
+              <span class="text-xs">{{ execucao.erro }}</span>
+              {% elif execucao.motivo_falha %}
+              <span class="text-xs">{{ motivos.get(execucao.motivo_falha, execucao.motivo_falha) }}</span>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <p class="ds-card__texto">
+    Nenhuma execução registrada ainda. Use <strong>Escanear agora</strong> em
+    <a class="text-primaria-clara" href="/configuracoes/perfis">Configurações &gt; Perfis</a>.
+  </p>
+  {% endif %}
+
+  <div class="flex flex-wrap gap-2">
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/configuracoes/perfis">Voltar aos perfis</a>
+  </div>
+</div>
+{% endblock %}

@@ -11,4 +11,6 @@ email-validator
 itsdangerous
 psycopg[binary]
 pyyaml
+rq
+redis
 

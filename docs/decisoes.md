@@ -206,3 +206,68 @@ Consequências aceitas:
   e não há migração de banco nesta fase.
 - As plataformas fora do Instagram nunca tiveram consulta de bio. Como não há
   verificação, todas continuam iguais, sem tratamento especial.
+
+## Fase 3 — Escaneamento agendado (27/11/2026)
+
+### D18 — Fila em worker separado com RQ + Redis
+
+A fase pedia para escolher entre tarefa no processo, worker separado e cron no
+container. Ficou o worker separado: `web` só enfileira, `worker` executa e
+`scheduler` dispara os horários vencidos. O limite global de 30/min precisa ser
+compartilhado entre processos — um contador em memória não serviria — e o Redis
+que a fila exige é o mesmo lugar onde a janela deslizante vive. RQ em vez de
+Celery: o job é uma função Python simples, sem broker extra além do Redis, sem
+beat e sem configuração de tarefas.
+
+### D19 — Reserva no banco em vez de trava distribuída
+
+Dois cuidados substituem um lock de fila: o scheduler avança `proxima_em` com
+`UPDATE ... WHERE proxima_em = <valor lido>` (só um chamador ganha a linha) e o
+worker troca `na_fila` por `rodando` com outro `UPDATE` condicional. Reiniciar
+o container, reentregar um job ou subir dois workers não duplica execução; o
+pior caso é uma execução pulada, que aparece no histórico.
+
+### D20 — Limite global no Redis, com janela deslizante
+
+`TINYFISH_REQUISICOES_POR_MINUTO` (padrão 30) vale para todas as criadoras
+juntas. A janela é deslizante (30 em qualquer intervalo de 60 s, não 30 por
+minuto de relógio) e o script Lua no Redis faz remoção, contagem e inserção
+atomicamente. Sem Redis, o limitador cai para uma janela em memória — correta
+em um processo só — e a fila também não funciona, então não há execução
+silenciosa fora do limite.
+
+### D21 — Limite diário por criadora
+
+`BUSCAS_POR_DIA_LIMITE` (ambiente) → `app_settings.buscas_por_dia_limite` →
+padrão 4. Conta qualquer tentativa do dia local (Brasília), inclusive falha:
+sem isso um erro repetido a cada clique consumiria créditos sem limite. O botão
+Escanear agora e o scheduler passam pela mesma checagem.
+
+### D22 — Estados e motivos de falha
+
+`busca_execucao` ganhou `origem`, `agendamento_id`, `iniciada_em`, `duracao_ms`
+e `motivo_falha`. O status interno `erro` é exibido como "Falhou" (o valor
+antigo foi mantido para não reescrever histórico), e `avisos` cobre execução que
+terminou com erro parcial ou Instagram indisponível. Motivos: `sem_creditos`
+(402), `limite_provedor` (429), `instagram_bloqueado`, `configuracao`,
+`interrompida` e `fila`. Nada de mensagem crua do provedor como único registro.
+
+### D23 — Fuso e padrão
+
+O horário escolhido é o de `America/Sao_Paulo`; o banco guarda UTC. O padrão é
+semanal (segunda-feira, 09:00), como pedido. A próxima execução é recalculada a
+partir do horário reservado, não do momento do enqueue, para não acumular atraso
+quando o scheduler fica parado.
+
+### D24 — Perfis que entram na busca
+
+A fase pedia "só perfis verificados", mas a Fase 2 foi fechada sem verificação
+(D17). Entram os perfis com status **ativo**; pausado não entra. Não existe
+coluna de verificação e nada foi inventado para simular uma.
+
+### D25 — Histórico e contagem para o painel
+
+`/configuracoes/historico` lista só as execuções da própria criadora (data,
+status, provedor, nº de buscas, novos, duração e erro). A contagem de novos da
+última execução aparece no card de perfis e no perfil de busca. A tela admin
+`/execucoes` continua sendo o histórico por consulta, sem mudança.

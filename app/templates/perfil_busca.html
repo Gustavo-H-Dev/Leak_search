@@ -75,6 +75,19 @@
     {% else %}
     <p>Nenhum perfil configurado ainda. Comece pelo passo a passo.</p>
     {% endif %}
+    {% if agendamento %}
+    <p>
+      {% if agendamento.ativo %}
+      Escaneamento agendado: {{ agendamento.resumo }}{% if agendamento.proxima %}, próxima em {{ agendamento.proxima }}{% endif %}.
+      {% else %}
+      Sem escaneamento agendado — o padrão é semanal.
+      {% endif %}
+      {% if agendamento.ultima %}
+      Última execução: {{ agendamento.ultima.resumo_json.get("novos", 0) }} candidato(s) novo(s).
+      {% endif %}
+      <a href="/configuracoes/historico">Ver histórico</a>
+    </p>
+    {% endif %}
     <p>
       <a class="button button-secondary" href="/configuracoes/perfis">Editar perfis monitorados</a>
       <a class="button" href="/onboarding">Abrir o passo a passo</a>

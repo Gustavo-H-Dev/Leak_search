@@ -293,6 +293,21 @@ def iniciar_banco():
                 criada_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 concluida_em TEXT
             );
+            CREATE TABLE IF NOT EXISTS agendamento_busca (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                criadora_id INTEGER NOT NULL UNIQUE
+                    REFERENCES users(id) ON DELETE CASCADE,
+                frequencia TEXT NOT NULL DEFAULT 'semanal',
+                hora INTEGER NOT NULL DEFAULT 9,
+                dia_semana INTEGER NOT NULL DEFAULT 1,
+                ativo INTEGER NOT NULL DEFAULT 1,
+                proxima_em TEXT NOT NULL,
+                ultima_em TEXT,
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TEXT
+            );
+            CREATE INDEX IF NOT EXISTS agendamento_busca_proxima
+            ON agendamento_busca (ativo, proxima_em);
             CREATE TABLE IF NOT EXISTS arroba_descoberto (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 criadora_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -315,6 +330,7 @@ def iniciar_banco():
     _migrar_usuarios()
     _migrar_criadoras()
     _migrar_busca_provedores()
+    _migrar_busca_execucao()
     _semear_dominios_iniciais()
 
 
@@ -562,6 +578,25 @@ def _iniciar_banco_postgresql():
         ON busca_execucao (criadora_id, criada_em DESC)
         """,
         """
+        CREATE TABLE IF NOT EXISTS agendamento_busca (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT NOT NULL UNIQUE
+                REFERENCES users(id) ON DELETE CASCADE,
+            frequencia TEXT NOT NULL DEFAULT 'semanal',
+            hora INTEGER NOT NULL DEFAULT 9,
+            dia_semana INTEGER NOT NULL DEFAULT 1,
+            ativo INTEGER NOT NULL DEFAULT 1,
+            proxima_em TEXT NOT NULL,
+            ultima_em TEXT,
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TEXT
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS agendamento_busca_proxima
+        ON agendamento_busca (ativo, proxima_em)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS arroba_descoberto (
             id BIGSERIAL PRIMARY KEY,
             criadora_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -646,6 +681,46 @@ def _migrar_busca_provedores():
             " WHERE ultima_vez_em IS NULL"
         )
         _criar_tabela_consulta_log(conn)
+
+
+COLUNAS_BUSCA_EXECUCAO = {
+    "origem": "TEXT NOT NULL DEFAULT 'manual'",
+    "agendamento_id": "BIGINT",
+    "iniciada_em": "TEXT",
+    "duracao_ms": "INTEGER",
+    "motivo_falha": "TEXT NOT NULL DEFAULT ''",
+}
+_COLUNAS_BUSCA_EXECUCAO_SQLITE = {
+    "origem": "TEXT NOT NULL DEFAULT 'manual'",
+    "agendamento_id": "INTEGER",
+    "iniciada_em": "TEXT",
+    "duracao_ms": "INTEGER",
+    "motivo_falha": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _migrar_busca_execucao():
+    """Colunas do agendamento na tabela de execucoes, sem apagar historico.
+
+    As execucoes antigas ficam com origem 'manual' e sem duracao; nada e
+    reescrito, so o que faltava passa a existir.
+    """
+    with conexao() as conn:
+        if usando_postgresql():
+            for coluna, tipo in COLUNAS_BUSCA_EXECUCAO.items():
+                conn.execute(
+                    f"ALTER TABLE busca_execucao ADD COLUMN IF NOT EXISTS {coluna} {tipo}"
+                )
+        else:
+            existentes = {
+                coluna["name"]
+                for coluna in conn.execute("PRAGMA table_info(busca_execucao)")
+            }
+            for coluna, tipo in _COLUNAS_BUSCA_EXECUCAO_SQLITE.items():
+                if coluna not in existentes:
+                    conn.execute(
+                        f"ALTER TABLE busca_execucao ADD COLUMN {coluna} {tipo}"
+                    )
 
 
 def _criar_tabela_consulta_log(conn):
@@ -1729,19 +1804,196 @@ def urls_conhecidas(user_id):
         }
 
 
-def criar_busca_execucao(criadora_id, provedor, termos):
+def criar_busca_execucao(
+    criadora_id,
+    provedor,
+    termos,
+    *,
+    status="rodando",
+    origem="manual",
+    agendamento_id=None,
+):
     agora = _agora_utc()
     with conexao() as conn:
         cur = conn.execute(
             """
             INSERT INTO busca_execucao
-                (criadora_id, provedor, termos_json, status, criada_em)
-            VALUES (?, ?, ?, 'rodando', ?)
+                (criadora_id, provedor, termos_json, status, origem,
+                 agendamento_id, criada_em, iniciada_em)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
-            (criadora_id, provedor, _valor_json(list(termos)), agora),
+            (
+                criadora_id,
+                provedor,
+                _valor_json(list(termos)),
+                status,
+                origem,
+                agendamento_id,
+                agora,
+                agora if status == "rodando" else None,
+            ),
         )
         return cur.fetchone()["id"]
+
+
+def reservar_execucao(execucao_id):
+    """Poe a execucao em 'rodando' de forma atomica.
+
+    Falso quando outro worker (ou outra tentativa nossa) ja pegou a linha: e a
+    trava que impede a mesma execucao rodar duas vezes depois de um reinicio.
+    """
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE busca_execucao
+               SET status = 'rodando', iniciada_em = ?
+             WHERE id = ? AND status = 'na_fila'
+            """,
+            (_agora_utc(), execucao_id),
+        )
+        return cur.rowcount > 0
+
+
+def finalizar_busca_execucao(
+    execucao_id,
+    *,
+    status,
+    resumo=None,
+    erro="",
+    motivo_falha="",
+    erro_instagram=None,
+):
+    campos = [
+        "status = ?",
+        "resumo_json = ?",
+        "erro = ?",
+        "motivo_falha = ?",
+        "concluida_em = ?",
+    ]
+    parametros = [
+        status,
+        _valor_json(resumo or {}),
+        (erro or "")[:2000],
+        (motivo_falha or "")[:40],
+        _agora_utc(),
+    ]
+    if erro_instagram is not None:
+        campos.append("erro_instagram = ?")
+        parametros.append((erro_instagram or "")[:2000])
+    parametros.append(execucao_id)
+    with conexao() as conn:
+        conn.execute(
+            f"UPDATE busca_execucao SET {', '.join(campos)} WHERE id = ?",
+            tuple(parametros),
+        )
+
+
+def registrar_duracao_execucao(execucao_id, duracao_ms):
+    with conexao() as conn:
+        conn.execute(
+            "UPDATE busca_execucao SET duracao_ms = ? WHERE id = ?",
+            (int(max(0, duracao_ms)), execucao_id),
+        )
+
+
+def execucao_em_andamento(criadora_id):
+    """Execucao que ainda vai rodar ou esta rodando agora."""
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT id, status, origem FROM busca_execucao
+            WHERE criadora_id = ? AND status IN ('na_fila', 'rodando')
+            ORDER BY id DESC LIMIT 1
+            """,
+            (criadora_id,),
+        ).fetchone()
+    return dict(linha) if linha else None
+
+
+def contar_execucoes_desde(criadora_id, desde_iso):
+    """Buscas desta criadora desde o inicio do dia local (qualquer status).
+
+    Falha conta como tentativa: o limite diario tambem protege contra um erro
+    que se repete a cada clique.
+    """
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT COUNT(*) AS total FROM busca_execucao
+            WHERE criadora_id = ? AND criada_em >= ?
+            """,
+            (criadora_id, desde_iso),
+        ).fetchone()
+    return int((linha["total"] if linha else 0) or 0)
+
+
+def _execucao_com_resumo(registro):
+    registro = dict(registro)
+    valor = registro.get("resumo_json")
+    if not isinstance(valor, (dict, list)):
+        try:
+            registro["resumo_json"] = json.loads(valor or "{}")
+        except (TypeError, ValueError):
+            registro["resumo_json"] = {}
+    return registro
+
+
+def ultima_execucao(criadora_id):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT id, criadora_id, provedor, status, origem, erro, motivo_falha,
+                   erro_instagram, resumo_json, criada_em, iniciada_em,
+                   concluida_em, duracao_ms
+            FROM busca_execucao
+            WHERE criadora_id = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (criadora_id,),
+        ).fetchone()
+    return _execucao_com_resumo(linha) if linha else None
+
+
+def listar_execucoes_criadora(criadora_id, limite=30):
+    """Historico do agendamento: data, provedor, buscas, novos, duracao, erro."""
+    with conexao() as conn:
+        linhas = conn.execute(
+            """
+            SELECT id, provedor, status, origem, erro, motivo_falha,
+                   erro_instagram, resumo_json, criada_em, iniciada_em,
+                   concluida_em, duracao_ms
+            FROM busca_execucao
+            WHERE criadora_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (criadora_id, int(limite)),
+        ).fetchall()
+    return [_execucao_com_resumo(linha) for linha in linhas]
+
+
+def marcar_execucoes_abandonadas(minutos=60):
+    """Fecha execucoes que ficaram presas em na_fila/rodando.
+
+    Acontece quando o container morre no meio; sem isso a criadora ficaria
+    bloqueada por uma execucao que nunca termina. O motivo deixa claro que nao
+    foi o provedor, e sim uma interrupcao.
+    """
+    limite = datetime.now(timezone.utc) - timedelta(minutes=int(minutos))
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE busca_execucao
+               SET status = 'erro', motivo_falha = 'interrompida',
+                   erro = 'A execucao foi interrompida antes de terminar.',
+                   concluida_em = ?
+             WHERE status IN ('na_fila', 'rodando')
+               AND COALESCE(iniciada_em, criada_em) < ?
+            """,
+            (_agora_utc(), limite.isoformat()),
+        )
+        return cur.rowcount
 
 
 def atualizar_busca_execucao(
@@ -1779,7 +2031,8 @@ def obter_busca_execucao(execucao_id):
     with conexao() as conn:
         linha = conn.execute(
             """
-            SELECT id, criadora_id, provedor, termos_json, status,
+            SELECT id, criadora_id, provedor, termos_json, status, origem,
+                   agendamento_id, iniciada_em, duracao_ms, motivo_falha,
                    erro_instagram, erro, resumo_json, criada_em, concluida_em
             FROM busca_execucao WHERE id = ?
             """,
@@ -1797,6 +2050,122 @@ def obter_busca_execucao(execucao_id):
         except (TypeError, ValueError):
             registro[chave] = [] if chave == "termos_json" else {}
     return registro
+
+
+# ------------------------------------------------------------- agendamento
+
+LIMITE_BUSCAS_DIA_PADRAO = 4
+
+
+def limite_buscas_por_dia() -> int:
+    """Buscas diarias por criadora: ambiente, depois app_settings, depois 4."""
+    do_ambiente = os.getenv("BUSCAS_POR_DIA_LIMITE", "").strip()
+    if do_ambiente:
+        try:
+            return max(1, int(do_ambiente))
+        except ValueError:
+            pass
+    valor = obter_configuracao("buscas_por_dia_limite", "").strip()
+    if valor:
+        try:
+            return max(1, int(valor))
+        except ValueError:
+            pass
+    return LIMITE_BUSCAS_DIA_PADRAO
+
+
+def salvar_agendamento_busca(
+    criadora_id, frequencia, hora, dia_semana, proxima_em, ativo=1
+):
+    agora = _agora_utc()
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO agendamento_busca
+                (criadora_id, frequencia, hora, dia_semana, ativo, proxima_em,
+                 criado_em, atualizado_em)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (criadora_id) DO UPDATE SET
+                frequencia = excluded.frequencia,
+                hora = excluded.hora,
+                dia_semana = excluded.dia_semana,
+                ativo = excluded.ativo,
+                proxima_em = excluded.proxima_em,
+                atualizado_em = excluded.atualizado_em
+            """,
+            (
+                criadora_id,
+                frequencia,
+                int(hora),
+                int(dia_semana),
+                int(ativo),
+                proxima_em,
+                agora,
+                agora,
+            ),
+        )
+
+
+def obter_agendamento_busca(criadora_id):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT id, criadora_id, frequencia, hora, dia_semana, ativo,
+                   proxima_em, ultima_em, criado_em, atualizado_em
+            FROM agendamento_busca WHERE criadora_id = ?
+            """,
+            (criadora_id,),
+        ).fetchone()
+    return dict(linha) if linha else None
+
+
+def desativar_agendamento_busca(criadora_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE agendamento_busca SET ativo = 0, atualizado_em = ?
+            WHERE criadora_id = ?
+            """,
+            (_agora_utc(), criadora_id),
+        )
+        return cur.rowcount > 0
+
+
+def listar_agendamentos_vencidos(agora_iso, limite=20):
+    """Agendamentos ativos cuja hora ja passou, com a criadora junto."""
+    with conexao() as conn:
+        linhas = conn.execute(
+            """
+            SELECT a.id AS agendamento_id, a.criadora_id, a.frequencia, a.hora,
+                   a.dia_semana, a.proxima_em, u.username, u.public_name,
+                   u.public_handle
+            FROM agendamento_busca a
+            JOIN users u ON u.id = a.criadora_id
+            WHERE a.ativo = 1 AND a.proxima_em <= ?
+            ORDER BY a.proxima_em
+            LIMIT ?
+            """,
+            (agora_iso, int(limite)),
+        ).fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def reservar_agendamento_busca(agendamento_id, proxima_esperada, proxima_nova):
+    """Avanca a proxima execucao so se ninguem avancou antes.
+
+    Devolve True para exatamente um chamador. E o que impede dois ticks do
+    scheduler (ou um reinicio no meio) de enfileirarem a mesma busca duas vezes.
+    """
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE agendamento_busca
+               SET proxima_em = ?, ultima_em = ?, atualizado_em = ?
+             WHERE id = ? AND proxima_em = ? AND ativo = 1
+            """,
+            (proxima_nova, _agora_utc(), _agora_utc(), agendamento_id, proxima_esperada),
+        )
+        return cur.rowcount > 0
 
 
 def registrar_consulta_log(

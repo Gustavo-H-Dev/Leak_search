@@ -27,6 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import db
 from app.core import (
+    agendamento,
     autenticacao,
     busca_provedores,
     busca_web,
@@ -867,6 +868,7 @@ def perfil_busca(request: Request, erro: str = "", mensagem: str = ""):
             "usuario": usuario,
             "fotos": db.listar_fotos_busca(usuario["id"]),
             "perfis": db.listar_perfis_monitorados(usuario["id"]),
+            "agendamento": agendamento.estado(usuario["id"]),
             "erro": erro,
             "mensagem": mensagem,
         },
@@ -1006,6 +1008,9 @@ def _contexto_perfis(request: Request, erro: str = "", mensagem: str = "") -> di
             if texto not in textos
         ],
         "limite_perfis": db.limite_perfis_monitorados(),
+        "agendamento": agendamento.estado(criadora_id),
+        "status_textos": agendamento.STATUS_TEXTOS,
+        "motivos": agendamento.MOTIVOS_FALHA,
         "erro": erro,
         "mensagem": mensagem,
     }
@@ -1023,6 +1028,58 @@ def configuracoes_perfis(request: Request, erro: str = "", mensagem: str = ""):
     contexto = _contexto_perfis(request, erro, mensagem)
     contexto["passo"] = 1
     return templates.TemplateResponse(request, "perfis_monitorados.html", contexto)
+
+
+def _voltar_para_perfis(chave: str, texto: str):
+    return RedirectResponse(
+        f"/configuracoes/perfis?{chave}={quote(texto)}", status_code=303
+    )
+
+
+@app.post("/configuracoes/agendamento", dependencies=_csrf())
+def salvar_agendamento_da_criadora(
+    request: Request,
+    frequencia: str = Form("semanal"),
+    hora: str = Form("9"),
+    dia_semana: str = Form("0"),
+):
+    """Agenda diaria ou semanal da propria criadora (padrao: semanal)."""
+    try:
+        agendamento.salvar(request.state.user["id"], frequencia, hora, dia_semana)
+    except ValueError as falha:
+        return _voltar_para_perfis("erro", str(falha))
+    return _voltar_para_perfis("mensagem", "Agendamento salvo.")
+
+
+@app.post("/configuracoes/agendamento/desligar", dependencies=_csrf())
+def desligar_agendamento_da_criadora(request: Request):
+    if not agendamento.desativar(request.state.user["id"]):
+        return _voltar_para_perfis("mensagem", "Não havia agendamento para desligar.")
+    return _voltar_para_perfis("mensagem", "Agendamento desligado.")
+
+
+@app.post("/configuracoes/escanear-agora", dependencies=_csrf())
+def escanear_agora(request: Request):
+    """Coloca uma busca na fila sem esperar o horario agendado."""
+    execucao_id, mensagem = agendamento.disparar_agora(
+        request.state.user["id"], origem="manual"
+    )
+    return _voltar_para_perfis("mensagem" if execucao_id else "erro", mensagem)
+
+
+@app.get("/configuracoes/historico", response_class=HTMLResponse)
+def historico_de_execucoes(request: Request):
+    """Historico da propria criadora: data, provedor, buscas, novos, duracao."""
+    return templates.TemplateResponse(
+        request,
+        "historico.html",
+        {
+            "execucoes": db.listar_execucoes_criadora(request.state.user["id"]),
+            "motivos": agendamento.MOTIVOS_FALHA,
+            "status_textos": agendamento.STATUS_TEXTOS,
+            "provedores": busca_provedores.PROVEDORES_NOMES,
+        },
+    )
 
 
 @app.post("/onboarding/perfis", dependencies=_csrf())

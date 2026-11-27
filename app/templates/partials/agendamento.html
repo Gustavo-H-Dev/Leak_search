@@ -1,0 +1,119 @@
+{% from "componentes/_badge.html" import badge %}
+{# Escaneamento agendado + "Escanear agora".
+   Espera `agendamento` (estado) e `csrf_token` no contexto. #}
+<section class="ds-card" aria-labelledby="agendamento-titulo">
+  <header class="ds-card__cabecalho">
+    <div>
+      <h2 class="ds-card__titulo" id="agendamento-titulo">Escaneamento agendado</h2>
+      <p class="ds-card__texto">
+        A busca roda sozinha no horário escolhido, no fuso de Brasília.
+        {% if agendamento.ativo %}
+        Agora: <strong>{{ agendamento.resumo }}</strong>.
+        {% else %}
+        Agendamento desligado — o padrão é semanal.
+        {% endif %}
+      </p>
+    </div>
+    {% if agendamento.ativo %}
+    {{ badge("Ativo", "sucesso") }}
+    {% else %}
+    {{ badge("Desligado", "neutro") }}
+    {% endif %}
+  </header>
+
+  <ul class="ds-lista">
+    <li class="ds-lista__item">
+      <div>
+        <p class="ds-lista__titulo">Próxima execução</p>
+        <p class="ds-lista__texto">
+          {{ agendamento.proxima if agendamento.ativo and agendamento.proxima else "Nada agendado" }}
+        </p>
+      </div>
+    </li>
+    <li class="ds-lista__item">
+      <div>
+        <p class="ds-lista__titulo">Buscas hoje</p>
+        <p class="ds-lista__texto">
+          {{ agendamento.usadas_hoje }} de {{ agendamento.limite_dia }} permitidas por dia
+          {% if agendamento.em_andamento %}
+          · uma busca está {{ "na fila" if agendamento.em_andamento.status == "na_fila" else "rodando" }}
+          {% endif %}
+        </p>
+      </div>
+      {% if agendamento.em_andamento %}{{ badge("Em andamento", "info") }}{% endif %}
+    </li>
+    <li class="ds-lista__item">
+      <div>
+        <p class="ds-lista__titulo">Última execução</p>
+        <p class="ds-lista__texto">
+          {% if agendamento.ultima %}
+          {{ status_textos.get(agendamento.ultima.status, agendamento.ultima.status) }} ·
+          {{ agendamento.ultima.resumo_json.get("novos", 0) }} novo(s) ·
+          {{ agendamento.ultima.origem }} ·
+          {{ (agendamento.ultima.criada_em|string)[:16]|replace("T", " ") }} UTC
+          {% if agendamento.ultima.motivo_falha %}
+          · {{ motivos.get(agendamento.ultima.motivo_falha, agendamento.ultima.motivo_falha) }}
+          {% endif %}
+          {% else %}
+          Nenhuma execução registrada ainda.
+          {% endif %}
+        </p>
+      </div>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/configuracoes/historico">Histórico</a>
+    </li>
+  </ul>
+
+  {% if not agendamento.provedor %}
+  <p class="ds-alerta" role="status">
+    Nenhum provedor configurado: defina <code>SERPAPI_API_KEY</code> ou
+    <code>TINYFISH_API_KEY</code> no servidor para as buscas rodarem.
+  </p>
+  {% endif %}
+
+  <form method="post" action="/configuracoes/agendamento" class="ds-form mt-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="grid gap-3 sm:grid-cols-3">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="ag-frequencia">Frequência</label>
+        <select class="ds-input" id="ag-frequencia" name="frequencia">
+          {% for valor, texto in agendamento.frequencias.items() %}
+          <option value="{{ valor }}"{% if agendamento.frequencia == valor %} selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="ag-hora">Horário (Brasília)</label>
+        <select class="ds-input" id="ag-hora" name="hora">
+          {% for hora in agendamento.horas %}
+          <option value="{{ hora }}"{% if agendamento.hora == hora %} selected{% endif %}>{{ "%02d:00"|format(hora) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="ag-dia">Dia da semana</label>
+        <select class="ds-input" id="ag-dia" name="dia_semana">
+          {% for valor, texto in agendamento.dias_semana %}
+          <option value="{{ valor }}"{% if agendamento.dia_semana == valor %} selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+        <p class="ds-dica">Usado só na frequência semanal.</p>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="submit" class="ds-btn ds-btn--primario">Salvar agendamento</button>
+    </div>
+  </form>
+
+  <div class="mt-4 flex flex-wrap gap-2">
+    <form method="post" action="/configuracoes/escanear-agora">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="ds-btn ds-btn--secundario">Escanear agora</button>
+    </form>
+    {% if agendamento.ativo %}
+    <form method="post" action="/configuracoes/agendamento/desligar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="ds-btn ds-btn--fantasma">Desligar agendamento</button>
+    </form>
+    {% endif %}
+  </div>
+</section>

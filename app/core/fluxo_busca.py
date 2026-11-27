@@ -138,13 +138,19 @@ def executar(
     engine: str = "google_images_light",
     parametros: dict | None = None,
     consultas=None,
+    execucao_id: int | None = None,
 ) -> dict:
-    """Executa a busca completa e devolve o resumo final da execucao."""
+    """Executa a busca completa e devolve o resumo final da execucao.
+
+    `execucao_id` permite reaproveitar a linha ja criada pela fila (status
+    'na_fila' -> 'rodando'); sem ele, a execucao e criada aqui, como antes.
+    """
     # SQLite devolve sqlite3.Row (sem .get); o fluxo usa dicionario.
     criadora = dict(criadora)
     criadora_id = criadora["id"]
     total_consultas = _consultas_por_execucao(limite)
-    execucao_id = db.criar_busca_execucao(criadora_id, provedor, termos)
+    if execucao_id is None:
+        execucao_id = db.criar_busca_execucao(criadora_id, provedor, termos)
 
     nome = (criadora.get("public_name") or "").strip()
     erro_instagram, arroba_invalida = _passo_instagram(criadora)

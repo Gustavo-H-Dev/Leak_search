@@ -1,10 +1,11 @@
 """Cliente TinyFish (TinySearch) para busca web por texto."""
 
 import os
-import threading
 import time
 
 import httpx
+
+from app.core import limite_taxa
 
 API_URL = "https://api.search.tinyfish.ai"
 TIMEOUT = 30
@@ -26,10 +27,7 @@ class TinyFishSemCreditos(ErroTinyFish):
 
 
 def _limite_por_minuto() -> int:
-    try:
-        return max(1, int(os.getenv("TINYFISH_REQUISICOES_POR_MINUTO", "30")))
-    except ValueError:
-        return 30
+    return limite_taxa.limite_por_minuto()
 
 
 def _chave() -> str:
@@ -41,21 +39,9 @@ def _chave() -> str:
     return chave
 
 
-_controle = threading.Lock()
-_ultima_requisicao = 0.0
-
-
 def _aguardar_janela() -> None:
-    """Mantem no maximo o limite por minuto, sem rajadas."""
-    global _ultima_requisicao
-    intervalo = 60.0 / _limite_por_minuto()
-    with _controle:
-        agora = time.monotonic()
-        espera = _ultima_requisicao + intervalo - agora
-        if espera > 0:
-            time.sleep(espera)
-            agora = time.monotonic()
-        _ultima_requisicao = agora
+    """Espera a vaga no limite global (Redis) ou na janela local."""
+    limite_taxa.aguardar_tinyfish()
 
 
 def _mensagem_de_erro(resposta: httpx.Response) -> str:

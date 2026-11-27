@@ -1,36 +1,71 @@
+x-app-ambiente: &app-ambiente
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: ${DATABASE_URL:-}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  MEDIA_DIR: ${MEDIA_DIR:-/code/media/oficiais}
+  SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
+  TINYFISH_API_KEY: ${TINYFISH_API_KEY:-}
+  TINYFISH_REQUISICOES_POR_MINUTO: ${TINYFISH_REQUISICOES_POR_MINUTO:-30}
+  BUSCAS_POR_DIA_LIMITE: ${BUSCAS_POR_DIA_LIMITE:-4}
+  COMPARACAO_IMAGEM_ATIVA: ${COMPARACAO_IMAGEM_ATIVA:-false}
+  PONTUACAO_LIMIAR_VAZAMENTO: ${PONTUACAO_LIMIAR_VAZAMENTO:-60}
+  PONTUACAO_LIMIAR_REVISAO: ${PONTUACAO_LIMIAR_REVISAO:-30}
+  BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+  TINEYE_API_KEY: ${TINEYE_API_KEY:-}
+  DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
+  DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
+  SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-Gustavo.souza}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8000}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_FROM: ${SMTP_FROM:-}
+  EMAIL_VERIFICATION_REQUIRED: ${EMAIL_VERIFICATION_REQUIRED:-false}
+
 services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    restart: unless-stopped
+
   web:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
-    environment:
-      APP_ENV: ${APP_ENV:-development}
-      DATABASE_URL: ${DATABASE_URL:-}
-      MEDIA_DIR: ${MEDIA_DIR:-/code/media/oficiais}
-      SERPAPI_API_KEY: ${SERPAPI_API_KEY:-}
-      TINYFISH_API_KEY: ${TINYFISH_API_KEY:-}
-      COMPARACAO_IMAGEM_ATIVA: ${COMPARACAO_IMAGEM_ATIVA:-false}
-      PONTUACAO_LIMIAR_VAZAMENTO: ${PONTUACAO_LIMIAR_VAZAMENTO:-60}
-      PONTUACAO_LIMIAR_REVISAO: ${PONTUACAO_LIMIAR_REVISAO:-30}
-      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
-      TINEYE_API_KEY: ${TINEYE_API_KEY:-}
-      DATAFORSEO_LOGIN: ${DATAFORSEO_LOGIN:-}
-      DATAFORSEO_PASSWORD: ${DATAFORSEO_PASSWORD:-}
-      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-Gustavo.souza}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8000}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      EMAIL_VERIFICATION_REQUIRED: ${EMAIL_VERIFICATION_REQUIRED:-false}
+    environment: *app-ambiente
+    depends_on:
+      - redis
     volumes:
       - ./app:/code/app
       - ./media:/code/media
+      - ./data:/code/data
+
+  worker:
+    build: .
+    command: python -m app.worker
+    environment: *app-ambiente
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./app:/code/app
+      - ./media:/code/media
+      - ./data:/code/data
+
+  scheduler:
+    build: .
+    command: python -m app.scheduler
+    environment: *app-ambiente
+    depends_on:
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./app:/code/app
       - ./data:/code/data
