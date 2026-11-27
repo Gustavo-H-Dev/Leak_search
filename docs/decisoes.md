@@ -179,3 +179,30 @@ Nada é agendado e nenhuma mídia é baixada: só metadados.
   Migrar uma por fase e só então remover `legado.css`.
 - "Remoções" precisa de página e fluxo próprios.
 - Cliente não tem histórico por criadora; por isso o item é oculto para ele.
+
+## Fase 2 — Verificação de titularidade (27/11/2026)
+
+### D17 — Sem verificação de titularidade nesta fase
+
+Decisão: não implementar verificação, nem por código na bio nem por documento
+manual. O cadastro de perfil segue livre: qualquer conta pode salvar qualquer
+arroba em `perfil_monitorado`, e o perfil entra na pontuação e nas buscas na
+hora, sem estado intermediário de "pendente".
+
+Descartadas: código temporário na bio (`verif-XXXXX`, 48 h, conferência pela
+bio pública com `instagram.buscar_perfil`, status verificado, auditoria e
+bloqueio de escaneamento/remoção enquanto pendente) e documento verificado
+manualmente.
+
+Consequências aceitas:
+
+- Sem status pendente não há o que bloquear, então o critério de aceite da fase
+  (teste provando o bloqueio em todas as rotas de escaneamento e remoção) não
+  se aplica: a fase não altera rotas.
+- Continua possível cadastrar o perfil de outra pessoa. Se isso virar problema,
+  a fase volta com o desenho do código na bio — a leitura da bio já existe em
+  `app/core/instagram.py` e o caminho de gravação em `fluxo_busca`.
+- Os perfis já cadastrados não foram apagados; nada muda para quem já configurou
+  e não há migração de banco nesta fase.
+- As plataformas fora do Instagram nunca tiveram consulta de bio. Como não há
+  verificação, todas continuam iguais, sem tratamento especial.
