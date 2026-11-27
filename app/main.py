@@ -42,12 +42,14 @@ from app.core import (
     fluxo_busca,
     imagens,
     instagram,
+    limite_taxa,
     pdf_simples,
     perfis_monitorados as perfis_core,
     pontuacao,
     provedores_busca,
     remocao as remocao_core,
     revisao as revisao_core,
+    seguranca,
     serpapi,
     sites_oficiais,
     tinyfish,
@@ -102,6 +104,7 @@ app.add_middleware(
     same_site="lax",
     https_only=os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes"},
 )
+app.add_middleware(seguranca.CabecalhosSeguranca)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
@@ -281,8 +284,37 @@ async def login(
     senha: str = Form(...),
     next: str = Form("/"),
 ):
+    ip = seguranca.ip_do_cliente(request)
+    tentativas = db.tentativas_login_recentes(username, ip)
+    if max(tentativas["por_usuario"], tentativas["por_ip"]) >= db.MAX_TENTATIVAS_LOGIN:
+        db.registrar_auditoria(
+            "login_bloqueado",
+            alvo_tipo="login",
+            alvo_id=username.strip(),
+            detalhe="Limite de tentativas em 15 minutos.",
+            ip=ip,
+        )
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "erro": "Muitas tentativas. Aguarde 15 minutos e tente de novo.",
+                "mensagem": "",
+                "next": _proximo_caminho(next),
+            },
+            status_code=429,
+        )
     usuario = db.obter_usuario_por_login(username.strip())
     if not usuario or not autenticacao.verificar_senha(usuario["password_hash"], senha):
+        db.registrar_tentativa_login(username, ip)
+        if max(tentativas["por_usuario"], tentativas["por_ip"]) + 1 >= db.MAX_TENTATIVAS_LOGIN:
+            db.registrar_auditoria(
+                "login_falha",
+                alvo_tipo="login",
+                alvo_id=username.strip(),
+                detalhe="Atingiu o limite de tentativas em 15 minutos.",
+                ip=ip,
+            )
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -293,6 +325,7 @@ async def login(
             },
             status_code=400,
         )
+    db.limpar_tentativas_login(username, ip)
     if not usuario["email_verified"] and autenticacao.confirmacao_email_obrigatoria():
         return templates.TemplateResponse(
             request,
@@ -310,6 +343,7 @@ async def login(
         db.atualizar_senha(
             usuario["id"], autenticacao.hash_senha(senha)
         )
+    db.limpar_tentativas_login(username, ip)
     _nova_sessao(request, usuario["id"])
     return RedirectResponse(_proximo_caminho(next), status_code=303)
 
@@ -1027,7 +1061,7 @@ def _contexto_perfis(request: Request, erro: str = "", mensagem: str = "") -> di
             for texto in perfis_core.sugerir_variantes(criadora_id)
             if texto not in textos
         ],
-        "limite_perfis": db.limite_perfis_monitorados(),
+        "limite_perfis": db.limite_perfis_monitorados(criadora_id),
         "preferencias_aviso": db.obter_preferencia_aviso(criadora_id),
         "avisos_recentes": db.listar_avisos_usuario(criadora_id),
         "avisos_tipos": avisos_core.TIPOS,
@@ -1140,6 +1174,14 @@ def salvar_perfis_monitorados(
         try:
             if perfis_core.salvar_perfil(criadora_id, escolhida, valor):
                 adicionados += 1
+                db.registrar_auditoria(
+                    "perfil_criado",
+                    actor=request.state.user,
+                    alvo_tipo="perfil",
+                    alvo_id=valor,
+                    detalhe=escolhida,
+                    ip=seguranca.ip_do_cliente(request),
+                )
         except ValueError as falha:
             return _redirecionar_com(destino, 1, "erro", str(falha))
     if not adicionados:
@@ -1172,6 +1214,13 @@ def excluir_perfil_monitorado(
     destino = _destino_do_formulario(voltar_para)
     if not db.excluir_perfil_monitorado(perfil_id, request.state.user["id"]):
         return _redirecionar_com(destino, 1, "erro", "Perfil não encontrado.")
+    db.registrar_auditoria(
+        "perfil_removido",
+        actor=request.state.user,
+        alvo_tipo="perfil",
+        alvo_id=perfil_id,
+        ip=seguranca.ip_do_cliente(request),
+    )
     return _redirecionar_com(destino, 1, "mensagem", "Perfil removido.")
 
 
@@ -1414,7 +1463,9 @@ def editar_usuario_formulario(request: Request, usuario_id: int, erro: str = "")
     if usuario is None:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
     return templates.TemplateResponse(
-        request, "usuario_editar.html", {"usuario": usuario, "erro": erro}
+        request,
+        "usuario_editar.html",
+        {"usuario": usuario, "erro": erro, "planos": db.listar_planos()},
     )
 
 
@@ -1428,6 +1479,7 @@ async def editar_usuario(
     nome_publico: str = Form(...),
     arroba: str = Form(...),
     role: str = Form("cliente"),
+    plano: str = Form(""),
     senha: str = Form(""),
     confirmar_senha: str = Form(""),
 ):
@@ -1450,22 +1502,28 @@ async def editar_usuario(
         if (email != usuario["email"] and autenticacao.confirmacao_email_obrigatoria()
                 and not autenticacao.email_configurado()):
             raise ValueError("Configure o envio de e-mail antes de alterar o endereço.")
+        if plano and not db.obter_plano(plano):
+            raise ValueError("Plano inexistente.")
         email_alterado = db.editar_usuario(
             usuario_id, username, email, nome_publico, arroba, role, password_hash
         )
         if email_alterado is None:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        if plano:
+            db.atualizar_plano_usuario(usuario_id, plano)
     except ValueError as erro:
         return templates.TemplateResponse(
             request, "usuario_editar.html",
             {"usuario": {**dict(usuario), "username": username, "email": email,
                          "public_name": nome_publico, "public_handle": arroba,
-                         "role": role}, "erro": str(erro)}, status_code=400,
+                         "role": role, "plano": plano}, "erro": str(erro),
+             "planos": db.listar_planos()}, status_code=400,
         )
     except db.INTEGRITY_ERRORS:
         return templates.TemplateResponse(
             request, "usuario_editar.html",
-            {"usuario": usuario, "erro": "Esse nome de usuário ou e-mail já está cadastrado."},
+            {"usuario": usuario, "erro": "Esse nome de usuário ou e-mail já está cadastrado.",
+             "planos": db.listar_planos()},
             status_code=400,
         )
     mensagem = "Usuário atualizado."
@@ -1496,24 +1554,24 @@ async def editar_usuario(
 
 @app.post("/usuarios/{usuario_id}/excluir", dependencies=_admin_csrf())
 def excluir_usuario(request: Request, usuario_id: int):
+    alvo = db.obter_usuario_por_id(usuario_id)
+    if alvo is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    db.registrar_auditoria(
+        "usuario_excluido",
+        actor=request.state.user,
+        alvo_tipo="usuario",
+        alvo_id=usuario_id,
+        detalhe=f"Conta {alvo['username']} excluída pelo admin.",
+        ip=seguranca.ip_do_cliente(request),
+    )
     try:
         arquivos = db.excluir_usuario(usuario_id)
     except ValueError as erro:
         return RedirectResponse("/usuarios?erro=" + quote(str(erro)), status_code=303)
     if arquivos is None:
         raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-    falha = False
-    for pasta, nomes in ((PASTA_FOTOS_BUSCA, arquivos[0]), (PASTA_OFICIAIS, arquivos[1])):
-        for nome in nomes:
-            if Path(nome).name != nome:
-                logger.error("Arquivo de usuário com caminho inválido: %s", nome)
-                falha = True
-                continue
-            try:
-                (pasta / nome).unlink(missing_ok=True)
-            except OSError:
-                logger.exception("Falha ao remover arquivo de usuário: %s", nome)
-                falha = True
+    falha = _apagar_arquivos_do_usuario(arquivos)
     mensagem = ("Usuário excluído, mas alguns arquivos não puderam ser removidos; consulte os logs."
                 if falha else "Usuário excluído.")
     if usuario_id == request.state.user["id"]:
@@ -2164,6 +2222,14 @@ def atualizar_dominio_suspeito(
         texto = "Domínio rejeitado."
     if not atualizado:
         raise HTTPException(status_code=404, detail="Domínio não encontrado.")
+    db.registrar_auditoria(
+        "dominio_status",
+        actor=request.state.user,
+        alvo_tipo="dominio",
+        alvo_id=dominio,
+        detalhe=f"{acao} · tipo {tipo or '-'}",
+        ip=seguranca.ip_do_cliente(request),
+    )
     return RedirectResponse(
         f"/dominios?mensagem={quote(texto)}", status_code=303
     )
@@ -3585,6 +3651,14 @@ def checar_pedido_de_remocao(
         remocao_core.proxima_checagem(),
         resumo,
     )
+    db.registrar_auditoria(
+        "verificacao",
+        actor=request.state.user,
+        alvo_tipo="pedido",
+        alvo_id=pedido_id,
+        detalhe=f"Resultado: {resultado}; {len(itens)} link(s); {erros} erro(s).",
+        ip=seguranca.ip_do_cliente(request),
+    )
     return RedirectResponse(
         f"/remocao/{pedido_id}?target_user_id={alvo['id']}"
         f"&mensagem={quote(resumo)}",
@@ -3620,6 +3694,7 @@ def contatos_abuso_admin(
 
 @app.post("/contatos-abuso", dependencies=_admin_csrf())
 def salvar_contato_de_abuso(
+    request: Request,
     dominio: str = Form(...),
     url_formulario: str = Form(""),
     email: str = Form(""),
@@ -3642,16 +3717,351 @@ def salvar_contato_de_abuso(
                 f"/contatos-abuso?erro={quote('Prazo de checagem inválido.')}",
                 status_code=303,
             )
+    db.registrar_auditoria(
+        "contato_abuso",
+        actor=request.state.user,
+        alvo_tipo="dominio",
+        alvo_id=dominio,
+        detalhe="Contato cadastrado ou atualizado.",
+        ip=seguranca.ip_do_cliente(request),
+    )
     return RedirectResponse(
         f"/contatos-abuso?mensagem={quote('Contato salvo.')}", status_code=303
     )
 
 
 @app.post("/contatos-abuso/{contato_id}/excluir", dependencies=_admin_csrf())
-def excluir_contato_de_abuso(contato_id: int):
+def excluir_contato_de_abuso(request: Request, contato_id: int):
     db.excluir_contato_abuso(contato_id)
+    db.registrar_auditoria(
+        "contato_abuso",
+        actor=request.state.user,
+        alvo_tipo="contato",
+        alvo_id=contato_id,
+        detalhe="Contato de abuso removido.",
+        ip=seguranca.ip_do_cliente(request),
+    )
     return RedirectResponse(
         f"/contatos-abuso?mensagem={quote('Contato removido.')}", status_code=303
+    )
+
+
+# --- Admin: visao geral, uso, planos, modelos e auditoria -------------------
+
+
+def _apagar_arquivos_do_usuario(arquivos):
+    falha = False
+    for pasta, nomes in ((PASTA_FOTOS_BUSCA, arquivos[0]), (PASTA_OFICIAIS, arquivos[1])):
+        for nome in nomes:
+            if Path(nome).name != nome:
+                logger.error("Arquivo de usuário com caminho inválido: %s", nome)
+                falha = True
+                continue
+            try:
+                (pasta / nome).unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Falha ao remover arquivo de usuário: %s", nome)
+                falha = True
+    return falha
+
+
+@app.get("/configuracoes/conta", response_class=HTMLResponse)
+def configuracao_conta(request: Request, erro: str = "", mensagem: str = ""):
+    usuario = request.state.user
+    return templates.TemplateResponse(
+        request,
+        "conta.html",
+        {
+            "titulo": "Minha conta",
+            "dados": db.contar_dados_conta(usuario["id"]),
+            "retencao_dias": db.dias_retencao_auditoria(),
+            "erro": erro,
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.post("/configuracoes/conta/excluir", dependencies=_csrf())
+def excluir_minha_conta(
+    request: Request,
+    senha: str = Form(...),
+    confirmacao: str = Form(""),
+):
+    usuario = request.state.user
+    atual = db.obter_usuario_por_login(usuario["username"])
+    if not atual or not autenticacao.verificar_senha(atual["password_hash"], senha):
+        return RedirectResponse(
+            "/configuracoes/conta?erro="
+            + quote("A senha está incorreta; nada foi excluído."),
+            status_code=303,
+        )
+    if (confirmacao or "").strip() != "EXCLUIR":
+        return RedirectResponse(
+            "/configuracoes/conta?erro="
+            + quote("Digite EXCLUIR para confirmar."),
+            status_code=303,
+        )
+    ip = seguranca.ip_do_cliente(request)
+    db.registrar_auditoria(
+        "conta_excluida",
+        actor=usuario,
+        alvo_tipo="usuario",
+        alvo_id=usuario["id"],
+        detalhe="Autoexclusão pela tela Minha conta.",
+        ip=ip,
+    )
+    try:
+        arquivos = db.excluir_usuario(usuario["id"])
+    except ValueError as falha:
+        return RedirectResponse(
+            "/configuracoes/conta?erro=" + quote(str(falha)), status_code=303
+        )
+    if arquivos is None:
+        return RedirectResponse(
+            "/configuracoes/conta?erro=" + quote("Conta não encontrada."),
+            status_code=303,
+        )
+    falha_arquivo = _apagar_arquivos_do_usuario(arquivos)
+    request.session.clear()
+    mensagem = (
+        "Conta e dados excluídos. Alguns arquivos não puderam ser removidos; "
+        "fale com o suporte."
+        if falha_arquivo
+        else "Conta e dados excluídos. A trilha de auditoria fica anônima por "
+        f"{db.dias_retencao_auditoria()} dias."
+    )
+    return RedirectResponse(
+        "/login?" + ("erro=" if falha_arquivo else "mensagem=") + quote(mensagem),
+        status_code=303,
+    )
+
+
+@app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])
+def admin_painel(request: Request, mensagem: str = ""):
+    db.purgar_auditoria()
+    return templates.TemplateResponse(
+        request,
+        "admin.html",
+        {
+            "titulo": "Admin",
+            "mensagem": mensagem,
+            "usuarios": db.listar_usuarios(),
+            "dominios_pendentes": len(db.listar_dominios_suspeitos("sugerido")),
+            "contatos": len(db.listar_contatos_abuso()),
+            "sinais": db.sinais_abuso(),
+            "auditoria": db.listar_auditoria(10),
+            "acoes": db.ACAO_AUDITORIA,
+            "retencao_dias": db.dias_retencao_auditoria(),
+        },
+    )
+
+
+@app.get(
+    "/admin/uso", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)]
+)
+def admin_uso(request: Request, dias: int = 7):
+    dias = 7 if dias not in {1, 7, 30} else dias
+    return templates.TemplateResponse(
+        request,
+        "admin_uso.html",
+        {
+            "titulo": "Uso e custo",
+            "uso": db.uso_buscas(dias),
+            "dias": dias,
+            "limite_minuto": limite_taxa.limite_por_minuto(),
+            "limitador": limite_taxa.estatisticas(),
+        },
+    )
+
+
+@app.get(
+    "/admin/planos",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def admin_planos(request: Request, mensagem: str = "", erro: str = ""):
+    return templates.TemplateResponse(
+        request,
+        "admin_planos.html",
+        {
+            "titulo": "Planos e limites",
+            "planos": db.listar_planos(),
+            "usuarios": db.listar_usuarios(),
+            "mensagem": mensagem,
+            "erro": erro,
+        },
+    )
+
+
+@app.post("/admin/planos", dependencies=_admin_csrf())
+def salvar_plano_admin(
+    request: Request,
+    plano: str = Form(...),
+    nome: str = Form(...),
+    max_perfis: int = Form(...),
+    buscas_dia: int = Form(...),
+    frequencia_horas: int = Form(...),
+    descricao: str = Form(""),
+):
+    try:
+        db.salvar_plano(
+            plano, nome, max_perfis, buscas_dia, frequencia_horas, descricao
+        )
+    except (ValueError, TypeError) as falha:
+        return RedirectResponse(
+            "/admin/planos?erro=" + quote(str(falha)), status_code=303
+        )
+    db.registrar_auditoria(
+        "plano_alterado",
+        actor=request.state.user,
+        alvo_tipo="plano",
+        alvo_id=plano,
+        detalhe=f"{max_perfis} perfis, {buscas_dia}/dia, {frequencia_horas} h",
+        ip=seguranca.ip_do_cliente(request),
+    )
+    return RedirectResponse(
+        "/admin/planos?mensagem=" + quote("Limites do plano salvos."), status_code=303
+    )
+
+
+@app.post("/admin/planos/usuarios/{usuario_id}", dependencies=_admin_csrf())
+def mudar_plano_do_usuario(
+    request: Request, usuario_id: int, plano: str = Form(...)
+):
+    try:
+        db.atualizar_plano_usuario(usuario_id, plano)
+    except ValueError as falha:
+        return RedirectResponse(
+            "/admin/planos?erro=" + quote(str(falha)), status_code=303
+        )
+    db.registrar_auditoria(
+        "plano_alterado",
+        actor=request.state.user,
+        alvo_tipo="usuario",
+        alvo_id=usuario_id,
+        detalhe=f"Plano alterado para {plano}.",
+        ip=seguranca.ip_do_cliente(request),
+    )
+    return RedirectResponse(
+        "/admin/planos?mensagem=" + quote("Plano da conta atualizado."),
+        status_code=303,
+    )
+
+
+@app.get(
+    "/admin/modelos",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def admin_modelos(request: Request, mensagem: str = "", erro: str = ""):
+    modelos = []
+    for codigo, nome in remocao_core.MODELOS.items():
+        salvo = db.obter_modelo_texto(codigo)
+        modelos.append(
+            {
+                "codigo": codigo,
+                "nome": nome,
+                "titulo": (salvo or {}).get("titulo") or f"Modelo em {nome}",
+                "conteudo": (salvo or {}).get("conteudo")
+                or remocao_core.carregar_modelo(codigo),
+                "personalizado": bool(salvo),
+                "atualizado_em": (salvo or {}).get("atualizado_em"),
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "admin_modelos.html",
+        {
+            "titulo": "Modelos de texto",
+            "modelos": modelos,
+            "mensagem": mensagem,
+            "erro": erro,
+        },
+    )
+
+
+@app.post("/admin/modelos", dependencies=_admin_csrf())
+def salvar_modelo_admin(
+    request: Request,
+    codigo: str = Form(...),
+    titulo: str = Form(""),
+    conteudo: str = Form(...),
+):
+    if codigo not in remocao_core.MODELOS:
+        raise HTTPException(status_code=400, detail="Modelo inválido.")
+    try:
+        db.salvar_modelo_texto(codigo, titulo, conteudo)
+    except ValueError as falha:
+        return RedirectResponse(
+            "/admin/modelos?erro=" + quote(str(falha)), status_code=303
+        )
+    db.registrar_auditoria(
+        "modelo_texto",
+        actor=request.state.user,
+        alvo_tipo="modelo",
+        alvo_id=codigo,
+        detalhe=f"Modelo {codigo} salvo.",
+        ip=seguranca.ip_do_cliente(request),
+    )
+    return RedirectResponse(
+        "/admin/modelos?mensagem=" + quote("Modelo salvo. Revise com o advogado."),
+        status_code=303,
+    )
+
+
+@app.post("/admin/modelos/{codigo}/restaurar", dependencies=_admin_csrf())
+def restaurar_modelo_admin(request: Request, codigo: str):
+    if codigo not in remocao_core.MODELOS:
+        raise HTTPException(status_code=400, detail="Modelo inválido.")
+    db.restaurar_modelo_texto(codigo)
+    db.registrar_auditoria(
+        "modelo_texto",
+        actor=request.state.user,
+        alvo_tipo="modelo",
+        alvo_id=codigo,
+        detalhe="Modelo restaurado para o arquivo padrão.",
+        ip=seguranca.ip_do_cliente(request),
+    )
+    return RedirectResponse(
+        "/admin/modelos?mensagem=" + quote("Modelo padrão restaurado."),
+        status_code=303,
+    )
+
+
+@app.get(
+    "/admin/auditoria",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def admin_auditoria(request: Request, acao: str = "", mensagem: str = ""):
+    db.purgar_auditoria()
+    return templates.TemplateResponse(
+        request,
+        "admin_auditoria.html",
+        {
+            "titulo": "Auditoria",
+            "eventos": db.listar_auditoria(200, acao),
+            "acoes": db.ACAO_AUDITORIA,
+            "acao_atual": acao,
+            "retencao_dias": db.dias_retencao_auditoria(),
+            "mensagem": mensagem,
+        },
+    )
+
+
+@app.post("/admin/auditoria/purgar", dependencies=_admin_csrf())
+def purgar_auditoria_admin(request: Request):
+    removidos = db.purgar_auditoria()
+    db.registrar_auditoria(
+        "auditoria_purgada",
+        actor=request.state.user,
+        detalhe=f"{removidos} evento(s) além de {db.dias_retencao_auditoria()} dias.",
+        ip=seguranca.ip_do_cliente(request),
+    )
+    return RedirectResponse(
+        "/admin/auditoria?mensagem="
+        + quote(f"Purga concluída: {removidos} evento(s) removido(s)."),
+        status_code=303,
     )
 
 
@@ -3739,6 +4149,14 @@ def exportar_linha_do_tempo_csv(request: Request, target_user_id: int = 0):
                 _data_curta(item["removido_em"]),
             ]
         )
+    db.registrar_auditoria(
+        "exportacao",
+        actor=request.state.user,
+        alvo_tipo="usuario",
+        alvo_id=alvo["id"],
+        detalhe="Exportação CSV da linha do tempo.",
+        ip=seguranca.ip_do_cliente(request),
+    )
     return Response(
         content="\ufeff" + saida.getvalue(),
         media_type="text/csv; charset=utf-8",
@@ -3792,6 +4210,14 @@ def exportar_linha_do_tempo_pdf(request: Request, target_user_id: int = 0):
         "Linha do tempo e pedidos de remocao",
         pdf_simples.subtitulo_padrao(),
         blocos,
+    )
+    db.registrar_auditoria(
+        "exportacao",
+        actor=request.state.user,
+        alvo_tipo="usuario",
+        alvo_id=alvo["id"],
+        detalhe="Exportação PDF da linha do tempo.",
+        ip=seguranca.ip_do_cliente(request),
     )
     return Response(
         content=pdf,

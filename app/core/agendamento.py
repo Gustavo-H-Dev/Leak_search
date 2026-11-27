@@ -162,7 +162,7 @@ def pode_disparar_agora(criadora_id: int) -> tuple[bool, str]:
             "Aguarde ela terminar.",
         )
     usadas = db.contar_execucoes_desde(criadora_id, em_utc(inicio_do_dia()))
-    limite = db.limite_buscas_por_dia()
+    limite = db.limite_buscas_por_dia(criadora_id)
     if usadas >= limite:
         return (
             False,
@@ -246,7 +246,7 @@ def estado(criadora_id: int) -> dict:
     usadas = db.contar_execucoes_desde(criadora_id, em_utc(inicio_do_dia()))
     return {
         **descricao(registro),
-        "limite_dia": db.limite_buscas_por_dia(),
+        "limite_dia": db.limite_buscas_por_dia(criadora_id),
         "usadas_hoje": usadas,
         "em_andamento": db.execucao_em_andamento(criadora_id),
         "ultima": db.ultima_execucao(criadora_id),

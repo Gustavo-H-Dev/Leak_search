@@ -26,6 +26,8 @@
   {"nome": "Configurações", "href": "/perfil-busca", "icone": "config", "ativo": caminho.startswith("/perfil-busca") or caminho.startswith("/configuracoes")}
 ] %}
 {% set itens_operacao = [
+  {"nome": "Admin", "href": "/admin", "icone": "painel", "ativo": caminho.startswith("/admin"), "admin": true},
+  {"nome": "Minha conta", "href": "/configuracoes/conta", "icone": "config", "ativo": caminho.startswith("/configuracoes/conta")},
   {"nome": "Busca na web", "href": "/busca-web", "icone": "busca", "ativo": caminho.startswith("/busca-web")},
   {"nome": "Usuários", "href": "/usuarios", "icone": "usuarios", "ativo": caminho.startswith("/usuarios"), "admin": true},
   {"nome": "Domínios", "href": "/dominios", "icone": "dominios", "ativo": caminho.startswith("/dominios"), "admin": true},

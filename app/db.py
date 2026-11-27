@@ -99,6 +99,9 @@ def iniciar_banco():
         _migrar_busca_provedores()
         _migrar_leak_reports()
         _migrar_candidatos_revisao()
+        _migrar_plano_usuario()
+        _semear_planos()
+        purgar_auditoria()
         try:
             with conexao() as conn:
                 conn.execute(
@@ -148,6 +151,7 @@ def iniciar_banco():
                 password_hash TEXT NOT NULL,
                 email_verified INTEGER NOT NULL DEFAULT 0,
                 role TEXT NOT NULL DEFAULT 'cliente',
+                plano TEXT NOT NULL DEFAULT 'gratis',
                 public_name TEXT,
                 public_handle TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -277,6 +281,43 @@ def iniciar_banco():
             );
             CREATE INDEX IF NOT EXISTS aviso_email_pendente
             ON aviso_email (user_id, enviado_em);
+            CREATE TABLE IF NOT EXISTS auditoria_evento (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                actor_label TEXT NOT NULL DEFAULT '',
+                acao TEXT NOT NULL,
+                alvo_tipo TEXT NOT NULL DEFAULT '',
+                alvo_id TEXT NOT NULL DEFAULT '',
+                detalhe TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT '',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS auditoria_evento_data
+            ON auditoria_evento (criado_em);
+            CREATE TABLE IF NOT EXISTS login_tentativa (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL DEFAULT '',
+                ip TEXT NOT NULL DEFAULT '',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS login_tentativa_data
+            ON login_tentativa (criado_em);
+            CREATE TABLE IF NOT EXISTS plano_limite (
+                plano TEXT PRIMARY KEY,
+                nome TEXT NOT NULL,
+                max_perfis INTEGER NOT NULL DEFAULT 5,
+                buscas_dia INTEGER NOT NULL DEFAULT 4,
+                frequencia_horas INTEGER NOT NULL DEFAULT 24,
+                preco_centavos INTEGER NOT NULL DEFAULT 0,
+                descricao TEXT NOT NULL DEFAULT '',
+                atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS modelo_texto (
+                codigo TEXT PRIMARY KEY,
+                titulo TEXT NOT NULL DEFAULT '',
+                conteudo TEXT NOT NULL,
+                atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS image_candidates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -405,7 +446,10 @@ def iniciar_banco():
     _migrar_busca_execucao()
     _migrar_leak_reports()
     _migrar_candidatos_revisao()
+    _migrar_plano_usuario()
+    _semear_planos()
     _semear_dominios_iniciais()
+    purgar_auditoria()
 
 
 def _iniciar_banco_postgresql():
@@ -455,6 +499,7 @@ def _iniciar_banco_postgresql():
             password_hash TEXT NOT NULL,
             email_verified INTEGER NOT NULL DEFAULT 0,
             role TEXT NOT NULL DEFAULT 'cliente',
+            plano TEXT NOT NULL DEFAULT 'gratis',
             public_name TEXT,
             public_handle TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -609,6 +654,49 @@ def _iniciar_banco_postgresql():
         )
         """,
         "CREATE INDEX IF NOT EXISTS aviso_email_pendente ON aviso_email (user_id, enviado_em)",
+        """
+        CREATE TABLE IF NOT EXISTS auditoria_evento (
+            id BIGSERIAL PRIMARY KEY,
+            actor_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+            actor_label TEXT NOT NULL DEFAULT '',
+            acao TEXT NOT NULL,
+            alvo_tipo TEXT NOT NULL DEFAULT '',
+            alvo_id TEXT NOT NULL DEFAULT '',
+            detalhe TEXT NOT NULL DEFAULT '',
+            ip TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS auditoria_evento_data ON auditoria_evento (criado_em)",
+        """
+        CREATE TABLE IF NOT EXISTS login_tentativa (
+            id BIGSERIAL PRIMARY KEY,
+            username TEXT NOT NULL DEFAULT '',
+            ip TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS login_tentativa_data ON login_tentativa (criado_em)",
+        """
+        CREATE TABLE IF NOT EXISTS plano_limite (
+            plano TEXT PRIMARY KEY,
+            nome TEXT NOT NULL,
+            max_perfis INTEGER NOT NULL DEFAULT 5,
+            buscas_dia INTEGER NOT NULL DEFAULT 4,
+            frequencia_horas INTEGER NOT NULL DEFAULT 24,
+            preco_centavos INTEGER NOT NULL DEFAULT 0,
+            descricao TEXT NOT NULL DEFAULT '',
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS modelo_texto (
+            codigo TEXT PRIMARY KEY,
+            titulo TEXT NOT NULL DEFAULT '',
+            conteudo TEXT NOT NULL,
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
         """
         CREATE TABLE IF NOT EXISTS image_candidates (
             id BIGSERIAL PRIMARY KEY,
@@ -1535,7 +1623,7 @@ def listar_usuarios():
     with conexao() as conn:
         return conn.execute(
             """
-            SELECT id, username, email, email_verified, role, public_name,
+            SELECT id, username, email, email_verified, role, plano, public_name,
                    public_handle, created_at,
                    (SELECT id FROM criadoras WHERE user_id = users.id) AS criadora_id
             FROM users
@@ -1664,6 +1752,7 @@ def excluir_usuario(user_id):
                     (snapshot["user_id"],),
                 )
         conn.execute("DELETE FROM app_settings WHERE name = ?", (f"vazamento_status_{user_id}",))
+        _anonimizar_auditoria_usuario(conn, user_id)
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         return fotos, arquivos
 
@@ -1758,11 +1847,11 @@ LIMITE_PERFIS_PADRAO = 5
 STATUS_PERFIL_MONITORADO = {"ativo", "pausado"}
 
 
-def limite_perfis_monitorados() -> int:
+def limite_perfis_monitorados(user_id=None) -> int:
     """Quantos perfis uma conta pode monitorar.
 
-    Precedencia: variavel de ambiente, depois app_settings (editavel sem
-    deploy), depois o padrao do codigo.
+    Precedencia: variavel de ambiente, depois o plano da conta, depois
+    app_settings (editavel sem deploy), depois o padrao do codigo.
     """
     do_ambiente = os.getenv("PERFIS_MONITORADOS_LIMITE", "").strip()
     if do_ambiente:
@@ -1770,6 +1859,11 @@ def limite_perfis_monitorados() -> int:
             return max(1, int(do_ambiente))
         except ValueError:
             pass
+    if user_id:
+        try:
+            return _limites_do_usuario(user_id)["max_perfis"]
+        except Exception:
+            logger.warning("Plano do usuario %s indisponivel; usando o limite padrao", user_id)
     try:
         return max(
             1,
@@ -2273,14 +2367,19 @@ def obter_busca_execucao(execucao_id):
 LIMITE_BUSCAS_DIA_PADRAO = 4
 
 
-def limite_buscas_por_dia() -> int:
-    """Buscas diarias por criadora: ambiente, depois app_settings, depois 4."""
+def limite_buscas_por_dia(user_id=None) -> int:
+    """Buscas diarias por criadora: ambiente, plano, app_settings, depois 4."""
     do_ambiente = os.getenv("BUSCAS_POR_DIA_LIMITE", "").strip()
     if do_ambiente:
         try:
             return max(1, int(do_ambiente))
         except ValueError:
             pass
+    if user_id:
+        try:
+            return _limites_do_usuario(user_id)["buscas_dia"]
+        except Exception:
+            logger.warning("Plano do usuario %s indisponivel; usando o limite padrao", user_id)
     valor = obter_configuracao("buscas_por_dia_limite", "").strip()
     if valor:
         try:
@@ -3935,6 +4034,547 @@ def salvar_texto_pedido(user_id, pedido_id, texto):
             ((texto or "").strip(), _agora_utc(), user_id, pedido_id),
         )
         return cur.rowcount > 0
+
+
+PLANOS_PADRAO = {
+    "gratis": {
+        "nome": "Gratuito",
+        "max_perfis": 5,
+        "buscas_dia": 4,
+        "frequencia_horas": 24,
+        "preco_centavos": 0,
+        "descricao": "Conta atual. Sem cobrança; os limites valem desde já.",
+    },
+    "pro": {
+        "nome": "Pro (futuro)",
+        "max_perfis": 20,
+        "buscas_dia": 12,
+        "frequencia_horas": 6,
+        "preco_centavos": 0,
+        "descricao": "Preparado para quando houver cobrança. Ainda não é vendido.",
+    },
+}
+
+ACAO_AUDITORIA = {
+    "login_falha": "Tentativa de login falhou",
+    "login_bloqueado": "Login bloqueado por tentativas",
+    "conta_excluida": "Conta e dados excluídos",
+    "exportacao": "Exportação de dados",
+    "verificacao": "Verificação de remoção",
+    "dominio_status": "Domínio aprovado/rejeitado",
+    "contato_abuso": "Contato de abuso alterado",
+    "modelo_texto": "Modelo de texto alterado",
+    "plano_alterado": "Limite de plano alterado",
+    "perfil_criado": "Perfil monitorado criado",
+    "perfil_removido": "Perfil monitorado removido",
+    "usuario_excluido": "Usuário excluído pelo admin",
+}
+
+
+def _migrar_plano_usuario():
+    """Plano da conta, para os limites por plano."""
+    with conexao() as conn:
+        if usando_postgresql():
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS plano TEXT NOT NULL DEFAULT 'gratis'"
+            )
+        else:
+            existentes = {
+                coluna["name"] for coluna in conn.execute("PRAGMA table_info(users)")
+            }
+            if "plano" not in existentes:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN plano TEXT NOT NULL DEFAULT 'gratis'"
+                )
+
+
+def _semear_planos():
+    agora = _agora_utc()
+    with conexao() as conn:
+        for plano, dados in PLANOS_PADRAO.items():
+            conn.execute(
+                """
+                INSERT INTO plano_limite
+                    (plano, nome, max_perfis, buscas_dia, frequencia_horas,
+                     preco_centavos, descricao, atualizado_em)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (plano) DO NOTHING
+                """,
+                (
+                    plano,
+                    dados["nome"],
+                    dados["max_perfis"],
+                    dados["buscas_dia"],
+                    dados["frequencia_horas"],
+                    dados["preco_centavos"],
+                    dados["descricao"],
+                    agora,
+                ),
+            )
+
+
+def listar_planos():
+    with conexao() as conn:
+        return [
+            dict(linha)
+            for linha in conn.execute(
+                "SELECT plano, nome, max_perfis, buscas_dia, frequencia_horas,"
+                " preco_centavos, descricao, atualizado_em FROM plano_limite"
+                " ORDER BY preco_centavos, plano"
+            ).fetchall()
+        ]
+
+
+def obter_plano(plano):
+    with conexao() as conn:
+        linha = conn.execute(
+            "SELECT plano, nome, max_perfis, buscas_dia, frequencia_horas,"
+            " preco_centavos, descricao FROM plano_limite WHERE plano = ?",
+            ((plano or "gratis").strip().lower(),),
+        ).fetchone()
+    return dict(linha) if linha else None
+
+
+def salvar_plano(plano, nome, max_perfis, buscas_dia, frequencia_horas, descricao=""):
+    plano = (plano or "").strip().lower()
+    if not plano or not re.fullmatch(r"[a-z0-9_-]{2,32}", plano):
+        raise ValueError("Código de plano inválido.")
+    if not (nome or "").strip():
+        raise ValueError("Informe o nome do plano.")
+    valores = {
+        "max_perfis": max(1, int(max_perfis)),
+        "buscas_dia": max(1, int(buscas_dia)),
+        "frequencia_horas": max(1, int(frequencia_horas)),
+    }
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO plano_limite
+                (plano, nome, max_perfis, buscas_dia, frequencia_horas,
+                 preco_centavos, descricao, atualizado_em)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            ON CONFLICT (plano) DO UPDATE SET
+                nome = excluded.nome,
+                max_perfis = excluded.max_perfis,
+                buscas_dia = excluded.buscas_dia,
+                frequencia_horas = excluded.frequencia_horas,
+                descricao = excluded.descricao,
+                atualizado_em = excluded.atualizado_em
+            """,
+            (
+                plano,
+                nome.strip()[:80],
+                valores["max_perfis"],
+                valores["buscas_dia"],
+                valores["frequencia_horas"],
+                (descricao or "").strip()[:500],
+                _agora_utc(),
+            ),
+        )
+
+
+def contar_dados_conta(user_id):
+    """O que a exclusao vai apagar, para a pessoa ver antes de confirmar."""
+    with conexao() as conn:
+        def total(tabela, coluna):
+            linha = conn.execute(
+                f"SELECT COUNT(*) AS total FROM {tabela} WHERE {coluna} = ?",
+                (user_id,),
+            ).fetchone()
+            return int((linha["total"] if linha else 0) or 0)
+
+        return {
+            "candidatos": total("search_candidates", "user_id"),
+            "perfis": total("perfil_monitorado", "criadora_id"),
+            "variantes": total("nome_variante", "criadora_id"),
+            "execucoes": total("busca_execucao", "criadora_id"),
+            "pedidos": total("pedido_remocao", "user_id"),
+            "fotos": total("user_search_photos", "user_id"),
+        }
+
+
+def atualizar_plano_usuario(user_id, plano):
+    plano = (plano or "gratis").strip().lower()
+    with conexao() as conn:
+        if not conn.execute(
+            "SELECT plano FROM plano_limite WHERE plano = ?", (plano,)
+        ).fetchone():
+            raise ValueError("Plano inexistente.")
+        cur = conn.execute(
+            "UPDATE users SET plano = ? WHERE id = ?", (plano, user_id)
+        )
+        return cur.rowcount > 0
+
+
+def plano_do_usuario(user_id):
+    with conexao() as conn:
+        linha = conn.execute(
+            "SELECT u.plano FROM users u WHERE u.id = ?", (user_id,)
+        ).fetchone()
+    return (linha["plano"] if linha and linha["plano"] else "gratis")
+
+
+def _limites_do_usuario(user_id):
+    plano = obter_plano(plano_do_usuario(user_id)) or obter_plano("gratis") or {}
+    return {
+        "max_perfis": int(plano.get("max_perfis") or LIMITE_PERFIS_PADRAO),
+        "buscas_dia": int(plano.get("buscas_dia") or LIMITE_BUSCAS_DIA_PADRAO),
+        "frequencia_horas": int(plano.get("frequencia_horas") or 24),
+    }
+
+
+# --- Auditoria ---------------------------------------------------------------
+
+
+def registrar_auditoria(
+    acao, actor=None, alvo_tipo="", alvo_id="", detalhe="", ip=""
+):
+    """Trilha de acoes sensiveis. Nunca recebe senha, token ou trecho de site."""
+    dados_actor = dict(actor) if actor else {}
+    actor_user_id = dados_actor.get("id")
+    actor_label = ""
+    if dados_actor:
+        actor_label = (
+            dados_actor.get("username") or dados_actor.get("public_name") or ""
+        )[:80]
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO auditoria_evento
+                (actor_user_id, actor_label, acao, alvo_tipo, alvo_id,
+                 detalhe, ip, criado_em)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                actor_user_id,
+                actor_label,
+                (acao or "")[:60],
+                (alvo_tipo or "")[:40],
+                str(alvo_id or "")[:120],
+                (detalhe or "")[:1000],
+                (ip or "")[:64],
+                _agora_utc(),
+            ),
+        )
+
+
+def listar_auditoria(limite=100, acao=""):
+    sql = (
+        "SELECT id, actor_user_id, actor_label, acao, alvo_tipo, alvo_id,"
+        " detalhe, ip, criado_em FROM auditoria_evento"
+    )
+    parametros = []
+    if acao:
+        sql += " WHERE acao = ?"
+        parametros.append(acao)
+    sql += " ORDER BY id DESC LIMIT ?"
+    parametros.append(max(1, int(limite)))
+    with conexao() as conn:
+        return [dict(linha) for linha in conn.execute(sql, parametros).fetchall()]
+
+
+def dias_retencao_auditoria() -> int:
+    try:
+        return max(1, int(os.getenv("RETENCAO_AUDITORIA_DIAS", "365")))
+    except ValueError:
+        return 365
+
+
+def purgar_auditoria(dias=None):
+    """Remove a trilha mais antiga que o prazo de retencao (12 meses por padrao)."""
+    prazo = dias or dias_retencao_auditoria()
+    corte = (datetime.now(timezone.utc) - timedelta(days=prazo)).isoformat()
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM auditoria_evento WHERE criado_em < ?", (corte,)
+        )
+        conn.execute("DELETE FROM login_tentativa WHERE criado_em < ?", (corte,))
+        return cur.rowcount
+
+
+def _anonimizar_auditoria_usuario(conn, user_id):
+    conn.execute(
+        """
+        UPDATE auditoria_evento
+           SET actor_user_id = NULL, actor_label = ''
+         WHERE actor_user_id = ?
+        """,
+        (user_id,),
+    )
+    conn.execute(
+        """
+        UPDATE auditoria_evento SET alvo_id = ''
+         WHERE alvo_tipo = 'usuario' AND alvo_id = ?
+        """,
+        (str(user_id),),
+    )
+
+
+# --- Login: limite de tentativas --------------------------------------------
+
+MAX_TENTATIVAS_LOGIN = 5
+JANELA_TENTATIVAS_MINUTOS = 15
+
+
+def registrar_tentativa_login(username, ip=""):
+    with conexao() as conn:
+        conn.execute(
+            "INSERT INTO login_tentativa (username, ip, criado_em) VALUES (?, ?, ?)",
+            ((username or "").strip()[:190].lower(), (ip or "")[:64], _agora_utc()),
+        )
+
+
+def limpar_tentativas_login(username, ip=""):
+    """Limpa só as falhas deste usuário; não apaga as de outra pessoa no mesmo IP."""
+    with conexao() as conn:
+        conn.execute(
+            "DELETE FROM login_tentativa WHERE lower(username) = lower(?)",
+            ((username or "").strip(),),
+        )
+
+
+def tentativas_login_recentes(username, ip="", janela_minutos=JANELA_TENTATIVAS_MINUTOS):
+    corte = (
+        datetime.now(timezone.utc) - timedelta(minutes=janela_minutos)
+    ).isoformat()
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN lower(username) = lower(?) THEN 1 ELSE 0 END) AS por_usuario,
+                SUM(CASE WHEN ip != '' AND ip = ? THEN 1 ELSE 0 END) AS por_ip
+            FROM login_tentativa WHERE criado_em >= ?
+            """,
+            ((username or "").strip(), (ip or "").strip(), corte),
+        ).fetchone()
+    return {
+        "por_usuario": int((linha["por_usuario"] if linha else 0) or 0),
+        "por_ip": int((linha["por_ip"] if linha else 0) or 0),
+    }
+
+
+# --- Uso e custo -------------------------------------------------------------
+
+
+def uso_buscas(dias=7):
+    """Buscas por criadora e por dia, falhas por tipo e limite do plano."""
+    dias = max(1, min(90, int(dias)))
+    hoje = datetime.now(timezone.utc).date()
+    inicio = (hoje - timedelta(days=dias - 1)).isoformat()
+    datas = [(hoje - timedelta(days=indice)).isoformat() for indice in range(dias - 1, -1, -1)]
+    with conexao() as conn:
+        linhas = conn.execute(
+            """
+            SELECT e.criadora_id, u.username, u.public_name, u.plano, e.status,
+                   e.motivo_falha, e.criada_em
+            FROM busca_execucao e JOIN users u ON u.id = e.criadora_id
+            WHERE e.criada_em >= ?
+            ORDER BY e.criada_em
+            """,
+            (inicio,),
+        ).fetchall()
+    criadoras = {}
+    totais_dia = {data: 0 for data in datas}
+    falhas_tipo = {}
+    for linha in linhas:
+        data = str(linha["criada_em"] or "")[:10]
+        if data not in totais_dia:
+            continue
+        chave = linha["criadora_id"]
+        registro = criadoras.setdefault(
+            chave,
+            {
+                "criadora_id": chave,
+                "nome": linha["public_name"] or linha["username"],
+                "plano": linha["plano"] or "gratis",
+                "por_dia": {dia: 0 for dia in datas},
+                "total": 0,
+                "falhas": 0,
+                "hoje": 0,
+            },
+        )
+        registro["por_dia"][data] += 1
+        registro["total"] += 1
+        if data == hoje.isoformat():
+            registro["hoje"] += 1
+        totais_dia[data] += 1
+        if linha["status"] in {"erro", "avisos"}:
+            registro["falhas"] += 1
+            tipo = (linha["motivo_falha"] or "sem_motivo").strip() or "sem_motivo"
+            falhas_tipo[tipo] = falhas_tipo.get(tipo, 0) + 1
+    limites = {}
+    for chave, registro in criadoras.items():
+        limites = _limites_do_usuario(chave)
+        registro["limite_dia"] = limites["buscas_dia"]
+    return {
+        "dias": datas,
+        "criadoras": sorted(
+            criadoras.values(), key=lambda item: (-item["total"], item["nome"])
+        ),
+        "total_por_dia": totais_dia,
+        "total": len(linhas),
+        "falhas_por_tipo": sorted(
+            ({"tipo": tipo, "total": total} for tipo, total in falhas_tipo.items()),
+            key=lambda item: -item["total"],
+        ),
+    }
+
+
+# --- Sinais de abuso (somente alerta) ---------------------------------------
+
+
+def sinais_abuso():
+    """Alertas para o admin; nada aqui bloqueia conta automaticamente."""
+    agora = datetime.now(timezone.utc)
+    corte_24h = (agora - timedelta(hours=24)).isoformat()
+    corte_7d = (agora - timedelta(days=7)).isoformat()
+    sinais = []
+    with conexao() as conn:
+        for linha in conn.execute(
+            """
+            SELECT lower(username) AS username, COUNT(*) AS total
+            FROM login_tentativa WHERE criado_em >= ? AND username != ''
+            GROUP BY lower(username) HAVING COUNT(*) >= ?
+            ORDER BY total DESC LIMIT 10
+            """,
+            (corte_24h, MAX_TENTATIVAS_LOGIN),
+        ).fetchall():
+            sinais.append(
+                {
+                    "tipo": "login",
+                    "titulo": f"{linha['total']} falhas de login para {linha['username']}",
+                    "detalhe": "Confira se é a própria pessoa errando a senha ou tentativa de acesso.",
+                }
+            )
+        for linha in conn.execute(
+            """
+            SELECT e.criadora_id, u.username, u.public_name, COUNT(*) AS total
+            FROM busca_execucao e JOIN users u ON u.id = e.criadora_id
+            WHERE e.criada_em >= ? AND e.status = 'erro'
+            GROUP BY e.criadora_id, u.username, u.public_name
+            HAVING COUNT(*) >= 3 ORDER BY total DESC LIMIT 10
+            """,
+            (corte_24h,),
+        ).fetchall():
+            sinais.append(
+                {
+                    "tipo": "falhas_busca",
+                    "titulo": f"{linha['total']} buscas falharam em 24 h para "
+                    f"{linha['public_name'] or linha['username']}",
+                    "detalhe": "Pode ser chave sem saldo, bloqueio do provedor ou configuração.",
+                }
+            )
+        for linha in conn.execute(
+            """
+            SELECT p.user_id, u.username, u.public_name, COUNT(*) AS total
+            FROM pedido_remocao p JOIN users u ON u.id = p.user_id
+            WHERE p.checagem_resultado = 'erro' AND p.checagem_em >= ?
+            GROUP BY p.user_id, u.username, u.public_name
+            HAVING COUNT(*) >= 3 ORDER BY total DESC LIMIT 10
+            """,
+            (corte_24h,),
+        ).fetchall():
+            sinais.append(
+                {
+                    "tipo": "verificacoes",
+                    "titulo": f"{linha['total']} verificações falharam em 24 h para "
+                    f"{linha['public_name'] or linha['username']}",
+                    "detalhe": "Pode ser bloqueio do buscador ou links inválidos; confira antes de agir.",
+                }
+            )
+        for linha in conn.execute(
+            """
+            SELECT actor_label, COUNT(*) AS total,
+                   SUM(CASE WHEN acao = 'perfil_removido' THEN 1 ELSE 0 END) AS remocoes
+            FROM auditoria_evento
+            WHERE criado_em >= ? AND acao IN ('perfil_criado', 'perfil_removido')
+            GROUP BY actor_label
+            HAVING COUNT(*) >= 3 AND SUM(CASE WHEN acao = 'perfil_removido' THEN 1 ELSE 0 END) >= 2
+            ORDER BY total DESC LIMIT 10
+            """,
+            (corte_7d,),
+        ).fetchall():
+            sinais.append(
+                {
+                    "tipo": "perfis",
+                    "titulo": f"Perfis criados e removidos em sequência por {linha['actor_label'] or 'conta'}",
+                    "detalhe": f"{linha['total']} eventos, {linha['remocoes']} remoções em 7 dias.",
+                }
+            )
+        for linha in conn.execute(
+            """
+            SELECT e.criadora_id, u.username, u.public_name, u.plano, COUNT(*) AS total
+            FROM busca_execucao e JOIN users u ON u.id = e.criadora_id
+            WHERE e.criada_em >= ?
+            GROUP BY e.criadora_id, u.username, u.public_name, u.plano
+            ORDER BY total DESC LIMIT 20
+            """,
+            (corte_24h,),
+        ).fetchall():
+            limite = _limites_do_usuario(linha["criadora_id"])["buscas_dia"]
+            if linha["total"] > limite * 2:
+                sinais.append(
+                    {
+                        "tipo": "volume",
+                        "titulo": f"Volume anormal: {linha['total']} buscas em 24 h para "
+                        f"{linha['public_name'] or linha['username']}",
+                        "detalhe": f"O plano {linha['plano']} permite {limite} por dia.",
+                    }
+                )
+        for linha in conn.execute(
+            """
+            SELECT actor_label, COUNT(*) AS total FROM auditoria_evento
+            WHERE criado_em >= ? AND acao = 'conta_excluida'
+            GROUP BY actor_label HAVING COUNT(*) >= 3 ORDER BY total DESC LIMIT 5
+            """,
+            (corte_24h,),
+        ).fetchall():
+            sinais.append(
+                {
+                    "tipo": "exclusoes",
+                    "titulo": f"{linha['total']} contas excluídas em 24 h",
+                    "detalhe": "Confirme se foram pedidos legítimos das titulares.",
+                }
+            )
+    return sinais
+
+
+# --- Modelos de texto editáveis ---------------------------------------------
+
+
+def obter_modelo_texto(codigo):
+    with conexao() as conn:
+        linha = conn.execute(
+            "SELECT codigo, titulo, conteudo, atualizado_em FROM modelo_texto"
+            " WHERE codigo = ?",
+            ((codigo or "").strip(),),
+        ).fetchone()
+    return dict(linha) if linha else None
+
+
+def salvar_modelo_texto(codigo, titulo, conteudo):
+    codigo = (codigo or "").strip()
+    if not re.fullmatch(r"[a-z]{2,8}", codigo):
+        raise ValueError("Código de modelo inválido.")
+    if not (conteudo or "").strip():
+        raise ValueError("O modelo não pode ficar vazio.")
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO modelo_texto (codigo, titulo, conteudo, atualizado_em)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (codigo) DO UPDATE SET
+                titulo = excluded.titulo,
+                conteudo = excluded.conteudo,
+                atualizado_em = excluded.atualizado_em
+            """,
+            (codigo, (titulo or "").strip()[:80], conteudo[:20000], _agora_utc()),
+        )
+
+
+def restaurar_modelo_texto(codigo):
+    with conexao() as conn:
+        conn.execute("DELETE FROM modelo_texto WHERE codigo = ?", ((codigo or ""),))
 
 
 def registrar_checagem_pedido(

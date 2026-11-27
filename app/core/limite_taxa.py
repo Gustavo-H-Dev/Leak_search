@@ -35,6 +35,7 @@ class StoreMemoria:
 
     def __init__(self):
         self._eventos = defaultdict(deque)
+        self._uso = defaultdict(int)
         self._trava = threading.Lock()
 
     def permitir(self, chave: str, limite: int, agora: float) -> float:
@@ -47,6 +48,19 @@ class StoreMemoria:
                 fila.append(agora)
                 return 0.0
             return max(0.01, fila[0] + JANELA_SEGUNDOS - agora)
+
+    def registrar_uso(self, chave: str, agora: float) -> None:
+        minuto = int(agora // 60)
+        with self._trava:
+            self._uso[minuto] += 1
+            for antigo in [m for m in self._uso if m < minuto - 120]:
+                self._uso.pop(antigo, None)
+
+    def estatisticas(self, chave: str, agora: float) -> dict:
+        minuto = int(agora // 60)
+        with self._trava:
+            valores = [self._uso.get(minuto - indice, 0) for indice in range(59, -1, -1)]
+        return {"minutos": valores}
 
 
 _SCRIPT = """
@@ -89,6 +103,25 @@ class StoreRedis:
         )
         return float(espera or 0.0)
 
+    def registrar_uso(self, chave: str, agora: float) -> None:
+        minuto = int(agora // 60)
+        try:
+            pipe = self._cliente.pipeline()
+            pipe.incr(f"{chave}:uso:{minuto}")
+            pipe.expire(f"{chave}:uso:{minuto}", 7200)
+            pipe.execute()
+        except Exception:
+            logger.warning("Nao foi possivel registrar o uso do limite no Redis")
+
+    def estatisticas(self, chave: str, agora: float) -> dict:
+        minuto = int(agora // 60)
+        chaves = [f"{chave}:uso:{minuto - indice}" for indice in range(59, -1, -1)]
+        try:
+            valores = self._cliente.mget(chaves)
+        except Exception:
+            valores = [None] * len(chaves)
+        return {"minutos": [int(valor or 0) for valor in valores]}
+
 
 class Limitador:
     def __init__(self, store, *, chave="tinyfish", dormir=None, relogio=None):
@@ -100,10 +133,15 @@ class Limitador:
     def aguardar(self) -> None:
         """Bloqueia ate haver vaga na janela; nunca dorme mais de 5 s de uma vez."""
         while True:
+            agora = self._relogio()
             espera = self._store.permitir(
-                self._chave, limite_por_minuto(), self._relogio()
+                self._chave, limite_por_minuto(), agora
             )
             if espera <= 0:
+                try:
+                    self._store.registrar_uso(self._chave, agora)
+                except Exception:
+                    logger.warning("Nao foi possivel registrar o uso do limitador")
                 return
             self._dormir(min(espera, ESPERA_MAXIMA))
 
@@ -144,3 +182,27 @@ def obter() -> Limitador:
 
 def aguardar_tinyfish() -> None:
     obter().aguardar()
+
+
+def estatisticas() -> dict:
+    """Uso do limite de 30/min: minuto atual, pico e total da ultima hora."""
+    limitador = obter()
+    try:
+        dados = limitador._store.estatisticas(limitador._chave, time.time())
+        minutos = list(dados.get("minutos") or [])
+    except Exception:
+        logger.warning("Nao foi possivel ler as estatisticas do limitador")
+        minutos = []
+    agora = time.time()
+    minuto_atual = int(agora // 60)
+    rotulos = [
+        time.strftime("%H:%M", time.localtime((minuto_atual - indice) * 60))
+        for indice in range(len(minutos) - 1, -1, -1)
+    ]
+    return {
+        "limite": limite_por_minuto(),
+        "minutos": list(zip(rotulos, minutos)),
+        "ultimo_minuto": minutos[-1] if minutos else 0,
+        "pico": max(minutos) if minutos else 0,
+        "total_60min": sum(minutos),
+    }

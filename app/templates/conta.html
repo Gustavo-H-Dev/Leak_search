@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block titulo %}Minha conta{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-3xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Configurações</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Minha conta e meus dados
+    </h1>
+    <p class="ds-card__texto">
+      A exclusão é imediata e não pode ser desfeita. Confirme com a sua senha e
+      digitando <strong>EXCLUIR</strong>.
+    </p>
+  </header>
+
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>{% endif %}
+  {% if erro %}<p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>{% endif %}
+
+  <section class="ds-card" aria-labelledby="o-que-sai">
+    <h2 class="ds-card__titulo" id="o-que-sai">O que será apagado</h2>
+    <ul class="ds-lista">
+      <li class="ds-lista__item"><span>Candidatos e links encontrados</span><strong>{{ dados.candidatos }}</strong></li>
+      <li class="ds-lista__item"><span>Perfis monitorados</span><strong>{{ dados.perfis }}</strong></li>
+      <li class="ds-lista__item"><span>Variações de nome</span><strong>{{ dados.variantes }}</strong></li>
+      <li class="ds-lista__item"><span>Execuções de busca</span><strong>{{ dados.execucoes }}</strong></li>
+      <li class="ds-lista__item"><span>Pedidos de remoção</span><strong>{{ dados.pedidos }}</strong></li>
+      <li class="ds-lista__item"><span>Fotos enviadas para busca</span><strong>{{ dados.fotos }}</strong></li>
+    </ul>
+    <p class="ds-card__texto">
+      Também saem a conta, o e-mail, a senha, as sessões e os avisos. A trilha de
+      auditoria (que prova a exclusão e acessos) fica <strong>anônima por
+      {{ retencao_dias }} dias</strong> e depois é apagada; ela não guarda nome,
+      e-mail, senha nem trecho de site.
+    </p>
+  </section>
+
+  <form class="ds-card grid gap-3" method="post" action="/configuracoes/conta/excluir"
+        onsubmit="return confirm('Excluir a conta e todos os dados agora? Não há como desfazer.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h2 class="ds-card__titulo">Confirmar exclusão</h2>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="senha-conta">Senha atual</label>
+      <input class="ds-input" id="senha-conta" name="senha" type="password"
+             autocomplete="current-password" required>
+    </div>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="confirmacao-conta">Digite EXCLUIR</label>
+      <input class="ds-input" id="confirmacao-conta" name="confirmacao" required
+             autocapitalize="characters" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="submit" class="ds-btn ds-btn--perigo ds-btn--pequeno">Excluir conta e dados</button>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/perfil-busca">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

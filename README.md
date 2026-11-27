@@ -239,12 +239,51 @@ enviado, removido), os perfis monitorados e os indicadores: sites
 reincidentes, tempo médio até a remoção e taxa de remoção. As exportações
 **CSV** e **PDF** levam só metadados, para a criadora levar ao advogado.
 
+### Admin e operação
+
+Só existem os papéis **admin** e **cliente**; não há revisor separado. Todas
+as telas abaixo exigem admin e respondem 403 a uma conta cliente:
+
+- `/admin` — resumo, atalhos, **sinais de abuso** e últimas ações sensíveis.
+- `/admin/uso` — buscas por criadora e por dia, falhas por tipo e uso do
+  limite global de 30/min (pico e última hora). Nenhum preço é inventado.
+- `/admin/planos` — tabela `plano_limite` editável: perfis monitorados, buscas
+  por dia e frequência mínima. Gratuito (5/4/24 h) já vale; Pro (20/12/6 h)
+  está preparado, sem cobrança. O plano de cada conta é trocado na mesma tela.
+- `/admin/modelos` — modelos de pedido em português e inglês, com o arquivo
+  padrão como fallback e botão de restaurar; a tela repete o aviso de revisão
+  pelo advogado.
+- `/admin/auditoria` — verificação, exportação, exclusão, domínios, contatos,
+  modelos e planos, com filtro por ação e purga após 12 meses.
+
+Domínios (`/dominios`), contatos de abuso (`/contatos-abuso`) e usuários
+(`/usuarios`) continuam nas telas de operação já existentes. Os sinais de
+abuso são **só alerta**: 5+ falhas de login, 3+ buscas com erro, perfis
+criados/removidos em sequência, volume acima do dobro do plano e 3+ exclusões
+em 24 h não bloqueiam nem apagam nada sozinhos.
+
+Em **Configurações > Minha conta** (`/configuracoes/conta`) a criadora vê o
+que será apagado (candidatos, perfis, variações, execuções, pedidos e fotos) e
+exclui a conta com senha + a palavra `EXCLUIR`. A exclusão revoga sessões,
+remove arquivos e **anonimiza a auditoria, que fica por 12 meses**
+(`RETENCAO_AUDITORIA_DIAS=365`) e depois é purgada. Backups do provedor seguem
+a rotação contratada fora do app.
+
+Segurança: Argon2 e senha mínima de 12 caracteres; sessões de 14 dias
+guardadas só como hash, revogadas no logout e na troca de senha/e-mail;
+bloqueio de login após 5 falhas em 15 minutos por usuário/IP; cookie
+`HttpOnly`, `SameSite=Lax` e `Secure` com `COOKIE_SECURE=1`; CSP, `DENY` de
+frame, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, COOP e HSTS com
+cookie seguro; `no-store` nas páginas autenticadas. Segredos só em variáveis
+de ambiente (`.env` fica fora do Git).
+
 ### Remoção e acompanhamento
 
 Cada link confirmado na fila tem o botão **Remover**, que abre
 `/remocao/novo`: o texto do pedido já vem com nome, arroba, links e descrição,
 com botão de copiar. Os modelos ficam em `app/modelos_remocao/pt.txt` e
-`en.txt` (editáveis) e a tela avisa **"Modelo a ser revisado por advogado"**;
+`en.txt`, editáveis também em `/admin/modelos`, e a tela avisa **"Modelo a ser
+revisado por advogado"**;
 o app não cita base legal. Um pedido pode cobrir vários links do mesmo site.
 
 O contato de abuso de cada site (e-mail, formulário, observação) é cadastrado

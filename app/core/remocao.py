@@ -47,6 +47,14 @@ def rotulo_status(status: str) -> str:
 def carregar_modelo(codigo: str) -> str:
     if codigo not in MODELOS:
         raise ValueError("Modelo de pedido inválido.")
+    try:
+        from app import db
+
+        salvo = db.obter_modelo_texto(codigo)
+    except Exception:
+        salvo = None
+    if salvo and (salvo.get("conteudo") or "").strip():
+        return salvo["conteudo"]
     caminho = PASTA_MODELOS / f"{codigo}.txt"
     if not caminho.is_file():
         raise ValueError(f"Modelo {codigo} não encontrado em {PASTA_MODELOS}.")

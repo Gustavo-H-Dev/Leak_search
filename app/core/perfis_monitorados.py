@@ -118,9 +118,10 @@ def salvar_perfil(criadora_id: int, plataforma: str, arroba: str) -> bool:
                 db.atualizar_status_perfil_monitorado(perfil["id"], criadora_id, "ativo")
                 return True
             return False
-    if len(existentes) >= db.limite_perfis_monitorados():
+    limite = db.limite_perfis_monitorados(criadora_id)
+    if len(existentes) >= limite:
         raise ValueError(
-            f"O limite de {db.limite_perfis_monitorados()} perfis monitorados "
+            f"O limite de {limite} perfis monitorados "
             "já foi atingido. Remova um perfil ou pause antes de adicionar outro."
         )
     db.adicionar_perfil_monitorado(criadora_id, plataforma, arroba)

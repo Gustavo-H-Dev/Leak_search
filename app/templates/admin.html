@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block titulo %}Admin{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-5xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Operação</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Admin
+    </h1>
+    <p class="ds-card__texto">
+      Aprovação de domínios, contatos, modelos, custo e sinais de abuso. Nada
+      aqui bloqueia uma conta sozinho: o alerta existe para você decidir.
+    </p>
+  </header>
+
+  {% if mensagem %}
+  <p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>
+  {% endif %}
+
+  <section aria-label="Resumo" class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">{{ usuarios|length }}</p>
+      <p class="ds-card__texto mb-0 mt-2">Contas</p>
+    </div>
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">{{ dominios_pendentes }}</p>
+      <p class="ds-card__texto mb-0 mt-2">Domínios a revisar</p>
+    </div>
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">{{ contatos }}</p>
+      <p class="ds-card__texto mb-0 mt-2">Contatos de abuso</p>
+    </div>
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">{{ retencao_dias }} d</p>
+      <p class="ds-card__texto mb-0 mt-2">Retenção da auditoria</p>
+    </div>
+  </section>
+
+  <section class="ds-card" aria-labelledby="atalhos">
+    <h2 class="ds-card__titulo" id="atalhos">Ferramentas</h2>
+    <div class="flex flex-wrap gap-2">
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="/admin/uso">Uso e custo</a>
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="/admin/planos">Planos e limites</a>
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="/admin/modelos">Modelos de texto</a>
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="/admin/auditoria">Auditoria</a>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/dominios">Domínios</a>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/contatos-abuso">Contatos</a>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/usuarios">Usuários</a>
+    </div>
+  </section>
+
+  <section class="ds-card" aria-labelledby="sinais">
+    <h2 class="ds-card__titulo" id="sinais">Sinais de abuso</h2>
+    <p class="ds-card__texto">
+      Só alerta. Nenhuma conta é bloqueada automaticamente por estes sinais.
+    </p>
+    {% if sinais %}
+    <ul class="ds-lista">
+      {% for sinal in sinais %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ sinal.titulo }}</p>
+          <p class="ds-lista__texto">{{ sinal.detalhe }}</p>
+        </div>
+        <span class="ds-badge">{{ sinal.tipo }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">Nenhum sinal nas últimas 24 horas.</p>
+    {% endif %}
+  </section>
+
+  <section class="ds-card" aria-labelledby="ultimas-acoes">
+    <header class="ds-card__cabecalho">
+      <h2 class="ds-card__titulo" id="ultimas-acoes">Últimas ações sensíveis</h2>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/admin/auditoria">Ver tudo</a>
+    </header>
+    {% if auditoria %}
+    <ul class="ds-lista">
+      {% for evento in auditoria %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ acoes.get(evento.acao, evento.acao) }}</p>
+          <p class="ds-lista__texto">
+            {{ evento.actor_label or "conta anônima" }} · {{ (evento.criado_em|string)[:19]|replace("T", " ") }}
+            {% if evento.alvo_id %} · {{ evento.alvo_tipo }} {{ evento.alvo_id }}{% endif %}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">Nenhuma ação registrada ainda.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block titulo %}Planos e limites{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-5xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Admin</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Planos e limites
+    </h1>
+    <p class="ds-card__texto">
+      Limites por plano em uma tabela editável: perfis monitorados, buscas por
+      dia e frequência mínima. Ainda não há cobrança; o plano Gratuito é o que
+      vale para todas as contas.
+    </p>
+  </header>
+
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>{% endif %}
+  {% if erro %}<p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>{% endif %}
+
+  {% for plano in planos %}
+  <form class="ds-card grid gap-3" method="post" action="/admin/planos">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="plano" value="{{ plano.plano }}">
+    <header class="ds-card__cabecalho">
+      <div>
+        <h2 class="ds-card__titulo">{{ plano.nome }}</h2>
+        <p class="ds-card__texto"><code>{{ plano.plano }}</code> · {{ plano.descricao }}</p>
+      </div>
+    </header>
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="nome-{{ plano.plano }}">Nome</label>
+        <input class="ds-input" id="nome-{{ plano.plano }}" name="nome" value="{{ plano.nome }}" required maxlength="80">
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="perfis-{{ plano.plano }}">Perfis monitorados</label>
+        <input class="ds-input" id="perfis-{{ plano.plano }}" name="max_perfis" type="number" min="1" max="500" value="{{ plano.max_perfis }}" required>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="buscas-{{ plano.plano }}">Buscas por dia</label>
+        <input class="ds-input" id="buscas-{{ plano.plano }}" name="buscas_dia" type="number" min="1" max="500" value="{{ plano.buscas_dia }}" required>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="freq-{{ plano.plano }}">Frequência mínima (horas)</label>
+        <input class="ds-input" id="freq-{{ plano.plano }}" name="frequencia_horas" type="number" min="1" max="8760" value="{{ plano.frequencia_horas }}" required>
+      </div>
+    </div>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="desc-{{ plano.plano }}">Descrição</label>
+      <input class="ds-input" id="desc-{{ plano.plano }}" name="descricao" value="{{ plano.descricao }}" maxlength="500">
+    </div>
+    <button type="submit" class="ds-btn ds-btn--primario ds-btn--pequeno">Salvar limites</button>
+  </form>
+  {% endfor %}
+
+  <form class="ds-card grid gap-3" method="post" action="/admin/planos">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h2 class="ds-card__titulo">Novo plano</h2>
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="novo-plano">Código</label>
+        <input class="ds-input" id="novo-plano" name="plano" placeholder="ex.: studio" required pattern="[a-z0-9_-]{2,32}" autocapitalize="none">
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="novo-nome">Nome</label>
+        <input class="ds-input" id="novo-nome" name="nome" placeholder="Studio" required maxlength="80">
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="novo-perfis">Perfis monitorados</label>
+        <input class="ds-input" id="novo-perfis" name="max_perfis" type="number" min="1" max="500" value="10" required>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="novo-buscas">Buscas por dia</label>
+        <input class="ds-input" id="novo-buscas" name="buscas_dia" type="number" min="1" max="500" value="6" required>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="novo-freq">Frequência mínima (horas)</label>
+        <input class="ds-input" id="novo-freq" name="frequencia_horas" type="number" min="1" max="8760" value="12" required>
+      </div>
+    </div>
+    <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Criar plano</button>
+  </form>
+
+  <section class="ds-card" aria-labelledby="contas-planos">
+    <h2 class="ds-card__titulo" id="contas-planos">Plano por conta</h2>
+    <p class="ds-card__texto">Trocar o plano muda os limites na próxima busca e no próximo perfil.</p>
+    {% if usuarios %}
+    <ul class="ds-lista">
+      {% for usuario in usuarios %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ usuario.public_name or usuario.username }}</p>
+          <p class="ds-lista__texto">{{ usuario.role }} · plano atual: {{ usuario.plano or "gratis" }}</p>
+        </div>
+        <form class="flex items-center gap-2" method="post" action="/admin/planos/usuarios/{{ usuario.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="sr-only" for="plano-usuario-{{ usuario.id }}">Plano</label>
+          <select class="ds-input ds-input--pequeno" id="plano-usuario-{{ usuario.id }}" name="plano">
+            {% for plano in planos %}
+            <option value="{{ plano.plano }}"{% if plano.plano == (usuario.plano or "gratis") %} selected{% endif %}>{{ plano.nome }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="ds-btn ds-btn--fantasma ds-btn--pequeno">Aplicar</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">Nenhuma conta cadastrada.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

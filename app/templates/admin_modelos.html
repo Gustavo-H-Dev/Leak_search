@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block titulo %}Modelos de texto{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-4xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Admin</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Modelos de texto
+    </h1>
+    <p class="ds-card__texto">
+      Texto que a criadora leva ao advogado. O app não escreve base legal:
+      quem preenche os trechos jurídicos é ela ou o advogado. O marcador
+      <code>{{ "{{" }}nome{{ "}}" }}</code>, <code>{{ "{{" }}arroba{{ "}}" }}</code>,
+      <code>{{ "{{" }}urls{{ "}}" }}</code>, <code>{{ "{{" }}descricao{{ "}}" }}</code> e
+      <code>{{ "{{" }}data{{ "}}" }}</code> é trocado no pedido.
+    </p>
+  </header>
+
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>{% endif %}
+  {% if erro %}<p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>{% endif %}
+
+  {% for modelo in modelos %}
+  <form class="ds-card grid gap-3" method="post" action="/admin/modelos">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="codigo" value="{{ modelo.codigo }}">
+    <header class="ds-card__cabecalho">
+      <div>
+        <h2 class="ds-card__titulo">{{ modelo.nome }}</h2>
+        <p class="ds-card__texto">
+          {% if modelo.personalizado %}Personalizado{% else %}Arquivo padrão{% endif %}
+          {% if modelo.atualizado_em %}· salvo em {{ (modelo.atualizado_em|string)[:10] }}{% endif %}
+        </p>
+      </div>
+    </header>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="titulo-{{ modelo.codigo }}">Título</label>
+      <input class="ds-input" id="titulo-{{ modelo.codigo }}" name="titulo" value="{{ modelo.titulo }}" maxlength="80">
+    </div>
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="conteudo-{{ modelo.codigo }}">Conteúdo</label>
+      <textarea class="ds-input" id="conteudo-{{ modelo.codigo }}" name="conteudo" rows="16" required>{{ modelo.conteudo }}</textarea>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="submit" class="ds-btn ds-btn--primario ds-btn--pequeno">Salvar modelo</button>
+    </div>
+  </form>
+  {% if modelo.personalizado %}
+  <form method="post" action="/admin/modelos/{{ modelo.codigo }}/restaurar">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="ds-btn ds-btn--fantasma ds-btn--pequeno">Restaurar padrão ({{ modelo.codigo }})</button>
+  </form>
+  {% endif %}
+  {% endfor %}
+
+  <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/admin">Voltar ao admin</a>
+</div>
+{% endblock %}

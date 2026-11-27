@@ -21,6 +21,14 @@
       <input type="checkbox" name="role" value="admin" {% if usuario.role == "admin" %}checked{% endif %}>
       <span>Administrador</span>
     </label>
+    <label class="field-label" for="plano">Plano</label>
+    <select id="plano" name="plano">
+      {% for plano in planos %}
+      <option value="{{ plano.plano }}"{% if plano.plano == (usuario.plano or "gratis") %} selected{% endif %}>
+        {{ plano.nome }} — {{ plano.max_perfis }} perfis, {{ plano.buscas_dia }} buscas/dia
+      </option>
+      {% endfor %}
+    </select>
     <label class="field-label" for="senha">Nova senha (opcional, mínimo 12 caracteres)</label>
     <input id="senha" name="senha" type="password" minlength="12" maxlength="128" autocomplete="new-password">
     <label class="field-label" for="confirmar-senha">Confirme a nova senha</label>

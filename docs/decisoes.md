@@ -485,3 +485,86 @@ URL, título, status de revisão, situação, datas e pedido — nunca trecho,
 miniatura ou imagem. O CSV usa `;` e BOM para abrir no Excel em português. O
 PDF é gerado em Python puro (`app/core/pdf_simples.py`), sem dependência nova,
 com Helvetica e quebra de página; `file` reconhece o resultado como PDF 1.4.
+
+## Fase 7 — Admin e operação (27/11/2026)
+
+### D47 — Só existe o papel admin; não há revisor separado
+
+As contas têm `role` `admin` ou `cliente`. Não foi criado um papel
+"revisor" porque ninguém exerce essa função hoje: um revisor sem as demais
+permissões só aumentaria a superfície de erro. Toda rota de operação usa
+`exigir_admin`, e o teste de aceite abre `/admin`, `/admin/uso`,
+`/admin/planos`, `/admin/modelos`, `/admin/auditoria`, `/dominios`,
+`/contatos-abuso` e `/usuarios` como visitante (redireciona ao login) e como
+cliente (403).
+
+### D48 — Painel admin e modelos de texto no banco
+
+`/admin` reúne o resumo, os atalhos para as telas que já existiam (domínios,
+contatos, usuários), os sinais de abuso e as últimas ações. Os modelos de
+remoção continuam tendo arquivo padrão em `app/modelos_remocao/`, mas agora
+podem ser editados em `/admin/modelos`; o texto salvo em `modelo_texto` tem
+precedência e "restaurar padrão" apaga a linha e volta ao arquivo. A tela
+relembra que o modelo precisa de revisão do advogado.
+
+### D49 — Uso e custo medidos, sem valor inventado
+
+`/admin/uso` mostra buscas por criadora e por dia, o total diário, falhas por
+`motivo_falha` (sem créditos, limite do provedor, Instagram bloqueado,
+configuração, erro) e o uso do limite global de 30/min. O limitador grava a
+contagem por minuto no Redis (ou na janela em memória quando não há Redis) e
+só então exibe pico e total da última hora; nenhum preço de provedor é
+inventado — o custo aparece quando a fatura for cadastrada.
+
+### D50 — Limites por plano em tabela, aplicados de verdade
+
+`plano_limite` guarda perfis monitorados, buscas por dia e frequência mínima
+por plano; `users.plano` diz o plano da conta. A tabela já nasce com
+**Gratuito** (5 perfis, 4 buscas/dia, 24 h) e **Pro (futuro)** (20, 12, 6 h),
+este sem cobrança. O admin edita os valores e troca o plano da conta. Perfis
+e buscas diárias usam o plano como fonte (ambiente continua com precedência
+para testes/operação); a frequência fica registrada para quando a cobrança
+existir, sem inventar bloqueio de agenda agora.
+
+### D51 — Sinais de abuso: só alerta, nunca bloqueio automático
+
+`/admin` lista sinais objetivos das últimas 24 h/7 dias: 5+ falhas de login
+para o mesmo usuário, 3+ buscas com erro para a mesma criadora, 3+
+verificações de remoção com erro, perfis
+criados e removidos em sequência, volume acima do dobro do limite diário e
+3+ exclusões de conta em 24 h. Nenhum sinal altera status, apaga dado ou
+impede login; a decisão é humana. O teste confirma que a conta citada no
+alerta continua entrando.
+
+### D52 — Exclusão da conta: apaga os dados, anonimiza a auditoria
+
+A tela **Minha conta** (`/configuracoes/conta`) mostra exatamente o que será
+apagado (candidatos, perfis, variações, execuções, pedidos e fotos) e exige
+senha + a palavra `EXCLUIR` (maiúsculas, exata). A exclusão usa os
+`ON DELETE CASCADE` para os dados da conta, revoga as sessões e remove os
+arquivos de mídia. Antes de apagar, grava `conta_excluida`; depois a trilha
+fica com `actor_user_id` nulo e sem nome/e-mail. **Retenção escolhida pela
+titular em 27/11/2026: 12 meses** (`RETENCAO_AUDITORIA_DIAS=365`), com purga
+automática; a tela e o README dizem isso. O teste comprova que as tabelas da
+conta ficam vazias, a sessão antiga não autentica e o evento de exclusão
+permanece anônimo. Backups do provedor seguem o prazo de rotação contratado
+fora do app; a exclusão não promete apagar cópias de backup.
+
+### D53 — Auditoria e revisão de segurança
+
+Eventos sensíveis vão para `auditoria_evento`: verificação de remoção,
+exportação CSV/PDF, exclusão (auto ou pelo admin), aprovação/rejeição de
+domínio, contato de abuso, modelo de texto, plano e criação/remoção de perfil.
+A trilha guarda ator, ação, alvo, detalhe curto, IP e data — nunca senha,
+token ou trecho de site.
+
+Revisão de segurança aplicada: Argon2 para senha e mínimo de 12 caracteres;
+sessões de 14 dias guardadas só como SHA-256 do token, com revogação no
+logout, troca de senha/e-mail; cookie `HttpOnly`, `SameSite=Lax` e `Secure`
+quando `COOKIE_SECURE=1`; bloqueio de login após 5 falhas em 15 minutos por
+usuário ou IP (IP da conexão, não `X-Forwarded-For`); cabeçalhos CSP,
+`X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`,
+COOP e HSTS com cookie seguro; `Cache-Control: no-store` nas páginas HTML
+autenticadas. Segredos ficam só em variáveis de ambiente — `.env` está no
+`.gitignore`, `.env.example` não tem valores e nenhuma chave foi encontrada
+em arquivo versionado.

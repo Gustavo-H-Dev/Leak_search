@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block titulo %}Auditoria{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-5xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Admin</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Auditoria
+    </h1>
+    <p class="ds-card__texto">
+      Quem fez o quê em verificação, exportação, exclusão, domínios, contatos e
+      modelos. A trilha não guarda senha, token nem trecho de site. Eventos com
+      mais de {{ retencao_dias }} dias são apagados automaticamente.
+    </p>
+  </header>
+
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>{% endif %}
+
+  <div class="flex flex-wrap items-end gap-3">
+    <form class="ds-card flex flex-1 flex-wrap items-end gap-3" method="get" action="/admin/auditoria">
+      <div class="ds-campo min-w-0 flex-1">
+        <label class="ds-rotulo" for="acao">Ação</label>
+        <select class="ds-input" id="acao" name="acao">
+          <option value="">Todas</option>
+          {% for chave, nome in acoes.items() %}
+          <option value="{{ chave }}"{% if chave == acao_atual %} selected{% endif %}>{{ nome }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Filtrar</button>
+    </form>
+    <form method="post" action="/admin/auditoria/purgar">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="ds-btn ds-btn--fantasma ds-btn--pequeno"
+              onclick="return confirm('Apagar agora a auditoria mais antiga que o prazo de retenção?');">
+        Purgar antigos
+      </button>
+    </form>
+  </div>
+
+  <section class="ds-card" aria-labelledby="eventos">
+    <h2 class="ds-card__titulo" id="eventos">Eventos ({{ eventos|length }})</h2>
+    {% if eventos %}
+    <div class="overflow-x-auto">
+      <table class="w-full border-collapse text-sm">
+        <thead>
+          <tr class="text-left text-texto-suave">
+            <th class="p-2">Quando</th>
+            <th class="p-2">Quem</th>
+            <th class="p-2">Ação</th>
+            <th class="p-2">Alvo</th>
+            <th class="p-2">Detalhe</th>
+            <th class="p-2">IP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for evento in eventos %}
+          <tr class="border-t border-borda align-top">
+            <td class="p-2 whitespace-nowrap">{{ (evento.criado_em|string)[:19]|replace("T", " ") }}</td>
+            <td class="p-2 break-words">{{ evento.actor_label or "—" }}</td>
+            <td class="p-2">{{ acoes.get(evento.acao, evento.acao) }}</td>
+            <td class="p-2 break-words">{{ evento.alvo_tipo }}{% if evento.alvo_id %} {{ evento.alvo_id }}{% endif %}</td>
+            <td class="p-2 break-words">{{ evento.detalhe or "—" }}</td>
+            <td class="p-2">{{ evento.ip or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="ds-card__texto">Nenhum evento para este filtro.</p>
+    {% endif %}
+  </section>
+
+  <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/admin">Voltar ao admin</a>
+</div>
+{% endblock %}
