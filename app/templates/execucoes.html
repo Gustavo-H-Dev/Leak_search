@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block titulo %}Execuções{% endblock %}
+{% block conteudo %}
+<section class="search-page">
+  <span class="eyebrow">EXECUÇÕES</span>
+  <h1>Histórico de execuções</h1>
+  <p>
+    Cada execução de busca com as consultas que rodaram, o modelo (M1–M5) que
+    gerou cada uma, quantos resultados o provedor devolveu e quantos viraram
+    candidatos na <a href="/valida">Valida</a>. A fila principal mostra os
+    candidatos com nota a partir de {{ limiar }}; os demais ficam em
+    "Abaixo do corte".
+  </p>
+  {% for execucao in execucoes %}
+  <article class="serpapi-card">
+    <h2>Execução {{ execucao.execucao_id }}</h2>
+    <p>
+      {{ execucao.consultas|length }} consulta(s) ·
+      {{ execucao.resultados }} resultado(s) no provedor ·
+      <strong>{{ execucao.candidatos }} candidato(s) na Valida</strong>
+      {% if execucao.inicio %} · {{ (execucao.inicio|string)[:19]|replace("T", " ") }} UTC{% endif %}
+    </p>
+    <table style="width:100%; border-collapse:collapse; font-size:.84rem;">
+      <thead>
+        <tr style="text-align:left; color:var(--muted);">
+          <th style="padding:.3rem .4rem;">Modelo</th>
+          <th style="padding:.3rem .4rem;">Consulta</th>
+          <th style="padding:.3rem .4rem;">Resultados</th>
+          <th style="padding:.3rem .4rem;">Candidatos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for consulta in execucao.consultas %}
+        <tr style="border-top:1px solid var(--border);">
+          <td style="padding:.3rem .4rem;">{{ consulta.modelo or "—" }}</td>
+          <td style="padding:.3rem .4rem;"><code>{{ consulta.consulta }}</code></td>
+          <td style="padding:.3rem .4rem;">{{ consulta.resultados }}</td>
+          <td style="padding:.3rem .4rem;">{{ consulta.candidatos }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+  {% else %}
+  <p>Nenhuma execução registrada ainda. Rode uma busca em
+    <a href="/busca-web">Busca na web</a>.</p>
+  {% endfor %}
+</section>
+{% endblock %}

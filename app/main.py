@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import logging
 import mimetypes
@@ -14,7 +16,13 @@ import httpx
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -746,9 +754,49 @@ def _voltar_ao_formulario_edicao(criadora_id: int, mensagem: str):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    return templates.TemplateResponse(
-        request, "home.html", {"titulo": "Monitoramento de Vazamentos"}
-    )
+    contexto = {"titulo": "Monitoramento de Vazamentos"}
+    if request.state.user and request.state.user["role"] == "admin":
+        contexto["pendencias"] = _pendencias_de_operacao()
+    return templates.TemplateResponse(request, "home.html", contexto)
+
+
+def _pendencias_de_operacao():
+    """Checklist do admin: contas que ainda nao conseguem gerar resultados."""
+    pendencias = []
+    for usuario in db.listar_usuarios():
+        nome = usuario["public_name"] or usuario["username"]
+        link = f"/usuarios/{usuario['id']}/editar"
+        if not (usuario["public_name"] and usuario["public_handle"]):
+            pendencias.append(
+                {
+                    "usuario": nome,
+                    "texto": "perfil de busca incompleto (nome público e arroba)",
+                    "link": link,
+                    "acao": "Completar perfil",
+                }
+            )
+            continue
+        if not db.contar_candidatos_por_status(usuario["id"]):
+            pendencias.append(
+                {
+                    "usuario": nome,
+                    "texto": "nenhuma busca executada para esta conta",
+                    "link": f"/busca-web?target_user_id={usuario['id']}",
+                    "acao": "Rodar primeira busca",
+                }
+            )
+        estado = _status_vazamento(usuario["id"])
+        if estado.get("estado") == "erro":
+            pendencias.append(
+                {
+                    "usuario": nome,
+                    "texto": "a última busca falhou: "
+                    + (estado.get("erro") or "erro não informado")[:120],
+                    "link": f"/busca-web?target_user_id={usuario['id']}",
+                    "acao": "Ver busca",
+                }
+            )
+    return pendencias
 
 
 @app.get("/saude")
@@ -1379,6 +1427,7 @@ def _referencias_do_usuario(alvo):
 
 STATUS_VALIDA = {
     "pending": "Pendentes",
+    "abaixo": "Abaixo do corte",
     "leaked": "Vazados",
     "not_me": "Não sou eu",
     "official": "Oficiais",
@@ -1441,10 +1490,26 @@ def valida(
                     {"phash": post["phash"], "origem": f"Instagram — {post['shortcode']}"}
                 )
 
+    # "Abaixo do corte" nao e um status no banco: e a mesma fila de pendentes
+    # que a nota minima esconde. Mostrar essa lista evita a impressao de fila
+    # vazia quando existe trabalho abaixo do limiar.
+    if status == "abaixo":
+        fila = (
+            []
+            if comparacao
+            else [
+                item
+                for item in db.listar_candidatos_revisao(alvo["id"], "pending", None)
+                if int(item["nota"] or 0) < nota_minima
+            ]
+        )
+    else:
+        fila = db.listar_candidatos_revisao(
+            alvo["id"], status, None if comparacao else nota_minima
+        )
+
     candidatos = []
-    for candidato in db.listar_candidatos_revisao(
-        alvo["id"], status, None if comparacao else nota_minima
-    ):
+    for candidato in fila:
         item = dict(candidato)
         motivos = item.get("motivos_json")
         if isinstance(motivos, (list, dict)):
@@ -1513,7 +1578,15 @@ def valida(
             "status_atual": status,
             "status_nomes": STATUS_VALIDA,
             "classificacao_nomes": CLASSIFICACAO_NOMES,
-            "contagens": db.contar_candidatos_por_status(alvo["id"]),
+            "contagens": {
+                **db.contar_candidatos_por_status(alvo["id"]),
+                "abaixo": (
+                    0 if comparacao
+                    else db.contar_candidatos_abaixo_do_limiar(
+                        alvo["id"], nota_minima
+                    )
+                ),
+            },
             "tem_referencias": bool(referencias),
             "mensagem": mensagem,
             "comparacao_imagem_ativa": comparacao,
@@ -1626,8 +1699,11 @@ def dominios_suspeitos_pagina(
             "tipos": dominios_core.TIPOS,
             "status_opcoes": dominios_core.STATUS,
             "contagens": {
-                chave: len(db.listar_dominios_suspeitos(chave))
-                for chave in dominios_core.STATUS
+                **{
+                    chave: len(db.listar_dominios_suspeitos(chave))
+                    for chave in dominios_core.STATUS
+                },
+                "todos": len(db.listar_dominios_suspeitos(None)),
             },
             "limiar": dominios_core.limiar(),
             "minimo_execucoes": dominios_core.minimo_execucoes(),
@@ -1716,6 +1792,89 @@ def validar_candidato(
         f"/valida?target_user_id={alvo['id']}"
         f"&mensagem={quote('Candidato atualizado.')}",
         status_code=303,
+    )
+
+
+@app.get("/valida/exportar.csv")
+def exportar_candidatos(
+    request: Request, target_user_id: int = 0, status: str = "pending"
+):
+    """Baixa a fila atual em CSV, para arquivar ou levar a um advogado."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if status not in STATUS_VALIDA:
+        status = "pending"
+    comparacao = comparacao_imagem_ativa()
+    limite = pontuacao.limiar_revisao()
+    linhas = db.listar_candidatos_revisao(
+        alvo["id"], "pending" if status == "abaixo" else status, None
+    )
+    if status == "abaixo":
+        linhas = [item for item in linhas if int(item["nota"] or 0) < limite]
+    elif status == "pending" and not comparacao:
+        linhas = [item for item in linhas if int(item["nota"] or 0) >= limite]
+
+    buffer = io.StringIO()
+    escritor = csv.writer(buffer, delimiter=";")
+    escritor.writerow(
+        [
+            "id",
+            "nota",
+            "status",
+            "classificacao",
+            "dominio",
+            "chave_grupo",
+            "modelo",
+            "consulta",
+            "posicao",
+            "url",
+            "titulo",
+            "primeira_vez_em",
+            "ultima_vez_em",
+        ]
+    )
+    for item in linhas:
+        escritor.writerow(
+            [
+                item["id"],
+                item["nota"] or 0,
+                STATUS_VALIDA.get(item["status"], item["status"]),
+                CLASSIFICACAO_NOMES.get(
+                    item["classificacao"], item["classificacao"] or ""
+                ),
+                item["dominio"] or "",
+                item["chave_grupo"] or "",
+                item["consulta_modelo"] or "",
+                item["consulta_texto"] or "",
+                item["posicao_busca"] or "",
+                item["url"],
+                item["title"] or "",
+                item["primeira_vez_em"] or "",
+                item["ultima_vez_em"] or "",
+            ]
+        )
+    usuario = re.sub(r"[^A-Za-z0-9_-]+", "-", str(alvo["username"] or "criadora"))
+    nome = f"candidatos-{usuario}-{status}.csv"
+    return Response(
+        "\ufeff" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.get(
+    "/execucoes",
+    response_class=HTMLResponse,
+    dependencies=[Depends(exigir_admin)],
+)
+def execucoes_de_busca(request: Request):
+    """Historico por consulta: qual modelo trouxe o que em cada execucao."""
+    return templates.TemplateResponse(
+        request,
+        "execucoes.html",
+        {
+            "execucoes": db.listar_execucoes(),
+            "limiar": pontuacao.limiar_revisao(),
+        },
     )
 
 

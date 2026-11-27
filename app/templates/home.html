@@ -69,4 +69,26 @@
     </a>
   </div>
 </section>
+
+{% if pendencias is defined and pendencias %}
+<section class="workflows" aria-labelledby="pendencias-title">
+  <div class="section-heading">
+    <div>
+      <span class="eyebrow">PRÓXIMOS PASSOS</span>
+      <h2 id="pendencias-title">O que falta arrumar ({{ pendencias|length }})</h2>
+    </div>
+    <p>Contas que ainda não conseguem gerar resultado com o botão de busca.</p>
+  </div>
+  <div class="workflow-grid">
+    {% for pendencia in pendencias %}
+    <a class="workflow-card" href="{{ pendencia.link }}">
+      <span class="card-link" aria-hidden="true">↗</span>
+      <h3>{{ pendencia.usuario }}</h3>
+      <p>{{ pendencia.texto }}</p>
+      <span class="card-action">{{ pendencia.acao }} <span aria-hidden="true">→</span></span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}

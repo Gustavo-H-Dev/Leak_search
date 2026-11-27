@@ -216,7 +216,8 @@
           <input type="checkbox" name="consentimento" value="on" required>
           <span>Autorizo o envio da consulta ou da minha foto à SerpApi.</span>
         </label>
-        <button id="endpoint-submit" type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos</button>
+        <button id="endpoint-submit" type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos{% if vazamento_consultas %} ({{ vazamento_consultas|length }} consultas){% endif %}</button>
+        {% if vazamento_consultas %}<p class="account-usage-note">Esta execução gasta {{ vazamento_consultas|length }} consulta(s) do provedor de busca.</p>{% endif %}
         <p id="endpoint-aviso" class="api-status api-status-missing" role="alert" hidden></p>
       </form>
   </div>

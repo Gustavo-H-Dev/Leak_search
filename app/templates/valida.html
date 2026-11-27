@@ -72,8 +72,12 @@
     {% endfor %}
   </nav>
 
+  <p class="account-usage-note">
+    <a class="button button-secondary" href="/valida/exportar.csv?target_user_id={{ target_user_id }}&status={{ status_atual }}">Exportar esta lista em CSV</a>
+  </p>
+
   <section class="search-results" aria-live="polite">
-    <h2>Candidatos por nota ({{ candidatos|length }}){% if grupos %} · {{ grupos }} álbum(ns)/grupo(s){% endif %}</h2>
+    <h2>{% if status_atual == "abaixo" %}Abaixo do corte{% else %}Candidatos por nota{% endif %} ({{ candidatos|length }}){% if grupos %} · {{ grupos }} álbum(ns)/grupo(s){% endif %}</h2>
     {% if candidatos %}
     <ul class="search-result-list">
       {% for candidato in candidatos %}
@@ -131,7 +135,18 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p>Nenhum candidato nesta lista. Rode uma busca em <a href="/busca-web?target_user_id={{ target_user_id }}">Busca na web</a>.</p>
+      {% if status_atual == "abaixo" %}
+      <p>Nenhum pendente abaixo de {{ nota_minima }}. Tudo o que foi coletado já está na fila principal.</p>
+      {% elif status_atual == "pending" and contagens.get("abaixo") %}
+      <p>
+        Nenhum pendente com nota a partir de <strong>{{ nota_minima }}</strong>.
+        Há <a href="/valida?target_user_id={{ target_user_id }}&status=abaixo">{{ contagens.abaixo }} candidato(s) abaixo do corte</a>:
+        eles não são descartados, só ficam fora da fila principal. Rode uma nova busca em
+        <a href="/busca-web?target_user_id={{ target_user_id }}">Busca na web</a> para trazer mais.
+      </p>
+      {% else %}
+      <p>Nenhum candidato nesta lista. Rode uma busca em <a href="/busca-web?target_user_id={{ target_user_id }}">Busca na web</a>.</p>
+      {% endif %}
     {% endif %}
   </section>
 </section>

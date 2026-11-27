@@ -1790,6 +1790,86 @@ def contar_candidatos_por_status(user_id):
     return {linha["status"]: linha["total"] for linha in linhas}
 
 
+def contar_candidatos_abaixo_do_limiar(user_id, limiar):
+    """Pendentes que ficaram abaixo da nota minima e nao entram na fila."""
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT COUNT(*) AS total FROM search_candidates
+            WHERE user_id = ? AND status = 'pending' AND COALESCE(nota, 0) < ?
+            """,
+            (user_id, int(limiar)),
+        ).fetchone()
+    return int((linha["total"] if linha else 0) or 0)
+
+
+def _lista_json(valor):
+    """Lista vinda de JSONB (PostgreSQL) ou de texto JSON (SQLite de teste)."""
+    if isinstance(valor, list):
+        return valor
+    try:
+        dados = json.loads(valor or "[]")
+    except (TypeError, ValueError):
+        return []
+    return dados if isinstance(dados, list) else []
+
+
+def listar_execucoes(limite=30):
+    """Execucoes de busca com as consultas de cada uma, mais recentes primeiro.
+
+    Cada consulta traz quantos resultados o provedor devolveu e quantos
+    candidatos ficaram na Valida, para saber qual modelo achou o que.
+    """
+    with conexao() as conn:
+        execucoes = conn.execute(
+            """
+            SELECT execucao_id, MIN(criada_em) AS inicio, MAX(criada_em) AS fim
+            FROM consulta_log
+            WHERE execucao_id IS NOT NULL
+            GROUP BY execucao_id
+            ORDER BY MAX(id) DESC
+            LIMIT ?
+            """,
+            (int(limite),),
+        ).fetchall()
+        resultado = []
+        for execucao in execucoes:
+            linhas = conn.execute(
+                """
+                SELECT c.id, c.modelo, c.consulta_exata, c.criada_em, c.posicoes_json,
+                       (SELECT COUNT(*) FROM search_candidates s
+                         WHERE s.consulta_log_id = c.id) AS candidatos
+                FROM consulta_log c
+                WHERE c.execucao_id = ?
+                ORDER BY c.id
+                """,
+                (execucao["execucao_id"],),
+            ).fetchall()
+            consultas = []
+            for linha in linhas:
+                consultas.append(
+                    {
+                        "id": linha["id"],
+                        "modelo": (linha["modelo"] or "").strip(),
+                        "consulta": linha["consulta_exata"],
+                        "criada_em": linha["criada_em"],
+                        "resultados": len(_lista_json(linha["posicoes_json"])),
+                        "candidatos": int(linha["candidatos"] or 0),
+                    }
+                )
+            resultado.append(
+                {
+                    "execucao_id": execucao["execucao_id"],
+                    "inicio": execucao["inicio"],
+                    "fim": execucao["fim"],
+                    "consultas": consultas,
+                    "resultados": sum(item["resultados"] for item in consultas),
+                    "candidatos": sum(item["candidatos"] for item in consultas),
+                }
+            )
+    return resultado
+
+
 def obter_candidato(candidate_id, user_id):
     with conexao() as conn:
         return conn.execute(
