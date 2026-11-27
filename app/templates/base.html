@@ -743,25 +743,6 @@
       .page-content { padding-bottom: 2.5rem; overflow-wrap: anywhere; }
       h1 { font-size: clamp(1.7rem, 8vw, 2.4rem); line-height: 1.12; }
       input, select, textarea, button { font-size: 16px; min-height: 44px; max-width: 100%; }
-
-    /* Fix for select element options visibility in dark theme */
-    select {
-      -webkit-appearance: none;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='%23f5f0f5'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-      padding-right: 25px;
-      color: var(--text);
-      background-color: var(--surface);
-      border: 1px solid var(--border);
-    }
-
-    /* Ensure option text is visible */
-    select option {
-      background-color: var(--surface);
-      color: var(--text);
-    }
       table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
       img, video, iframe { max-width: 100%; height: auto; }
       .provider-grid { grid-template-columns: 1fr; }
@@ -787,26 +768,7 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
     }
-  }
-
-  /* Fix for select element options visibility in dark theme */
-  select {
-    -webkit-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='%23f5f0f5'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 25px;
-    color: var(--text);
-    background-color: var(--surface);
-    border: 1px solid var(--border);
-  }
-
-  /* Ensure option text is visible */
-  select option {
-    background-color: var(--surface);
-    color: var(--text);
-  }
+  </style>
 </head>
 <body>
   <header class="site-header">
@@ -842,25 +804,6 @@
   <main class="page-content">
     {% block conteudo %}{% endblock %}
   </main>
-  /* Fix for select element options visibility in dark theme */
-  select {
-    -webkit-appearance: none;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='%23f5f0f5'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    padding-right: 25px;
-    color: var(--text);
-    background-color: var(--surface);
-    border: 1px solid var(--border);
-  }
-
-  /* Ensure option text is visible */
-  select option {
-    background-color: var(--surface);
-    color: var(--text);
-  }
-  </style>
 <script>
   (function () {
     var btn = document.querySelector(".menu-toggle");
