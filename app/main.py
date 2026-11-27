@@ -1549,7 +1549,14 @@ def valida(
 @app.post("/valida/buscar-instagram", dependencies=_csrf())
 async def valida_buscar_instagram_agora(request: Request):
     """Forca uma nova busca de postagens do Instagram para o usuario alvo."""
-    alvo = _usuario_alvo_busca(request)
+    # O formulario informa qual criadora esta selecionada na pagina; sem isso a
+    # busca salvaria as postagens na conta do proprio admin logado.
+    formulario = await request.form()
+    try:
+        alvo_id = int(formulario.get("target_user_id") or 0)
+    except (TypeError, ValueError):
+        alvo_id = 0
+    alvo = _usuario_alvo_busca(request, alvo_id)
     try:
         posts = _buscar_postagens_instagram(alvo)
     except BuscaInstagramIndisponivel as erro:

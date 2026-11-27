@@ -1093,7 +1093,7 @@ def listar_postagens_instagram(user_id: int) -> list[dict]:
     with conexao() as conn:
         linhas = conn.execute(
             """
-            SELECT shortcode, url, phash, criado_em
+            SELECT shortcode, url, miniatura, phash, criado_em
             FROM instagram_post_hashes
             WHERE user_id = ?
             ORDER BY criado_em DESC

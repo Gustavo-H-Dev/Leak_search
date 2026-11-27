@@ -242,8 +242,14 @@
         // Primeiro tenta o input hidden, depois cai de meta tag (mais confiavel em mobile)
         var csrfToken = document.querySelector('input[name="csrf_token"]')?.value ||
                         document.querySelector('meta[name="csrf-token"]')?.content || '';
+        // Qual criadora esta selecionada: sem isso a busca salvaria as postagens
+        // na conta do admin logado e a pagina recarregada perderia o resultado.
+        var alvoSelecionado = document.getElementById("valida-target");
+        var targetUserId = (alvoSelecionado && alvoSelecionado.value) ||
+                           new URLSearchParams(window.location.search).get("target_user_id") || "";
         const formData = new FormData();
         formData.append("csrf_token", csrfToken);
+        formData.append("target_user_id", targetUserId);
 
         const resposta = await fetch("/valida/buscar-instagram", {
           method: "POST",
@@ -274,7 +280,11 @@
             btnBuscarInstagram.innerHTML = 'Buscar postagens novamente';
             btnBuscarInstagram.style.opacity = "1";
             btnBuscarInstagram.disabled = false;
-            window.location.reload();
+            // Mantem a criadora selecionada ao recarregar a pagina.
+            var parametros = new URLSearchParams(window.location.search);
+            if (targetUserId) parametros.set("target_user_id", targetUserId);
+            var consulta = parametros.toString();
+            window.location.href = "/valida" + (consulta ? "?" + consulta : "");
           }, 1200);
         } else {
           // Erro de negocio retornado com 200
