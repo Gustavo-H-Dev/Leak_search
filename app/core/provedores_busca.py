@@ -19,6 +19,14 @@ PROVEDORES = (
         "integrado": True,
     },
     {
+        "id": "tinyfish",
+        "nome": "TinyFish (web)",
+        "tipo": "texto",
+        "descricao": "Busca web por texto, em português e com foco no Brasil.",
+        "variaveis": ("TINYFISH_API_KEY",),
+        "integrado": True,
+    },
+    {
         "id": "brave",
         "nome": "Brave Search",
         "tipo": "texto",

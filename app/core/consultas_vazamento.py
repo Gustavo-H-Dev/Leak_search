@@ -39,6 +39,31 @@ def limpar_sites(texto: str) -> list[str]:
     return sites[:MAXIMO_SITES]
 
 
+def gerar_consultas_busca(arrobas, termos, sites, limite: int = 12) -> list[str]:
+    """Combina cada arroba com termos e com `site:` dos dominios configurados."""
+    arrobas = [a.strip().lstrip("@") for a in arrobas if a and a.strip()][:10]
+    consultas: list[str] = []
+    vistos: set[str] = set()
+
+    def adicionar(consulta: str) -> None:
+        consulta = " ".join(consulta.split())
+        chave = consulta.lower()
+        if consulta and chave not in vistos and len(consultas) < max(1, limite):
+            vistos.add(chave)
+            consultas.append(consulta)
+
+    for termo in termos:
+        termo = termo.strip()
+        if not termo:
+            continue
+        for arroba in arrobas:
+            adicionar(f'"@{arroba}" "{termo}"')
+    for site in sites:
+        for arroba in arrobas:
+            adicionar(f'"@{arroba}" site:{site}')
+    return consultas
+
+
 def montar_consultas(nome: str, handle: str, termos, sites) -> list[str]:
     """Agrupa tudo em poucas consultas: uma de termos e até duas de sites."""
     nome = nome.replace('"', "").strip()

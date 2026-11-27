@@ -1,4 +1,5 @@
 import asyncio
+import os
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -171,6 +172,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
             pasta = Path(diretorio)
             (pasta / registro["arquivo"]).write_bytes(dados_imagem)
             with (
+                patch.dict(os.environ, {"COMPARACAO_IMAGEM_ATIVA": "true"}),
                 patch("app.main.db.listar_conteudos", return_value=[registro]),
                 patch("app.main.db.obter_conteudo", return_value=registro),
                 patch("app.main.PASTA_OFICIAIS", pasta),

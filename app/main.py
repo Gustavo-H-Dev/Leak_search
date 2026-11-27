@@ -22,14 +22,19 @@ from starlette.concurrency import run_in_threadpool
 from app import db
 from app.core import (
     autenticacao,
+    busca_provedores,
     busca_web,
     analise,
     candidatos as candidatos_core,
     consultas_vazamento,
+    fluxo_busca,
     imagens,
+    instagram,
+    pontuacao,
     provedores_busca,
     serpapi,
     sites_oficiais,
+    tinyfish,
 )
 from app.core.middleware_auth import AutenticacaoMiddleware
 
@@ -1354,108 +1359,39 @@ STATUS_VALIDA = {
     "official": "Oficiais",
 }
 
+CLASSIFICACAO_NOMES = {
+    "provavel_vazamento": "Provável vazamento",
+    "oficial": "Oficial",
+    "falso_positivo": "Falso positivo",
+    "indefinido": "Indefinido",
+}
 
-class BuscaInstagramIndisponivel(Exception):
-    """Falha ao buscar postagens do Instagram, com mensagem pronta para o usuario."""
+
+def comparacao_imagem_ativa() -> bool:
+    """Liga/desliga a comparacao por pHash sem remover o codigo existente."""
+    return os.getenv("COMPARACAO_IMAGEM_ATIVA", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
-USER_AGENT_IMAGEM = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+BuscaInstagramIndisponivel = instagram.BuscaInstagramIndisponivel
+USER_AGENT_IMAGEM = instagram.USER_AGENT_IMAGEM
 
 
 def _baixar_miniatura(url: str) -> str:
-    """Baixa uma imagem e devolve o pHash; vazio quando nao for possivel."""
-    if not url:
-        return ""
-    try:
-        with httpx.Client(
-            timeout=15,
-            follow_redirects=True,
-            headers={"User-Agent": USER_AGENT_IMAGEM},
-        ) as cliente:
-            resposta = cliente.get(url)
-        if resposta.status_code != 200:
-            logger.warning(
-                "Miniatura do Instagram respondeu HTTP %s", resposta.status_code
-            )
-            return ""
-        tipo = resposta.headers.get("content-type", "")
-        if not tipo.lower().startswith("image/"):
-            logger.warning("Miniatura do Instagram nao e imagem (%s)", tipo)
-            return ""
-        return imagens.calcular_phash(resposta.content)
-    except Exception:
-        logger.exception("Falha ao baixar miniatura do Instagram")
-        return ""
+    return instagram.baixar_hash_da_miniatura(url)
 
 
 def _buscar_postagens_instagram(alvo: dict) -> list[dict]:
-    """Busca postagens recentes do Instagram da criadora e calcula pHash de cada miniatura.
-
-    Retorna lista de dicts com shortcode, url e phash. Imagens sao baixadas em
-    memoria e descartadas apos o calculo do hash; nada e salvo em disco.
-    Levanta BuscaInstagramIndisponivel com o motivo real da falha.
-    """
+    """Busca postagens recentes e calcula o pHash das miniaturas (rota legada)."""
     dados_alvo = dict(alvo) if not isinstance(alvo, dict) else alvo
-    handle = (dados_alvo.get("public_handle") or "").strip().lstrip("@")
-    if not handle:
-        raise BuscaInstagramIndisponivel(
-            "Esta criadora nao tem o @ do Instagram cadastrado no perfil de busca. "
-            "Preencha o perfil de busca para capturar as postagens."
-        )
-    try:
-        resposta_api = serpapi.pesquisar("instagram_profile", profile_id=handle)
-    except serpapi.SemResultados as erro:
-        raise BuscaInstagramIndisponivel(
-            f"O Instagram nao devolveu dados para @{handle} "
-            "(perfil privado, inexistente ou sem publicacoes publicas)."
-        ) from erro
-    except serpapi.SerpApiNaoConfigurada as erro:
-        raise BuscaInstagramIndisponivel(str(erro)) from erro
-    except serpapi.ErroSerpApi as erro:
-        raise BuscaInstagramIndisponivel(f"SerpApi: {erro}") from erro
-
-    try:
-        _perfil, posts = serpapi.normalizar_perfil_instagram(resposta_api)
-    except Exception as erro:
-        logger.exception("Falha ao normalizar perfil do Instagram para %s", handle)
-        raise BuscaInstagramIndisponivel(
-            f"Resposta inesperada da SerpApi para @{handle}: {erro}"
-        ) from erro
-
-    if not posts:
-        raise BuscaInstagramIndisponivel(
-            f"A SerpApi respondeu, mas nao trouxe postagens publicas de @{handle}."
-        )
-
-    resultado = []
-    for post in posts:
-        miniatura = post.get("miniatura") or ""
-        phash = _baixar_miniatura(miniatura)
-        if not phash:
-            miniatura = post.get("miniatura_alternativa") or ""
-            phash = _baixar_miniatura(miniatura)
-        if not phash:
-            continue
-        shortcode = sites_oficiais.shortcode_instagram(post.get("link", ""))
-        if not shortcode:
-            continue
-        resultado.append(
-            {
-                "shortcode": shortcode,
-                "url": post.get("link", ""),
-                "miniatura": miniatura,
-                "phash": phash,
-            }
-        )
-    if not resultado:
-        raise BuscaInstagramIndisponivel(
-            f"A SerpApi encontrou {len(posts)} postagem(ns) de @{handle}, "
-            "mas nenhuma miniatura pode ser baixada para calcular o hash."
-        )
-    return resultado
+    _perfil, posts = instagram.buscar_postagens(
+        dados_alvo.get("public_handle") or ""
+    )
+    return posts
 
 
 @app.get("/valida", response_class=HTMLResponse)
@@ -1465,60 +1401,60 @@ def valida(
     status: str = "pending",
     mensagem: str = "",
 ):
+    """Revisao dos candidatos ja coletados; nao consulta o Instagram."""
     alvo = _usuario_alvo_busca(request, target_user_id)
     if status not in STATUS_VALIDA:
         status = "pending"
 
-    # Busca automatica de postagens do Instagram se necessario (max 1 vez por 24h)
-    ultima_busca_instagram = db.obter_ultima_busca_instagram(alvo["id"])
-    buscar_instagram_erro = ""
-    if db.deve_buscar_instagram(alvo["id"]):
-        try:
-            posts = _buscar_postagens_instagram(alvo)
-            if posts:
-                db.salvar_postagens_instagram(alvo["id"], posts)
-        except BuscaInstagramIndisponivel as erro:
-            buscar_instagram_erro = str(erro)
-            logger.warning(
-                "Busca automatica de Instagram indisponivel para %s: %s",
-                alvo["id"],
-                erro,
-            )
-        except Exception:
-            buscar_instagram_erro = "Falha inesperada na busca automatica de postagens."
-            logger.exception("Falha ao buscar postagens do Instagram para valida")
-        db.registrar_busca_instagram(alvo["id"])
-        ultima_busca_instagram = db.obter_ultima_busca_instagram(alvo["id"])
+    comparacao = comparacao_imagem_ativa()
+    nota_minima = pontuacao.limiar_revisao()
+    referencias = _referencias_do_usuario(alvo) if comparacao else []
+    if comparacao:
+        for post in db.listar_postagens_instagram(alvo["id"]):
+            if post["phash"]:
+                referencias.append(
+                    {"phash": post["phash"], "origem": f"Instagram — {post['shortcode']}"}
+                )
 
-    referencias = _referencias_do_usuario(alvo)
-    # Adicionar postagens do Instagram como referencias de comparacao
-    for post in db.listar_postagens_instagram(alvo["id"]):
-        if post["phash"]:
-            referencias.append(
-                {"phash": post["phash"], "origem": f"Instagram — {post['shortcode']}"}
-            )
     candidatos = []
-    for candidato in db.listar_candidatos(alvo["id"], status):
-        melhor = candidatos_core.melhor_referencia(candidato["phash"], referencias)
-        distancia = melhor["distancia"] if melhor else None
-        listagem = sites_oficiais.pagina_de_listagem(candidato["url"])
-        candidatos.append(
-            {
-                **candidato,
-                "distancia": distancia,
-                "pontuacao": (
-                    imagens.pontuacao(distancia) if distancia is not None else None
-                ),
-                "referencia": melhor["origem"] if melhor else "",
-                "listagem": listagem,
-                "nivel": (
-                    "diferente"
-                    if listagem
-                    else imagens.nivel_de_similaridade(distancia)
-                ),
-            }
-        )
-    candidatos = candidatos_core.ordenar_por_atencao(candidatos)
+    for candidato in db.listar_candidatos_revisao(
+        alvo["id"], status, None if comparacao else nota_minima
+    ):
+        item = dict(candidato)
+        motivos = item.get("motivos_json")
+        if isinstance(motivos, (list, dict)):
+            item["motivos"] = motivos if isinstance(motivos, list) else [motivos]
+        else:
+            try:
+                item["motivos"] = json.loads(motivos or "[]")
+            except (TypeError, ValueError):
+                item["motivos"] = []
+        item["novo"] = bool(item.get("novo_para_criadora"))
+        if comparacao:
+            melhor = candidatos_core.melhor_referencia(candidato["phash"], referencias)
+            distancia = melhor["distancia"] if melhor else None
+            listagem = sites_oficiais.pagina_de_listagem(candidato["url"])
+            item.update(
+                {
+                    "distancia": distancia,
+                    "pontuacao": (
+                        imagens.pontuacao(distancia)
+                        if distancia is not None
+                        else None
+                    ),
+                    "referencia": melhor["origem"] if melhor else "",
+                    "listagem": listagem,
+                    "nivel": (
+                        "diferente"
+                        if listagem
+                        else imagens.nivel_de_similaridade(distancia)
+                    ),
+                }
+            )
+        candidatos.append(item)
+    if comparacao:
+        candidatos = candidatos_core.ordenar_por_atencao(candidatos)
+
     return templates.TemplateResponse(
         request,
         "valida.html",
@@ -1535,13 +1471,12 @@ def valida(
             "pontuacao_possivel": imagens.pontuacao(imagens.LIMITE_POSSIVEL),
             "status_atual": status,
             "status_nomes": STATUS_VALIDA,
+            "classificacao_nomes": CLASSIFICACAO_NOMES,
             "contagens": db.contar_candidatos_por_status(alvo["id"]),
             "tem_referencias": bool(referencias),
             "mensagem": mensagem,
-            "ultima_busca_instagram": ultima_busca_instagram,
-            "buscar_instagram_erro": buscar_instagram_erro,
-            "postagens_instagram_count": len(db.listar_postagens_instagram(alvo["id"])),
-            "postagens_instagram": db.listar_postagens_instagram(alvo["id"]),
+            "comparacao_imagem_ativa": comparacao,
+            "nota_minima": nota_minima,
         },
     )
 
@@ -1838,9 +1773,14 @@ def _enviar_para_valida(alvo, resultados, engine):
         else:
             novos.append((url, resultado))
 
-    hashes = candidatos_core.calcular_hashes(
-        [r["miniatura"] for _, r in novos + oficiais_proprios if r.get("miniatura")]
-    )
+    if comparacao_imagem_ativa():
+        hashes = candidatos_core.calcular_hashes(
+            [r["miniatura"] for _, r in novos + oficiais_proprios if r.get("miniatura")]
+        )
+    else:
+        # Comparacao desligada: nenhuma midia e baixada nem processada.
+        hashes = {}
+        resumo["sem_hash"] = 0
     for url, resultado in oficiais_proprios:
         phash = hashes.get(resultado.get("miniatura"), "")
         if phash:
@@ -1925,7 +1865,12 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         "query": "",
         "foto_selecionada": None,
         "related_content_id": "",
-        "api_key_configurada": bool(os.getenv("SERPAPI_API_KEY", "").strip()),
+        "api_key_configurada": busca_provedores.configurado("serpapi"),
+        "tinyfish_configurada": busca_provedores.configurado("tinyfish"),
+        "comparacao_imagem_ativa": comparacao_imagem_ativa(),
+        "nota_minima": pontuacao.limiar_revisao(),
+        "busca_maxima_consultas": _limite_consultas_busca(),
+        "arrobas_descobertos": db.listar_arrobas_descobertos(target_user_id),
         "status_conta": None,
         "status_conta_atualizado": False,
         "pesquisa_realizada": False,
@@ -1964,8 +1909,10 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
             _status_vazamento(target_user_id)
         ),
         "vazamento_consultas": (
-            consultas_vazamento.montar_consultas(
-                alvo["public_name"], alvo["public_handle"], *_config_vazamentos()
+            consultas_vazamento.gerar_consultas_busca(
+                _arrobas_para_busca(alvo),
+                *_config_vazamentos(),
+                _limite_consultas_busca(),
             )
             if alvo["public_name"] and alvo["public_handle"]
             else []
@@ -2256,6 +2203,7 @@ def salvar_config_vazamentos(
     request: Request,
     termos: str = Form(""),
     sites: str = Form(""),
+    limite: int = Form(0),
     target_user_id: int = Form(0),
 ):
     db.salvar_configuracao(
@@ -2264,8 +2212,12 @@ def salvar_config_vazamentos(
     db.salvar_configuracao(
         "vazamento_sites", "\n".join(consultas_vazamento.limpar_sites(sites))
     )
+    if limite:
+        db.salvar_configuracao(
+            "busca_maxima_consultas", str(max(1, min(int(limite), 60)))
+        )
     return _contexto_serpapi(
-        request, target_user_id, mensagem="Termos e sites salvos."
+        request, target_user_id, mensagem="Termos, sites e limite salvos."
     )
 
 
@@ -2358,24 +2310,34 @@ async def buscar_vazamentos(
     target_user_id: int = Form(0),
     api: str = Form("google_images_light"),
     periodo: str = Form(""),
+    provedor: str = Form("serpapi"),
 ):
+    """Inicia a busca no provedor escolhido, sempre com o Instagram primeiro."""
+    if provedor not in busca_provedores.PROVEDORES_TEXTO:
+        provedor = "serpapi"
     alvo = _usuario_alvo_busca(request, target_user_id)
     target_user_id = alvo["id"]
-    contexto = {"api_ativa": api}
+    contexto = {"api_ativa": api, "provedor_selecionado": provedor}
 
     def erro(mensagem):
         return _contexto_serpapi(request, target_user_id, erro=mensagem, **contexto)
 
-    if api not in {"google_images", "google_images_light"}:
-        return erro("API selecionada inválida.")
+    if provedor == "serpapi" and api not in {"google_images", "google_images_light"}:
+        return erro("API selecionada inválida para o SerpAPI.")
     if periodo not in consultas_vazamento.PERIODOS:
         return erro("Período inválido.")
     if consentimento != "on":
-        return erro("Confirme o envio das consultas à SerpApi.")
+        return erro(f"Confirme o envio das consultas ao {busca_provedores.PROVEDORES_NOMES[provedor]}.")
     if not (alvo["public_name"] and alvo["public_handle"]):
         return erro("Complete o nome público e a arroba no perfil de busca.")
-    consultas = consultas_vazamento.montar_consultas(
-        alvo["public_name"], alvo["public_handle"], *_config_vazamentos()
+    if not busca_provedores.configurado(provedor):
+        variavel = "SERPAPI_API_KEY" if provedor == "serpapi" else "TINYFISH_API_KEY"
+        return erro(f"Configure {variavel} no ambiente do servidor.")
+
+    termos, sites = _config_vazamentos()
+    limite = _limite_consultas_busca()
+    consultas = consultas_vazamento.gerar_consultas_busca(
+        _arrobas_para_busca(alvo), termos, sites, limite
     )
     if not consultas:
         return erro("Cadastre ao menos um termo ou site para pesquisar.")
@@ -2384,26 +2346,146 @@ async def buscar_vazamentos(
     if atual.get("estado") == "rodando" and (
         time.time() - atual.get("iniciado", 0) < TEMPO_MAXIMO_BUSCA_VAZAMENTO
     ):
-        return erro("Já existe uma busca de vazamentos em andamento para esta criadora.")
+        return erro("Já existe uma busca em andamento para esta criadora.")
 
     parametros = {"gl": "br", "hl": "pt", "safe": "off"}
     if periodo:
         parametros["tbs"] = f"qdr:{periodo}"
     _salvar_status_vazamento(
         target_user_id,
-        {"estado": "rodando", "iniciado": time.time(), "consultas": consultas, "api": api},
+        {
+            "estado": "rodando",
+            "iniciado": time.time(),
+            "consultas": consultas,
+            "api": api,
+            "provedor": provedor,
+        },
     )
     tarefas.add_task(
-        _executar_busca_vazamentos, alvo, api, consultas, parametros
+        _executar_busca_provedor,
+        alvo,
+        provedor,
+        termos,
+        sites,
+        limite,
+        api,
+        parametros,
     )
     return _contexto_serpapi(
         request,
         target_user_id,
         mensagem=(
-            "Busca iniciada em segundo plano. Pode demorar alguns minutos; "
-            "esta página atualiza sozinha e os candidatos chegam à Valida."
+            "Busca iniciada em segundo plano. O Instagram é consultado primeiro "
+            "e os candidatos aparecem na Valida."
         ),
         api_ativa=api,
+        provedor_selecionado=provedor,
+    )
+
+
+def _limite_consultas_busca() -> int:
+    try:
+        return max(1, min(int(db.obter_configuracao("busca_maxima_consultas", "12")), 60))
+    except (TypeError, ValueError):
+        return 12
+
+
+def _arrobas_para_busca(alvo) -> list[str]:
+    arrobas = []
+    propria = (dict(alvo).get("public_handle") or "").strip().lstrip("@")
+    if propria:
+        arrobas.append(propria)
+    for item in db.listar_arrobas_descobertos(alvo["id"]):
+        arroba = (item.get("arroba") or "").strip().lstrip("@")
+        if arroba and arroba.lower() not in {a.lower() for a in arrobas}:
+            arrobas.append(arroba)
+    return arrobas
+
+
+def _executar_busca_provedor(alvo, provedor, termos, sites, limite, engine, parametros):
+    """Roda em segundo plano: Instagram, consultas, pontuacao e persistencia."""
+    user_id = alvo["id"]
+    inicio = _status_vazamento(user_id).get("iniciado", time.time())
+    try:
+        resumo = fluxo_busca.executar(
+            alvo,
+            provedor,
+            termos=termos,
+            sites=sites,
+            limite=limite,
+            engine=engine,
+            parametros=parametros,
+        )
+    except Exception as erro:
+        logger.exception("Falha na busca de vazamentos (%s)", provedor)
+        _salvar_status_vazamento(
+            user_id,
+            {
+                "estado": "erro",
+                "iniciado": inicio,
+                "erro": str(erro)[:300],
+                "fim": time.time(),
+                "api": engine,
+                "provedor": provedor,
+            },
+        )
+        return
+    estado = "erro" if resumo.get("erro") else "ok"
+    _salvar_status_vazamento(
+        user_id,
+        {
+            **resumo,
+            "estado": estado,
+            "iniciado": inicio,
+            "fim": time.time(),
+            "api": engine,
+            "provedor": provedor,
+            "resumo": resumo,
+            "erro": resumo.get("erro", ""),
+        },
+    )
+
+
+def _executar_busca_vazamentos(alvo, api, consultas, parametros):
+    """Compatibilidade: executa uma lista de consultas pelo fluxo novo."""
+    inicio = _status_vazamento(alvo["id"]).get("iniciado", time.time())
+    termos, sites = _config_vazamentos()
+    try:
+        resumo = fluxo_busca.executar(
+            alvo,
+            "serpapi",
+            termos=termos,
+            sites=sites,
+            limite=max(1, len(consultas)),
+            engine=api,
+            parametros=parametros,
+            consultas=consultas,
+        )
+    except Exception as erro:
+        logger.exception("Falha na busca de vazamentos (%s)", api)
+        _salvar_status_vazamento(
+            alvo["id"],
+            {
+                "estado": "erro",
+                "iniciado": inicio,
+                "erro": str(erro)[:300],
+                "fim": time.time(),
+                "api": api,
+            },
+        )
+        return
+    estado = "erro" if resumo.get("erro") else "ok"
+    _salvar_status_vazamento(
+        alvo["id"],
+        {
+            **resumo,
+            "estado": estado,
+            "iniciado": inicio,
+            "fim": time.time(),
+            "api": api,
+            "resumo": resumo,
+            "erro": resumo.get("erro", ""),
+        },
     )
 
 

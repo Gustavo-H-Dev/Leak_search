@@ -5,8 +5,9 @@
   <span class="eyebrow">BUSCA NA WEB</span>
   <h1>Busca na web</h1>
   <p class="search-intro">
-    Escolha o endpoint. Os resultados são filtrados e os candidatos seguem
-    para a página <a href="/valida">Valida</a>, onde são comparados por hash e validados.
+    Escolha o provedor. O Instagram é consultado primeiro (postagens e arrobas
+    da bio) e só depois a busca por texto roda. Os candidatos pontuados vão para
+    a página <a href="/valida">Valida</a>, onde você revisa manualmente.
   </p>
 
   {% if current_user.role == "admin" %}
@@ -40,11 +41,21 @@
     <a href="/perfil-busca">Adicionar site oficial</a>. As fotos são opcionais.
   </p>
   {% endif %}
-  {% if not api_key_configurada %}
+  {% if not api_key_configurada and not tinyfish_configurada %}
   <p class="api-status api-status-missing">
-    Chave não configurada. Defina <code>SERPAPI_API_KEY</code> no ambiente do servidor.
+    Nenhum provedor configurado. Defina <code>SERPAPI_API_KEY</code> e/ou
+    <code>TINYFISH_API_KEY</code> no ambiente do servidor.
+  </p>
+  {% elif not tinyfish_configurada %}
+  <p class="api-status api-status-missing">
+    TinyFish indisponível: defina <code>TINYFISH_API_KEY</code> para usar a busca web por texto.
   </p>
   {% endif %}
+  <p class="account-usage-note">
+    Toda busca consulta primeiro o Instagram da criadora (respeitando o cache de
+    24 h), guarda os arrobas citados na bio e só então pesquisa no provedor.
+    Comparação de imagens: <strong>{{ "ligada" if comparacao_imagem_ativa else "desligada" }}</strong>.
+  </p>
 
   {% if current_user.role == "admin" %}
   <section class="account-usage" aria-labelledby="account-usage-title">
@@ -107,7 +118,7 @@
   {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
 
   <div class="serpapi-sections">
-    <h2 class="search-group-title">Google via SerpApi</h2>
+    <h2 class="search-group-title">Busca por texto</h2>
 
       <p>Os resultados vão para a <a href="/valida?target_user_id={{ target_user_id }}">Valida</a>.</p>
       {% if current_user.role == "admin" %}
@@ -116,9 +127,11 @@
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
         <label class="field-label" for="vaz-termos">Termos (um por linha)</label>
         <textarea id="vaz-termos" name="termos" rows="4">{{ vazamento_termos|join("\n") }}</textarea>
-        <label class="field-label" for="vaz-sites">Sites (um domínio por linha, até 10 usados por busca)</label>
+        <label class="field-label" for="vaz-sites">Sites (um domínio por linha)</label>
         <textarea id="vaz-sites" name="sites" rows="4">{{ vazamento_sites|join("\n") }}</textarea>
-        <button type="submit" class="button-secondary">Salvar termos e sites</button>
+        <label class="field-label" for="vaz-limite">Máximo de consultas por execução</label>
+        <input id="vaz-limite" type="number" name="limite" min="1" max="60" value="{{ busca_maxima_consultas }}">
+        <button type="submit" class="button-secondary">Salvar configuração</button>
       </form>
       {% endif %}
       {% if vazamento_status %}
@@ -129,10 +142,16 @@
         <p class="erro" role="alert">A última busca falhou ({{ vazamento_status.iniciado }}): {{ vazamento_status.erro }}</p>
         {% else %}
         <p class="sucesso" role="status">
-          Última busca concluída em {{ vazamento_status.fim }}: {{ vazamento_status.resumo.total }} resultado(s),
+          Última busca ({{ vazamento_status.provedor or vazamento_status.api }}) concluída em {{ vazamento_status.fim }}:
+          {{ vazamento_status.resumo.unicos if vazamento_status.resumo.unicos is defined else vazamento_status.resumo.total }} resultado(s) único(s),
           <strong>{{ vazamento_status.resumo.novos }} novo(s) na <a href="/valida?target_user_id={{ target_user_id }}">Valida</a></strong>;
-          omitidos: {{ vazamento_status.resumo.oficiais }} oficiais, {{ vazamento_status.resumo.nao_sou_eu }} “não sou eu”, {{ vazamento_status.resumo.repetidos }} repetidos.
+          atualizados: {{ vazamento_status.resumo.atualizados|default(0) }};
+          omitidos: {{ vazamento_status.resumo.oficiais }} oficiais e
+          {{ vazamento_status.resumo.descartados|default(0) }} abaixo da nota mínima.
         </p>
+        {% if vazamento_status.erro_instagram %}
+        <p class="api-status api-status-missing">Instagram não consultado: {{ vazamento_status.erro_instagram }}</p>
+        {% endif %}
         {% if vazamento_status.por_consulta %}
         <ul>{% for item in vazamento_status.por_consulta %}<li><code>{{ item.consulta }}</code>: {{ item.resultados }} resultado(s)</li>{% endfor %}</ul>
         {% endif %}
@@ -140,12 +159,17 @@
       </div>
       {% endif %}
       {% if vazamento_consultas %}
-      <p><strong>A busca por texto usa {{ vazamento_consultas|length }} crédito(s)</strong> da SerpApi:</p>
+      <p><strong>A busca por texto usa {{ vazamento_consultas|length }} consulta(s)</strong> (limite por execução: {{ busca_maxima_consultas }}):</p>
       <ul>{% for consulta in vazamento_consultas %}<li><code>{{ consulta }}</code></li>{% endfor %}</ul>
       {% endif %}
       <form id="endpoint-form" class="search-form" method="post" action="/buscar-vazamentos" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+        <label class="field-label" for="vaz-provedor">Provedor</label>
+        <select id="vaz-provedor" name="provedor">
+          <option value="serpapi" {% if provedor_selecionado == "serpapi" %}selected{% endif %}>SerpAPI (Google)</option>
+          <option value="tinyfish" {% if provedor_selecionado == "tinyfish" %}selected{% endif %} {% if not tinyfish_configurada %}disabled{% endif %}>TinyFish (web)</option>
+        </select>
         <label class="field-label" for="vaz-api">Endpoint</label>
         <select id="vaz-api" name="api">
           <option value="google_images_light">Google Images Light API</option>
@@ -214,20 +238,26 @@
 </section>
 <script>
   const endpoint = document.getElementById("vaz-api");
+  const provedor = document.getElementById("vaz-provedor");
   const formEndpoint = document.getElementById("endpoint-form");
   function atualizarEndpoint() {
+    const tinyfish = provedor.value === "tinyfish";
     const texto = endpoint.value === "google_images" || endpoint.value === "google_images_light";
     const lens = endpoint.value === "google_lens";
-    document.getElementById("endpoint-texto").hidden = !texto;
-    document.getElementById("endpoint-lens").hidden = !lens;
-    document.getElementById("endpoint-related").hidden = texto || lens;
-    formEndpoint.action = texto ? "/buscar-vazamentos" : "/buscar-serpapi";
-    document.getElementById("endpoint-submit").disabled = texto
+    document.getElementById("endpoint-texto").hidden = tinyfish ? false : !texto;
+    document.getElementById("endpoint-lens").hidden = tinyfish || !lens;
+    document.getElementById("endpoint-related").hidden = tinyfish || texto || lens;
+    endpoint.disabled = tinyfish;
+    formEndpoint.action = "/buscar-vazamentos";
+    document.getElementById("endpoint-submit").disabled = tinyfish
+      ? {{ (not perfil_busca_completo or not vazamento_consultas or not sites_oficiais_usuario or not tinyfish_configurada)|tojson }}
+      : texto
       ? {{ (not perfil_busca_completo or not vazamento_consultas or not sites_oficiais_usuario)|tojson }}
       : lens ? {{ (not perfil_busca_completo or target_user_id != current_user.id or not sites_oficiais_usuario)|tojson }}
       : {{ (not perfil_busca_completo or not related_options or not sites_oficiais_usuario)|tojson }};
   }
   endpoint.addEventListener("change", atualizarEndpoint);
+  provedor.addEventListener("change", atualizarEndpoint);
   atualizarEndpoint();
 </script>
 {% if vazamento_status and vazamento_status.estado == "rodando" %}

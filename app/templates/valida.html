@@ -1,61 +1,17 @@
 {% extends "base.html" %}
 {% block titulo %}Valida{% endblock %}
 {% block conteudo %}
-{% set niveis = [("atencao", "Atenção — muito parecidos"), ("possivel", "Possíveis — mais ou menos parecidos"), ("diferente", "Diferentes — nada parecido")] %}
 <section class="search-page">
   <span class="eyebrow">VALIDA</span>
   <h1>Valida</h1>
   <p>
-    Candidatos vindos da busca na web para
-    {{ target_user.public_name or target_user.username }}. Cada candidato é
-    comparado, por hash perceptual, com as imagens do catálogo, as fotos do
-    perfil, as imagens de sites oficiais e as postagens recentes do
-    Instagram. Nenhuma imagem é salva, apenas o hash; a semelhança é uma
-    pista e não confirma identidade.
+    Candidatos coletados para
+    {{ target_user.public_name or target_user.username }}. A busca consulta
+    primeiro o perfil público do Instagram, extrai arrobas citados na bio e
+    depois pesquisa no provedor escolhido. Aqui você revisa o que foi coletado:
+    a nota vem de regras simples (arroba, domínio e palavras suspeitas), não de
+    uma confirmação automática.
   </p>
-
-  <!-- Informacao da ultima busca de postagens do Instagram -->
-  <div class="instagram-busca-info" style="margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);">
-    <span class="eyebrow" style="display:block; font-size:.8rem; margin-bottom:.4rem;">POSTAGENS DO INSTAGRAM</span>
-    {% if ultima_busca_instagram %}
-    <p style="margin:0 0 .5rem 0; font-size:.9rem;">
-      Ultima busca: <strong>{{ ultima_busca_instagram[:19].replace("T", " ") }} (UTC)</strong>
-      · {{ postagens_instagram_count }} postagem(ens) capturada(s) para comparacao.
-    </p>
-    {% else %}
-    <p style="margin:0 0 .5rem 0; font-size:.9rem;">
-      Nenhuma busca de postagens do Instagram foi feita ainda.
-    </p>
-    {% endif %}
-    <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
-      <button type="button" id="btn-buscar-instagram-agora" class="button-primary">
-        {% if ultima_busca_instagram %}Buscar postagens novamente{% else %}Buscar postagens do Instagram{% endif %}
-      </button>
-      <button type="button" id="btn-ver-imagens-instagram" class="button-secondary">
-        Ver imagens capturadas
-      </button>
-      <span id="status-busca-instagram" style="font-size:.8rem; color: var(--muted);"></span>
-    </div>
-    {% if buscar_instagram_erro %}
-    <p class="erro" role="alert" style="margin:.6rem 0 0 0; font-size:.85rem;">
-      {{ buscar_instagram_erro }}
-    </p>
-    {% endif %}
-  </div>
-
-  <details class="collapsible" open>
-    <summary>Como ler a semelhança</summary>
-    <p>
-      A semelhança vai de 0 a 100 e compara o candidato com a imagem de
-      referência mais parecida (100 = praticamente idêntica; perto de 0 = sem
-      relação).
-    </p>
-    <ul>
-      <li><strong>Atenção:</strong> {{ pontuacao_atencao }} a 100</li>
-      <li><strong>Possíveis:</strong> {{ pontuacao_possivel }} a {{ pontuacao_atencao - 1 }}</li>
-      <li><strong>Diferentes:</strong> 0 a {{ pontuacao_possivel - 1 }}, ou sem imagem para comparar</li>
-    </ul>
-  </details>
 
   {% if current_user.role == "admin" %}
   <form class="search-form target-user-form" method="get" action="/valida">
@@ -73,10 +29,36 @@
   {% endif %}
 
   {% if mensagem %}<p class="sucesso" role="status">{{ mensagem }}</p>{% endif %}
-  {% if not tem_referencias %}
+
+  <details class="collapsible" {% if not comparacao_imagem_ativa %}open{% endif %}>
+    <summary>Como a nota é calculada</summary>
+    <ul>
+      <li>+30 quando o arroba aparece no título ou na URL;</li>
+      <li>+40 quando o domínio está na lista de sites de vazamento;</li>
+      <li>+10 por palavra suspeita no trecho/título (até +30);</li>
+      <li>perfis oficiais da criadora, páginas de busca e espelhos de perfil são descartados.</li>
+    </ul>
+    <p>
+      Só entram nesta fila candidatos com nota a partir de
+      <strong>{{ nota_minima }}</strong>. A classificação é uma pista para a
+      revisão manual, não uma prova.
+    </p>
+  </details>
+
+  {% if comparacao_imagem_ativa %}
+  <details class="collapsible">
+    <summary>Semelhança de imagem (comparação ligada)</summary>
+    <ul>
+      <li><strong>Atenção:</strong> {{ pontuacao_atencao }} a 100</li>
+      <li><strong>Possíveis:</strong> {{ pontuacao_possivel }} a {{ pontuacao_atencao - 1 }}</li>
+      <li><strong>Diferentes:</strong> 0 a {{ pontuacao_possivel - 1 }}, ou sem imagem para comparar</li>
+    </ul>
+  </details>
+  {% endif %}
+
+  {% if not tem_referencias and comparacao_imagem_ativa %}
   <p class="api-status api-status-missing">
-    Não há imagens de referência (catálogo, fotos do perfil ou sites oficiais)
-    para esta criadora; os candidatos não podem ser comparados.
+    Não há imagens de referência para esta criadora; os candidatos não podem ser comparados por imagem.
   </p>
   {% endif %}
 
@@ -88,115 +70,54 @@
     {% endfor %}
   </nav>
 
-  {% for nivel, titulo in niveis %}
-    {% set grupo = candidatos|selectattr("nivel", "equalto", nivel)|list %}
-    {% if grupo %}
-    <section class="search-results">
-      <h2>{{ titulo }} ({{ grupo|length }})</h2>
-      <ul class="search-result-list">
-        {% for candidato in grupo %}
-        <li>
-          {% if candidato.thumbnail %}<img class="result-thumb" src="{{ candidato.thumbnail }}" alt="Miniatura de {{ candidato.title }}" loading="lazy" referrerpolicy="no-referrer">{% endif %}
-          <a href="{{ candidato.url }}" target="_blank" rel="noopener noreferrer">{{ candidato.title }}</a>
-          <span>{{ candidato.url }}</span>
-          {% if candidato.source %}<span>{{ candidato.source }}</span>{% endif %}
-          {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
-          {% if candidato.listagem %}
-          <span class="erro">Página de busca ou listagem com vários autores, não uma publicação: a miniatura pode ser da criadora, mas a página não prova nada. Rebaixado para Diferentes.</span>
-          {% endif %}
-          {% if candidato.distancia is not none %}
-          <span><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>
-            {% if candidato.nivel == "diferente" and not candidato.listagem %}— nada parecido nas referências; a mais próxima é{% elif candidato.listagem %}— miniatura parecida com{% else %}— mais parecido com{% endif %}
-            {{ candidato.referencia }}</span>
-          {% elif not candidato.phash %}
-          <span>Sem imagem comparável para este resultado.</span>
-          {% endif %}
-          {% if candidato.status == "pending" %}
-          <div class="result-actions">
-            {% for novo, rotulo, classe in [("leaked", "VAZADO!", "button-danger"), ("not_me", "Não sou eu", "button-secondary"), ("official", "Oficial", "")] %}
-            <form method="post" action="/valida/{{ candidato.id }}/status" data-validar>
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
-              <input type="hidden" name="status" value="{{ novo }}">
-              <button class="{{ classe }}" type="submit">{{ rotulo }}</button>
-            </form>
-            {% endfor %}
-          </div>
-          {% endif %}
-          <span class="result-action-status" aria-live="polite"></span>
-        </li>
-        {% endfor %}
-      </ul>
-    </section>
-    {% endif %}
-  {% endfor %}
-  {% if not candidatos %}<p>Nenhum candidato nesta lista.</p>{% endif %}
-</section>
-
-<style>
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-  }
-  .modal-content {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.5rem;
-    max-height: 90vh;
-    overflow-y: auto;
-    position: relative;
-  }
-  .modal-close {
-    position: absolute;
-    top: .5rem;
-    right: .75rem;
-    background: none;
-    border: none;
-    font-size: 1.5rem;
-    color: var(--muted);
-    cursor: pointer;
-    line-height: 1;
-    padding: .25rem;
-  }
-  .modal-close:hover {
-    color: var(--text);
-  }
-</style>
-
-<!-- Modal de imagens do Instagram -->
-<div id="modal-imagens-instagram" class="modal-overlay" style="display:none;">
-  <div class="modal-content" style="background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.5rem; max-width:560px; width:100%; max-height:85vh; overflow-y:auto; position:relative;">
-    <button type="button" id="fechar-modal-instagram" class="modal-close" style="position:absolute; top:.5rem; right:.75rem; background:none; border:none; font-size:1.5rem; color:var(--muted); cursor:pointer;">&times;</button>
-    <h3 style="margin-top:0; font-size:1rem;">Postagens do Instagram para comparacao</h3>
-    <p style="font-size:.85rem; color:var(--muted); margin-bottom:1rem;">
-      Estas sao as miniaturas capturadas da busca recente do Instagram. Seus hashes sao usados como referencia na comparacao dos candidatos.
-    </p>
-    {% if postagens_instagram %}
-    <div id="grid-imagens-instagram" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:1rem;">
-      {% for post in postagens_instagram %}
-      <div style="display:flex; flex-direction:column; align-items:center; gap:.4rem;">
-        <a href="{{ post.url }}" target="_blank" rel="noopener" style="text-decoration:none; color:inherit;">
-          <img src="{{ post.miniatura or '' }}" alt="{{ post.shortcode }}" style="width:100%; height:120px; object-fit:cover; border-radius:6px; border:1px solid var(--border);">
-        </a>
-        <div style="font-size:.75rem; color:var(--muted); text-align:center;">{{ post.shortcode }}</div>
-      </div>
+  <section class="search-results" aria-live="polite">
+    <h2>Candidatos por nota ({{ candidatos|length }})</h2>
+    {% if candidatos %}
+    <ul class="search-result-list">
+      {% for candidato in candidatos %}
+      <li>
+        {% if candidato.thumbnail %}<img class="result-thumb" src="{{ candidato.thumbnail }}" alt="Miniatura de {{ candidato.title }}" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+        <div class="result-badges" style="display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;">
+          <strong title="Nota por regras">{{ candidato.nota }}/100</strong>
+          <span>{{ classificacao_nomes.get(candidato.classificacao, candidato.classificacao) }}</span>
+          {% if candidato.novo %}<span class="profile-badge">novo</span>{% endif %}
+          {% if candidato.dominio %}<span>{{ candidato.dominio }}</span>{% endif %}
+        </div>
+        <a href="{{ candidato.url }}" target="_blank" rel="noopener noreferrer">{{ candidato.title }}</a>
+        <span>{{ candidato.url }}</span>
+        {% if candidato.source %}<span>{{ candidato.source }}</span>{% endif %}
+        {% if candidato.snippet %}<span>{{ candidato.snippet }}</span>{% endif %}
+        {% if candidato.motivos %}
+        <ul class="result-motivos" style="margin:.3rem 0 0; padding-left:1.1rem; font-size:.82rem;">
+          {% for motivo in candidato.motivos %}<li>{{ motivo }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if comparacao_imagem_ativa and candidato.distancia is not none %}
+        <span><strong>Semelhança: {{ candidato.pontuacao }}/100</strong>
+          {% if candidato.nivel == "diferente" and not candidato.listagem %}— nada parecido nas referências; a mais próxima é{% elif candidato.listagem %}— miniatura parecida com{% else %}— mais parecido com{% endif %}
+          {{ candidato.referencia }}</span>
+        {% endif %}
+        {% if candidato.status == "pending" %}
+        <div class="result-actions">
+          {% for novo, rotulo, classe in [("leaked", "VAZADO!", "button-danger"), ("not_me", "Não sou eu", "button-secondary"), ("official", "Oficial", "")] %}
+          <form method="post" action="/valida/{{ candidato.id }}/status" data-validar>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+            <input type="hidden" name="status" value="{{ novo }}">
+            <button class="{{ classe }}" type="submit">{{ rotulo }}</button>
+          </form>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <span class="result-action-status" aria-live="polite"></span>
+      </li>
       {% endfor %}
-    </div>
+    </ul>
     {% else %}
-    <p id="vazio-imagens-instagram" style="font-size:.85rem; color:var(--muted);">Nenhuma imagem capturada ainda.</p>
+    <p>Nenhum candidato nesta lista. Rode uma busca em <a href="/busca-web?target_user_id={{ target_user_id }}">Busca na web</a>.</p>
     {% endif %}
-  </div>
-</div>
+  </section>
+</section>
 
 <script>
   document.querySelectorAll("[data-validar]").forEach((form) => {
@@ -222,113 +143,5 @@
       }
     });
   });
-
-  // Buscar postagens do Instagram agora (forca nova busca)
-  const btnBuscarInstagram = document.getElementById("btn-buscar-instagram-agora");
-  const btnVerImagens = document.getElementById("btn-ver-imagens-instagram");
-  const statusBusca = document.getElementById("status-busca-instagram");
-
-  if (btnBuscarInstagram) {
-    btnBuscarInstagram.addEventListener("click", async function () {
-      // Estado de carregamento com spinner
-      btnBuscarInstagram.disabled = true;
-      btnBuscarInstagram.innerHTML = '<span class="spinner" style="display:inline-block;width:14px;height:14px;margin-right:6px;border:2px solid #ffffff40;border-top-color:#ffffff;border-radius:50%;animation:spin 0.8s linear infinite;"></span>Buscando postagens...';
-      btnBuscarInstagram.style.opacity = "0.85";
-      statusBusca.textContent = "";
-      statusBusca.className = "";
-
-      try {
-        // Envia o CSRF token no corpo (FormData), pois o backend le de request.form()
-        // Primeiro tenta o input hidden, depois cai de meta tag (mais confiavel em mobile)
-        var csrfToken = document.querySelector('input[name="csrf_token"]')?.value ||
-                        document.querySelector('meta[name="csrf-token"]')?.content || '';
-        // Qual criadora esta selecionada: sem isso a busca salvaria as postagens
-        // na conta do admin logado e a pagina recarregada perderia o resultado.
-        var alvoSelecionado = document.getElementById("valida-target");
-        var targetUserId = (alvoSelecionado && alvoSelecionado.value) ||
-                           new URLSearchParams(window.location.search).get("target_user_id") || "";
-        const formData = new FormData();
-        formData.append("csrf_token", csrfToken);
-        formData.append("target_user_id", targetUserId);
-
-        const resposta = await fetch("/valida/buscar-instagram", {
-          method: "POST",
-          headers: { Accept: "application/json" },
-          body: formData,
-        });
-
-        // Trata respostas de erro HTTP (ex: 403 CSRF, 500 servidor)
-        if (!resposta.ok) {
-          let mensagemErro = "Erro HTTP " + resposta.status;
-          try {
-            const erroJson = await resposta.json();
-            mensagemErro = erroJson.erro || erroJson.detail || mensagemErro;
-          } catch (e) {
-            // ignora, usa mensagem padrao
-          }
-          throw new Error(mensagemErro);
-        }
-
-        const dados = await resposta.json();
-
-        if (dados.ok) {
-          // Sucesso
-          var encontradas = dados.postagens || dados.salvos;
-          statusBusca.innerHTML = '<strong style="color:#5ac68a;">✓ Concluído:</strong> ' + dados.salvos + ' de ' + encontradas + ' postagem(ns) capturada(s).';
-          btnBuscarInstagram.innerHTML = '<span style="color:#5ac68a;">✓</span> Atualizado';
-          setTimeout(function () {
-            btnBuscarInstagram.innerHTML = 'Buscar postagens novamente';
-            btnBuscarInstagram.style.opacity = "1";
-            btnBuscarInstagram.disabled = false;
-            // Mantem a criadora selecionada ao recarregar a pagina.
-            var parametros = new URLSearchParams(window.location.search);
-            if (targetUserId) parametros.set("target_user_id", targetUserId);
-            var consulta = parametros.toString();
-            window.location.href = "/valida" + (consulta ? "?" + consulta : "");
-          }, 1200);
-        } else {
-          // Erro de negocio retornado com 200
-          statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro:</strong> ' + (dados.erro || "resposta inesperada do servidor");
-          btnBuscarInstagram.innerHTML = 'Tentar novamente';
-          btnBuscarInstagram.disabled = false;
-          btnBuscarInstagram.style.opacity = "1";
-        }
-      } catch (err) {
-        // Erro de rede, HTTP ou excecao
-        statusBusca.innerHTML = '<strong style="color:#ff7b9a;">Erro:</strong> ' + err.message;
-        btnBuscarInstagram.innerHTML = 'Tentar novamente';
-        btnBuscarInstagram.disabled = false;
-        btnBuscarInstagram.style.opacity = "1";
-      }
-    });
-  }
-
-  // Modal de imagens do Instagram (conteudo ja renderizado no HTML)
-  const modalInstagram = document.getElementById("modal-imagens-instagram");
-  const fecharModalInstagram = document.getElementById("fechar-modal-instagram");
-
-  if (btnVerImagens && modalInstagram) {
-    btnVerImagens.addEventListener("click", function () {
-      modalInstagram.style.display = "flex";
-    });
-    fecharModalInstagram.addEventListener("click", function () {
-      modalInstagram.style.display = "none";
-    });
-    modalInstagram.addEventListener("click", function (e) {
-      if (e.target === modalInstagram) modalInstagram.style.display = "none";
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && modalInstagram.style.display === "flex") modalInstagram.style.display = "none";
-    });
-  }
-
-  // Estilo da animação de carregamento (spinner)
-  const style = document.createElement("style");
-  style.textContent = `
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-  `;
-  document.head.appendChild(style);
 </script>
 {% endblock %}

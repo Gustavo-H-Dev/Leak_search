@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -61,9 +62,12 @@ class ValidaTest(unittest.TestCase):
             {"link": "https://outro.com/a/", "titulo": "Repetido"},
         ]
 
-        with patch(
-            "app.main.candidatos_core.calcular_hashes",
-            return_value={"https://cdn.com/a.jpg": "a" * 16},
+        with (
+            patch.dict(os.environ, {"COMPARACAO_IMAGEM_ATIVA": "true"}),
+            patch(
+                "app.main.candidatos_core.calcular_hashes",
+                return_value={"https://cdn.com/a.jpg": "a" * 16},
+            ),
         ):
             resumo = _enviar_para_valida({"id": user_id}, resultados, "google_images")
 
@@ -75,21 +79,28 @@ class ValidaTest(unittest.TestCase):
         self.assertEqual([c["url"] for c in pendentes], ["https://outro.com/a"])
         self.assertEqual(pendentes[0]["phash"], "a" * 16)
 
-    def test_busca_google_images_guarda_opcoes_relacionadas(self):
+    def test_busca_google_images_grava_candidato_pontuado(self):
         from app import main
 
         resposta = {"images_results": [
-            {"link": "https://x.com/1", "title": "Primeiro", "related_content_id": "abc"},
-            {"link": "https://x.com/2", "title": "Segundo", "related_content_id": "abc"},
+            {"link": "https://www.erome.com/a/xyz", "title": "Ana @ana vazado", "snippet": "download"},
+            {"link": "https://www.google.com/search?q=ana", "title": "ana vazado", "snippet": ""},
         ]}
         with patch("app.main.serpapi.pesquisar", return_value=resposta):
             main._executar_busca_vazamentos(
-                {"id": self.user_id}, "google_images", ["q"], {}
+                {"id": self.user_id, "public_handle": "ana"},
+                "google_images",
+                ["q"],
+                {},
             )
+        status = main._status_vazamento(self.user_id)
+        self.assertEqual(status["estado"], "ok")
+        candidatos = db.listar_candidatos(self.user_id)
         self.assertEqual(
-            main._status_vazamento(self.user_id)["related_options"],
-            [{"id": "abc", "title": "Primeiro"}],
+            [c["url"] for c in candidatos], ["https://erome.com/a/xyz"]
         )
+        self.assertGreaterEqual(candidatos[0]["nota"], 60)
+        self.assertEqual(candidatos[0]["classificacao"], "provavel_vazamento")
 
     def test_posts_oficiais_do_instagram_importados_nao_viram_candidatos(self):
         user_id = self.user_id
@@ -155,7 +166,8 @@ class ValidaTest(unittest.TestCase):
         ):
             db.adicionar_candidato(user_id, url, url, "", "", "", "serp", phash)
 
-        corpo = valida(criar_request(user_id)).body.decode()
+        with patch.dict(os.environ, {"COMPARACAO_IMAGEM_ATIVA": "true"}):
+            corpo = valida(criar_request(user_id)).body.decode()
 
         self.assertLess(corpo.index("a.com/igual"), corpo.index("a.com/medio"))
         self.assertLess(corpo.index("a.com/medio"), corpo.index("a.com/longe"))
@@ -218,11 +230,22 @@ def test_busca_de_vazamentos_em_segundo_plano_registra_status(tmp_path):
     with patch.object(db, "CAMINHO_DB", tmp_path / "u.db"):
         db.iniciar_banco()
         uid = db.criar_usuario("ana", "ana@example.com", "hash")
-        falsa = {"images_results": [{"link": "https://x.com/a", "original": "https://x.com/a.jpg", "title": "t"}]}
-        with patch("app.main.serpapi.pesquisar", return_value=falsa), patch(
-            "app.main.candidatos_core.calcular_hashes", return_value={}
-        ):
-            main._executar_busca_vazamentos({"id": uid}, "google_images_light", ["q1", "q2"], {})
+        falsa = {
+            "images_results": [
+                {
+                    "link": "https://www.erome.com/a/xyz",
+                    "original": "https://www.erome.com/a/xyz.jpg",
+                    "title": "Ana @ana vazado",
+                }
+            ]
+        }
+        with patch("app.main.serpapi.pesquisar", return_value=falsa):
+            main._executar_busca_vazamentos(
+                {"id": uid, "public_handle": "ana"},
+                "google_images_light",
+                ["q1", "q2"],
+                {},
+            )
         status = main._status_vazamento(uid)
         assert status["estado"] == "ok" and status["resumo"]["novos"] == 1
 

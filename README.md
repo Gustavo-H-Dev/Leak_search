@@ -28,14 +28,21 @@ disponibilizar o site publicamente para controlar custos de APIs externas.
 
 ## Provedores de busca
 
-A página de busca usa SerpApi. Google Cloud Vision continua disponível somente
-pela rota legada de administrador; os demais provedores não estão integrados.
+A página de busca usa dois provedores de texto, ambos com a mesma interface
+(`search(query) -> list[Candidato]`):
+
+- **SerpAPI (Google Images/Light)** — continua com a chave
+  `SERPAPI_API_KEY` e as consultas montadas a partir de arrobas, termos e sites.
+- **TinyFish (web)** — `GET https://api.search.tinyfish.ai` com `X-API-Key`,
+  `location=BR` e `language=pt`, chave em `TINYFISH_API_KEY`. Respeita 30
+  requisições/minuto, repete em 429/5xx e avisa quando a cota diária acaba
+  (HTTP 402). Consulte a
+  [referência da API](https://docs.tinyfish.ai/search-api/reference.md).
 
 As variáveis `BRAVE_SEARCH_API_KEY`, `TINEYE_API_KEY`, `DATAFORSEO_LOGIN`,
 `DATAFORSEO_PASSWORD` e `SEARXNG_BASE_URL` podem ser preparadas no `.env`, mas
-configurá-las não ativa essas integrações. Cada provedor precisará de um
-adaptador próprio e de normalização para o formato de resultados já usado pela
-aplicação antes de ser habilitado.
+configurá-las não ativa essas integrações. Google Cloud Vision continua
+somente pela rota legada de administrador.
 
 ## Contas, login e e-mail
 
@@ -103,11 +110,11 @@ docker compose up --build -d
 
 ## Render e PostgreSQL
 
-O aplicativo continua usando SQLite local quando `DATABASE_URL` está vazia.
-Para o Render, crie um PostgreSQL e configure `DATABASE_URL` nas variáveis do
-serviço Web com a URL interna fornecida pelo Render. O app cria/atualiza as
-tabelas ao iniciar. Não use a URL externa do banco entre serviços hospedados no
-Render.
+O aplicativo **exige PostgreSQL**: sem `DATABASE_URL` ele não inicia (a flag
+`APP_TESTES_SQLITE` existe apenas para a suíte de testes). Para o Render, crie
+um PostgreSQL e configure `DATABASE_URL` nas variáveis do serviço Web com a URL
+interna fornecida pelo Render. O app cria/atualiza as tabelas ao iniciar. Não
+use a URL externa do banco entre serviços hospedados no Render.
 
 Para levar os dados locais ao banco PostgreSQL:
 
@@ -163,6 +170,7 @@ Para configurar a chave, crie um arquivo `.env` na raiz do projeto (ele está no
 
 ```env
 SERPAPI_API_KEY=sua_chave_serpapi
+TINYFISH_API_KEY=sua_chave_tinyfish
 ```
 
 Recrie o contêiner para carregar a variável:
@@ -184,24 +192,32 @@ a chave e monitore os custos.
 
 ## Fluxo de busca e validação (Valida)
 
-1. Em `/busca-web`, escolha o endpoint SerpApi (por exemplo, Google Images ou
-   Images Light). O administrador também pode escolher outra conta.
-2. Os resultados da API não são listados ali. O servidor omite páginas oficiais
-   e páginas filhas de um site oficial (mesmo domínio e caminho abaixo da página
-   cadastrada; vale para qualquer dono, inclusive dono incerto), resultados já
-   marcados como "não sou eu" e repetições. A página mostra só o resumo.
-3. O restante vira **candidato** em `/valida`, inclusive o que já havia sido
-   marcado como vazado e o que nunca foi catalogado. O servidor baixa apenas a
-   miniatura do resultado, em memória e somente de destinos públicos, calcula o
-   pHash e descarta o arquivo: nenhuma imagem é guardada, só o hash.
-4. Cada candidato é comparado com as imagens do catálogo vinculadas à criadora,
-   as fotos enviadas no perfil e os hashes de imagens de sites oficiais
-   (capturados nas buscas ou ao marcar um candidato como oficial). A página
-   ordena em **Atenção** (muito parecido), **Possíveis** e **Diferentes**. A
-   semelhança é uma pista, não confirma identidade.
-5. A criadora (ou o administrador) valida cada candidato como **vazado**,
-   **não sou eu** ou **oficial**. Vazados entram na lista de relatos; oficiais
-   passam a ser omitidos nas próximas buscas.
+1. Em `/busca-web`, o administrador escolhe a criadora, o provedor (SerpAPI ou
+   TinyFish), os termos, os sites e o limite de consultas por execução
+   (padrão 12, salvo em `app_settings`).
+2. Ao iniciar, o servidor consulta **primeiro** o perfil público do Instagram
+   (respeitando o cache de 24 h), salva as postagens e extrai da bio os outros
+   arrobas citados, gravando-os em `arroba_descoberto`. Se o Instagram falhar
+   ou estiver bloqueado, a execução registra o motivo em `busca_execucao` e
+   continua apenas com o arroba informado.
+3. As consultas combinam cada arroba com os termos e com `site:` dos domínios
+   configurados. A execução roda em segundo plano (`BackgroundTasks`), com
+   status consultável na própria página, e é registrada em `busca_execucao`
+   (provedor, termos, status, erro do Instagram, resumo).
+4. Resultados são normalizados (URL sem parâmetros de rastreio, domínio em
+   minúsculas), deduplicados e pontuados por regras: arroba no título/URL,
+   domínio de vazamento, palavras suspeitas; perfis oficiais da criadora,
+   páginas de busca e espelhos de perfil são descartados. A nota, os motivos e
+   a classificação (`provavel_vazamento`, `oficial`, `falso_positivo`,
+   `indefinido`) ficam em `search_candidates`. Só entram na fila candidatos com
+   nota a partir de `PONTUACAO_LIMIAR_REVISAO` (padrão 30).
+5. `/valida` deixou de consultar o Instagram: ela lista os candidatos por nota,
+   com os motivos, e mantém a revisão manual de sempre (**vazado**, **não sou
+   eu**, **oficial**). Rodar a busca de novo atualiza `ultima_vez_em` e não
+   apaga o status de revisão já dado.
+6. A comparação de imagens por pHash continua no código, mas desligada por
+   `COMPARACAO_IMAGEM_ATIVA=false`: nesse modo nenhuma miniatura é baixada,
+   processada ou comparada e a SerpAPI também usa a pontuação por regras.
 
 Para administradores, ao carregar a página, o uso do mês, a cota e as consultas restantes são
 consultados automaticamente; o botão **Atualizar saldo** repete a consulta pela
@@ -247,3 +263,27 @@ perfil e guarda os hashes das miniaturas como referência.
 `/analise` (só admin) resume, por criadora, candidatos por status e nível de semelhança, falta de hash/referências, domínios mais frequentes e alertas de calibração (ex.: vazados confirmados caindo em "Diferentes"). Serve para acompanhar a qualidade da busca sem acessar o banco.
 
 A busca de vazamentos roda em segundo plano (o plano gratuito do Render é lento e a requisição poderia expirar): o card mostra "em andamento", atualiza sozinho e exibe o resumo final ou o erro.
+
+## Banco, migração e testes
+
+O schema é criado/atualizado no início do app (`db.iniciar_banco`), sem
+Alembic: `CREATE TABLE IF NOT EXISTS` e `ALTER TABLE ... ADD COLUMN`
+idempotentes, tanto para as tabelas novas (`busca_execucao`,
+`arroba_descoberto`) quanto para as colunas novas de `search_candidates`
+(`nota`, `motivos_json`, `classificacao`, `execucao_id`, `url_normalizada`,
+`dominio`, `primeira_vez_em`, `ultima_vez_em`, `resposta_bruta_json`,
+`novo_para_criadora`). Nenhum dado é apagado.
+
+Para levar um banco SQLite antigo ao PostgreSQL:
+
+```bash
+DATABASE_URL='postgresql://...' python -m scripts.migrar_sqlite_para_postgres
+```
+
+Para rodar os testes (o `conftest.py` liga um SQLite temporário só na suíte):
+
+```bash
+pip install -r requirements.txt pytest
+python -m pytest tests/test_pontuacao.py tests/test_valida.py tests/test_busca_web.py
+python -m pytest tests
+```

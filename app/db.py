@@ -36,6 +36,24 @@ def usando_postgresql() -> bool:
     return _url_postgresql() is not None
 
 
+def _valor_json(valor):
+    """JSONB no PostgreSQL, texto JSON no SQLite de teste."""
+    if usando_postgresql():
+        from psycopg.types.json import Jsonb
+
+        return Jsonb(valor if valor is not None else {})
+    return json.dumps(valor, ensure_ascii=False, default=str)
+
+
+def _usar_sqlite_de_teste() -> bool:
+    """SQLite existe apenas para a suite de testes, nunca para a aplicacao.
+
+    Em desenvolvimento e producao o banco e sempre o PostgreSQL apontado por
+    DATABASE_URL; o compose e o Render definem essa variavel.
+    """
+    return os.getenv("APP_TESTES_SQLITE", "").strip() == "1"
+
+
 @contextmanager
 def conexao():
     url_postgresql = _url_postgresql()
@@ -46,6 +64,12 @@ def conexao():
         with psycopg.connect(url_postgresql, row_factory=dict_row) as connection:
             yield _PostgresConnection(connection)
         return
+
+    if not _usar_sqlite_de_teste():
+        raise RuntimeError(
+            "Defina DATABASE_URL com a URL do PostgreSQL. "
+            "A aplicacao nao usa mais SQLite em execucao normal."
+        )
 
     CAMINHO_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(CAMINHO_DB)
@@ -62,11 +86,17 @@ def conexao():
 
 
 def iniciar_banco():
+    if not usando_postgresql() and not _usar_sqlite_de_teste():
+        raise RuntimeError(
+            "Defina DATABASE_URL com a URL do PostgreSQL. "
+            "A aplicacao nao usa mais SQLite em execucao normal."
+        )
     if usando_postgresql():
         _iniciar_banco_postgresql()
         _migrar_sites_oficiais()
         _migrar_usuarios()
         _migrar_criadoras()
+        _migrar_busca_provedores()
         try:
             with conexao() as conn:
                 conn.execute(
@@ -225,6 +255,27 @@ def iniciar_banco():
             );
             CREATE INDEX IF NOT EXISTS search_snapshots_updated_at
             ON search_snapshots (updated_at);
+            CREATE TABLE IF NOT EXISTS busca_execucao (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                criadora_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provedor TEXT NOT NULL,
+                termos_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'pendente',
+                erro_instagram TEXT,
+                erro TEXT,
+                resumo_json TEXT NOT NULL DEFAULT '{}',
+                criada_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                concluida_em TEXT
+            );
+            CREATE TABLE IF NOT EXISTS arroba_descoberto (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                criadora_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plataforma TEXT NOT NULL DEFAULT '',
+                arroba TEXT NOT NULL,
+                origem TEXT NOT NULL DEFAULT '',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (criadora_id, plataforma, arroba)
+            );
             """
         )
         try:
@@ -234,9 +285,9 @@ def iniciar_banco():
         except Exception:
             pass
     _migrar_sites_oficiais()
-    _migrar_sites_oficiais()
     _migrar_usuarios()
     _migrar_criadoras()
+    _migrar_busca_provedores()
 
 
 def _iniciar_banco_postgresql():
@@ -431,10 +482,101 @@ def _iniciar_banco_postgresql():
         CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower
         ON users (lower(email))
         """,
+        """
+        CREATE TABLE IF NOT EXISTS busca_execucao (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            provedor TEXT NOT NULL,
+            termos_json JSONB NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'pendente',
+            erro_instagram TEXT,
+            erro TEXT,
+            resumo_json JSONB NOT NULL DEFAULT '{}',
+            criada_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            concluida_em TEXT
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS busca_execucao_criadora
+        ON busca_execucao (criadora_id, criada_em DESC)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS arroba_descoberto (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            plataforma TEXT NOT NULL DEFAULT '',
+            arroba TEXT NOT NULL,
+            origem TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (criadora_id, plataforma, arroba)
+        )
+        """,
     )
     with conexao() as conn:
         for comando in comandos:
             conn.execute(comando)
+
+
+COLUNAS_BUSCA_PROVEDORES = {
+    "execucao_id": "BIGINT",
+    "url_normalizada": "TEXT NOT NULL DEFAULT ''",
+    "dominio": "TEXT NOT NULL DEFAULT ''",
+    "nota": "INTEGER NOT NULL DEFAULT 0",
+    "motivos_json": "JSONB NOT NULL DEFAULT '[]'",
+    "classificacao": "TEXT NOT NULL DEFAULT 'indefinido'",
+    "primeira_vez_em": "TEXT",
+    "ultima_vez_em": "TEXT",
+    "resposta_bruta_json": "JSONB NOT NULL DEFAULT '{}'",
+    "novo_para_criadora": "BOOLEAN NOT NULL DEFAULT TRUE",
+}
+_COLUNAS_BUSCA_PROVEDORES_SQLITE = {
+    "execucao_id": "INTEGER",
+    "url_normalizada": "TEXT NOT NULL DEFAULT ''",
+    "dominio": "TEXT NOT NULL DEFAULT ''",
+    "nota": "INTEGER NOT NULL DEFAULT 0",
+    "motivos_json": "TEXT NOT NULL DEFAULT '[]'",
+    "classificacao": "TEXT NOT NULL DEFAULT 'indefinido'",
+    "primeira_vez_em": "TEXT",
+    "ultima_vez_em": "TEXT",
+    "resposta_bruta_json": "TEXT NOT NULL DEFAULT '{}'",
+    "novo_para_criadora": "INTEGER NOT NULL DEFAULT 1",
+}
+
+
+def _migrar_busca_provedores():
+    """Adiciona as colunas de pontuacao/classificacao em search_candidates.
+
+    A tabela existente e reaproveitada: status, url unica por criadora e a tela
+    de revisao continuam valendo. Nenhum dado salvo e apagado.
+    """
+    with conexao() as conn:
+        if usando_postgresql():
+            for coluna, tipo in COLUNAS_BUSCA_PROVEDORES.items():
+                conn.execute(
+                    f"ALTER TABLE search_candidates ADD COLUMN IF NOT EXISTS {coluna} {tipo}"
+                )
+        else:
+            existentes = {
+                coluna["name"]
+                for coluna in conn.execute("PRAGMA table_info(search_candidates)")
+            }
+            for coluna, tipo in _COLUNAS_BUSCA_PROVEDORES_SQLITE.items():
+                if coluna not in existentes:
+                    conn.execute(
+                        f"ALTER TABLE search_candidates ADD COLUMN {coluna} {tipo}"
+                    )
+        conn.execute(
+            "UPDATE search_candidates SET url_normalizada = url"
+            " WHERE url_normalizada IS NULL OR url_normalizada = ''"
+        )
+        conn.execute(
+            "UPDATE search_candidates SET primeira_vez_em = created_at"
+            " WHERE primeira_vez_em IS NULL"
+        )
+        conn.execute(
+            "UPDATE search_candidates SET ultima_vez_em = created_at"
+            " WHERE ultima_vez_em IS NULL"
+        )
 
 
 def _migrar_sites_oficiais():
@@ -907,17 +1049,22 @@ STATUS_CANDIDATO = {"pending", "leaked", "not_me", "official"}
 def adicionar_candidato(
     user_id, url, title, source, snippet, thumbnail, engine, phash
 ):
+    agora = _agora_utc()
     with conexao() as conn:
         cur = conn.execute(
             """
             INSERT INTO search_candidates (
-                user_id, url, title, source, snippet, thumbnail, engine, phash
+                user_id, url, title, source, snippet, thumbnail, engine, phash,
+                url_normalizada, primeira_vez_em, ultima_vez_em
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (user_id, url) DO NOTHING
             RETURNING id
             """,
-            (user_id, url, title, source, snippet, thumbnail, engine, phash),
+            (
+                user_id, url, title, source, snippet, thumbnail, engine, phash,
+                url, agora, agora,
+            ),
         )
         registro = cur.fetchone()
         return registro["id"] if registro else None
@@ -926,7 +1073,9 @@ def adicionar_candidato(
 def listar_candidatos(user_id, status=None):
     consulta = """
         SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
-               phash, status, created_at
+               phash, status, created_at, execucao_id, url_normalizada, dominio,
+               nota, motivos_json, classificacao, primeira_vez_em, ultima_vez_em,
+               novo_para_criadora
         FROM search_candidates
         WHERE user_id = ?
     """
@@ -937,6 +1086,219 @@ def listar_candidatos(user_id, status=None):
     consulta += " ORDER BY created_at DESC, id DESC"
     with conexao() as conn:
         return conn.execute(consulta, tuple(parametros)).fetchall()
+
+
+def listar_candidatos_revisao(user_id, status=None, nota_minima=None):
+    """Candidatos ordenados por nota, com os novos primeiro no empate."""
+    consulta = """
+        SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
+               phash, status, created_at, execucao_id, url_normalizada, dominio,
+               nota, motivos_json, classificacao, primeira_vez_em, ultima_vez_em,
+               novo_para_criadora
+        FROM search_candidates
+        WHERE user_id = ?
+    """
+    parametros = [user_id]
+    if status:
+        consulta += " AND status = ?"
+        parametros.append(status)
+    if nota_minima is not None:
+        consulta += " AND nota >= ?"
+        parametros.append(nota_minima)
+    consulta += (
+        " ORDER BY nota DESC, novo_para_criadora DESC,"
+        " COALESCE(ultima_vez_em, created_at) DESC, id DESC"
+    )
+    with conexao() as conn:
+        return conn.execute(consulta, tuple(parametros)).fetchall()
+
+
+def urls_conhecidas(user_id):
+    with conexao() as conn:
+        return {
+            linha["url"]
+            for linha in conn.execute(
+                "SELECT url FROM search_candidates WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        }
+
+
+def criar_busca_execucao(criadora_id, provedor, termos):
+    agora = _agora_utc()
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO busca_execucao
+                (criadora_id, provedor, termos_json, status, criada_em)
+            VALUES (?, ?, ?, 'rodando', ?)
+            RETURNING id
+            """,
+            (criadora_id, provedor, _valor_json(list(termos)), agora),
+        )
+        return cur.fetchone()["id"]
+
+
+def atualizar_busca_execucao(
+    execucao_id, *, status=None, erro_instagram=None, erro=None, resumo=None
+):
+    campos = []
+    parametros = []
+    if status is not None:
+        campos.append("status = ?")
+        parametros.append(status)
+        if status in {"concluida", "erro"}:
+            campos.append("concluida_em = ?")
+            parametros.append(_agora_utc())
+    if erro_instagram is not None:
+        campos.append("erro_instagram = ?")
+        parametros.append(erro_instagram[:2000])
+    if erro is not None:
+        campos.append("erro = ?")
+        parametros.append(erro[:2000])
+    if resumo is not None:
+        campos.append("resumo_json = ?")
+        parametros.append(_valor_json(resumo))
+    if not campos:
+        return False
+    parametros.append(execucao_id)
+    with conexao() as conn:
+        cur = conn.execute(
+            f"UPDATE busca_execucao SET {', '.join(campos)} WHERE id = ?",
+            tuple(parametros),
+        )
+        return cur.rowcount > 0
+
+
+def obter_busca_execucao(execucao_id):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT id, criadora_id, provedor, termos_json, status,
+                   erro_instagram, erro, resumo_json, criada_em, concluida_em
+            FROM busca_execucao WHERE id = ?
+            """,
+            (execucao_id,),
+        ).fetchone()
+    if not linha:
+        return None
+    registro = dict(linha)
+    for chave in ("termos_json", "resumo_json"):
+        valor = registro.get(chave)
+        if isinstance(valor, (dict, list)):
+            continue
+        try:
+            registro[chave] = json.loads(valor or "{}")
+        except (TypeError, ValueError):
+            registro[chave] = [] if chave == "termos_json" else {}
+    return registro
+
+
+def salvar_arroba_descoberto(criadora_id, plataforma, arroba, origem=""):
+    arroba = (arroba or "").strip().lstrip("@").lower()
+    if not arroba:
+        return False
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO arroba_descoberto
+                (criadora_id, plataforma, arroba, origem)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (criadora_id, plataforma, arroba) DO UPDATE
+            SET origem = excluded.origem
+            """,
+            (criadora_id, (plataforma or "").strip().lower(), arroba, origem[:500]),
+        )
+        return True
+
+
+def listar_arrobas_descobertos(criadora_id):
+    with conexao() as conn:
+        return [
+            dict(linha)
+            for linha in conn.execute(
+                """
+                SELECT arroba, plataforma, origem
+                FROM arroba_descoberto WHERE criadora_id = ?
+                ORDER BY id
+                """,
+                (criadora_id,),
+            ).fetchall()
+        ]
+
+
+def salvar_candidatos_busca(criadora_id, execucao_id, candidatos):
+    """Grava/atualiza candidatos sem tocar no status de revisao existente.
+
+    Cada item traz url_normalizada, dominio, titulo, trecho, miniatura_url,
+    provedor, nota, motivos, classificacao e resposta_bruta. Devolve
+    (novos, atualizados).
+    """
+    if not candidatos:
+        return 0, 0
+    conhecidas = urls_conhecidas(criadora_id)
+    novos = atualizados = 0
+    agora = _agora_utc()
+    with conexao() as conn:
+        for item in candidatos:
+            url = item["url_normalizada"]
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO search_candidates (
+                        user_id, url, title, source, snippet, thumbnail, engine,
+                        phash, status, created_at, execucao_id, url_normalizada,
+                        dominio, nota, motivos_json, classificacao,
+                        primeira_vez_em, ultima_vez_em, resposta_bruta_json,
+                        novo_para_criadora
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, '', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (user_id, url) DO UPDATE SET
+                        title = excluded.title,
+                        source = excluded.source,
+                        snippet = excluded.snippet,
+                        thumbnail = excluded.thumbnail,
+                        engine = excluded.engine,
+                        execucao_id = excluded.execucao_id,
+                        url_normalizada = excluded.url_normalizada,
+                        dominio = excluded.dominio,
+                        nota = excluded.nota,
+                        motivos_json = excluded.motivos_json,
+                        classificacao = excluded.classificacao,
+                        ultima_vez_em = excluded.ultima_vez_em,
+                        resposta_bruta_json = excluded.resposta_bruta_json,
+                        novo_para_criadora = ?
+                    """,
+                    (
+                        criadora_id,
+                        url,
+                        (item.get("titulo") or "Resultado")[:500],
+                        (item.get("origem") or item.get("dominio") or "")[:200],
+                        (item.get("trecho") or "")[:4000],
+                        item.get("miniatura_url") or "",
+                        item.get("provedor") or "",
+                        agora,
+                        execucao_id,
+                        url,
+                        item.get("dominio") or "",
+                        int(item.get("nota") or 0),
+                        _valor_json(item.get("motivos") or []),
+                        item.get("classificacao") or "indefinido",
+                        agora,
+                        agora,
+                        _valor_json(item.get("resposta_bruta") or {}),
+                        True,
+                        False,
+                    ),
+                )
+            except Exception:
+                logger.exception("Falha ao salvar candidato %s", url)
+                continue
+            if url in conhecidas:
+                atualizados += 1
+            else:
+                novos += 1
+                conhecidas.add(url)
+    return novos, atualizados
 
 
 def contar_candidatos_por_status(user_id):

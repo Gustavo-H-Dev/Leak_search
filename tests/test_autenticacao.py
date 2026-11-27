@@ -396,13 +396,16 @@ class AutenticacaoTest(unittest.TestCase):
                 self.assertEqual(cliente.post("/busca-vazamentos/config", data={
                     "csrf_token": token, "termos": "alterado", "sites": "exemplo.com",
                 }).status_code, 403)
-                with patch("app.main._executar_busca_vazamentos") as executar:
+                with (
+                    patch.dict(os.environ, {"SERPAPI_API_KEY": "teste"}),
+                    patch("app.main._executar_busca_provedor") as executar,
+                ):
                     resposta = cliente.post("/buscar-vazamentos", data={
                         "csrf_token": token, "api": "google_images_light", "consentimento": "on",
                     })
                 self.assertEqual(resposta.status_code, 200)
                 self.assertEqual(executar.call_args.args[0]["id"], primeiro)
-                self.assertIn('"Ana"', executar.call_args.args[2][0])
+                self.assertIn("vazado", executar.call_args.args[2])
             with TestClient(app) as admin:
                 token = re.search(r'name="csrf_token" value="([^"]+)"', admin.get("/login").text).group(1)
                 admin.post("/login", data={
@@ -412,14 +415,17 @@ class AutenticacaoTest(unittest.TestCase):
                 pagina = admin.get(f"/busca-web?target_user_id={segundo}")
                 self.assertIn("Bia (@bia)", pagina.text)
                 token = re.search(r'name="csrf_token" value="([^"]+)"', pagina.text).group(1)
-                with patch("app.main._executar_busca_vazamentos") as executar:
+                with (
+                    patch.dict(os.environ, {"SERPAPI_API_KEY": "teste"}),
+                    patch("app.main._executar_busca_provedor") as executar,
+                ):
                     resposta = admin.post("/buscar-vazamentos", data={
                         "csrf_token": token, "target_user_id": segundo,
                         "api": "google_images_light", "consentimento": "on",
                     })
                 self.assertEqual(resposta.status_code, 200)
                 self.assertEqual(executar.call_args.args[0]["id"], segundo)
-                self.assertIn('"Bia"', executar.call_args.args[2][0])
+                self.assertIn("vazado", executar.call_args.args[2])
 
     def test_usuario_criado_pelo_admin_respeita_confirmacao_de_email(self):
         with (
