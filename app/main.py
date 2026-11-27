@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+import httpx
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -1354,42 +1355,89 @@ STATUS_VALIDA = {
 }
 
 
+class BuscaInstagramIndisponivel(Exception):
+    """Falha ao buscar postagens do Instagram, com mensagem pronta para o usuario."""
+
+
+USER_AGENT_IMAGEM = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+def _baixar_miniatura(url: str) -> str:
+    """Baixa uma imagem e devolve o pHash; vazio quando nao for possivel."""
+    if not url:
+        return ""
+    try:
+        with httpx.Client(
+            timeout=15,
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT_IMAGEM},
+        ) as cliente:
+            resposta = cliente.get(url)
+        if resposta.status_code != 200:
+            logger.warning(
+                "Miniatura do Instagram respondeu HTTP %s", resposta.status_code
+            )
+            return ""
+        tipo = resposta.headers.get("content-type", "")
+        if not tipo.lower().startswith("image/"):
+            logger.warning("Miniatura do Instagram nao e imagem (%s)", tipo)
+            return ""
+        return imagens.calcular_phash(resposta.content)
+    except Exception:
+        logger.exception("Falha ao baixar miniatura do Instagram")
+        return ""
+
+
 def _buscar_postagens_instagram(alvo: dict) -> list[dict]:
     """Busca postagens recentes do Instagram da criadora e calcula pHash de cada miniatura.
 
     Retorna lista de dicts com shortcode, url e phash. Imagens sao baixadas em
     memoria e descartadas apos o calculo do hash; nada e salvo em disco.
+    Levanta BuscaInstagramIndisponivel com o motivo real da falha.
     """
-    handle = (alvo.get("public_handle") or "").strip().lstrip("@")
+    dados_alvo = dict(alvo) if not isinstance(alvo, dict) else alvo
+    handle = (dados_alvo.get("public_handle") or "").strip().lstrip("@")
     if not handle:
-        return []
+        raise BuscaInstagramIndisponivel(
+            "Esta criadora nao tem o @ do Instagram cadastrado no perfil de busca. "
+            "Preencha o perfil de busca para capturar as postagens."
+        )
     try:
-        dados = serpapi.pesquisar("instagram_profile", profile_id=handle)
-    except Exception:
-        logger.exception("Falha na chamada da Instagram Profile API para %s", handle)
-        return []
+        resposta_api = serpapi.pesquisar("instagram_profile", profile_id=handle)
+    except serpapi.SemResultados as erro:
+        raise BuscaInstagramIndisponivel(
+            f"O Instagram nao devolveu dados para @{handle} "
+            "(perfil privado, inexistente ou sem publicacoes publicas)."
+        ) from erro
+    except serpapi.SerpApiNaoConfigurada as erro:
+        raise BuscaInstagramIndisponivel(str(erro)) from erro
+    except serpapi.ErroSerpApi as erro:
+        raise BuscaInstagramIndisponivel(f"SerpApi: {erro}") from erro
 
     try:
-        _perfil, posts = serpapi.normalizar_perfil_instagram(dados)
-    except Exception:
+        _perfil, posts = serpapi.normalizar_perfil_instagram(resposta_api)
+    except Exception as erro:
         logger.exception("Falha ao normalizar perfil do Instagram para %s", handle)
-        return []
+        raise BuscaInstagramIndisponivel(
+            f"Resposta inesperada da SerpApi para @{handle}: {erro}"
+        ) from erro
+
+    if not posts:
+        raise BuscaInstagramIndisponivel(
+            f"A SerpApi respondeu, mas nao trouxe postagens publicas de @{handle}."
+        )
 
     resultado = []
     for post in posts:
         miniatura = post.get("miniatura") or ""
-        if not miniatura:
-            continue
-        try:
-            with httpx.Client(timeout=15) as cliente:
-                resposta = cliente.get(miniatura)
-                if resposta.status_code != 200:
-                    continue
-                tipo = resposta.headers.get("content-type", "")
-                if not tipo.lower().startswith("image/"):
-                    continue
-                phash = imagens.calcular_phash(resposta.content)
-        except Exception:
+        phash = _baixar_miniatura(miniatura)
+        if not phash:
+            miniatura = post.get("miniatura_alternativa") or ""
+            phash = _baixar_miniatura(miniatura)
+        if not phash:
             continue
         shortcode = sites_oficiais.shortcode_instagram(post.get("link", ""))
         if not shortcode:
@@ -1401,6 +1449,11 @@ def _buscar_postagens_instagram(alvo: dict) -> list[dict]:
                 "miniatura": miniatura,
                 "phash": phash,
             }
+        )
+    if not resultado:
+        raise BuscaInstagramIndisponivel(
+            f"A SerpApi encontrou {len(posts)} postagem(ns) de @{handle}, "
+            "mas nenhuma miniatura pode ser baixada para calcular o hash."
         )
     return resultado
 
@@ -1418,12 +1471,21 @@ def valida(
 
     # Busca automatica de postagens do Instagram se necessario (max 1 vez por 24h)
     ultima_busca_instagram = db.obter_ultima_busca_instagram(alvo["id"])
+    buscar_instagram_erro = ""
     if db.deve_buscar_instagram(alvo["id"]):
         try:
             posts = _buscar_postagens_instagram(alvo)
             if posts:
                 db.salvar_postagens_instagram(alvo["id"], posts)
+        except BuscaInstagramIndisponivel as erro:
+            buscar_instagram_erro = str(erro)
+            logger.warning(
+                "Busca automatica de Instagram indisponivel para %s: %s",
+                alvo["id"],
+                erro,
+            )
         except Exception:
+            buscar_instagram_erro = "Falha inesperada na busca automatica de postagens."
             logger.exception("Falha ao buscar postagens do Instagram para valida")
         db.registrar_busca_instagram(alvo["id"])
         ultima_busca_instagram = db.obter_ultima_busca_instagram(alvo["id"])
@@ -1477,6 +1539,7 @@ def valida(
             "tem_referencias": bool(referencias),
             "mensagem": mensagem,
             "ultima_busca_instagram": ultima_busca_instagram,
+            "buscar_instagram_erro": buscar_instagram_erro,
             "postagens_instagram_count": len(db.listar_postagens_instagram(alvo["id"])),
             "postagens_instagram": db.listar_postagens_instagram(alvo["id"]),
         },
@@ -1489,24 +1552,31 @@ async def valida_buscar_instagram_agora(request: Request):
     alvo = _usuario_alvo_busca(request)
     try:
         posts = _buscar_postagens_instagram(alvo)
-        salvos = 0
-        if posts:
-            salvos = db.salvar_postagens_instagram(alvo["id"], posts)
-        db.registrar_busca_instagram(alvo["id"])
-        ultima = db.obter_ultima_busca_instagram(alvo["id"])
-        return JSONResponse(
-            {
-                "ok": True,
-                "postagens": len(posts),
-                "salvos": salvos,
-                "ultima_busca": ultima,
-            }
-        )
+    except BuscaInstagramIndisponivel as erro:
+        return JSONResponse({"ok": False, "erro": str(erro)}, status_code=400)
     except Exception as erro:
         logger.exception("Falha ao forcar busca de Instagram para valida")
         return JSONResponse(
-            {"ok": False, "erro": str(erro)}, status_code=500
+            {"ok": False, "erro": f"Erro inesperado: {erro}"}, status_code=500
         )
+    try:
+        salvos = db.salvar_postagens_instagram(alvo["id"], posts) if posts else 0
+        db.registrar_busca_instagram(alvo["id"])
+        ultima = db.obter_ultima_busca_instagram(alvo["id"])
+    except Exception as erro:
+        logger.exception("Falha ao salvar postagens do Instagram para valida")
+        return JSONResponse(
+            {"ok": False, "erro": f"Erro ao salvar as postagens: {erro}"},
+            status_code=500,
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "postagens": len(posts),
+            "salvos": salvos,
+            "ultima_busca": ultima,
+        }
+    )
 
 
 @app.get("/analise", response_class=HTMLResponse, dependencies=[Depends(exigir_admin)])

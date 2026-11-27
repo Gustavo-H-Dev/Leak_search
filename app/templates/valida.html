@@ -36,6 +36,11 @@
       </button>
       <span id="status-busca-instagram" style="font-size:.8rem; color: var(--muted);"></span>
     </div>
+    {% if buscar_instagram_erro %}
+    <p class="erro" role="alert" style="margin:.6rem 0 0 0; font-size:.85rem;">
+      {{ buscar_instagram_erro }}
+    </p>
+    {% endif %}
   </div>
 
   <details class="collapsible" open>
@@ -222,7 +227,8 @@
 
         if (dados.ok) {
           // Sucesso
-          statusBusca.innerHTML = '<strong style="color:#5ac68a;">✓ Concluído:</strong> ' + dados.salvos + ' postagem(ns) capturada(s).';
+          var encontradas = dados.postagens || dados.salvos;
+          statusBusca.innerHTML = '<strong style="color:#5ac68a;">✓ Concluído:</strong> ' + dados.salvos + ' de ' + encontradas + ' postagem(ns) capturada(s).';
           btnBuscarInstagram.innerHTML = '<span style="color:#5ac68a;">✓</span> Atualizado';
           setTimeout(function () {
             btnBuscarInstagram.innerHTML = 'Buscar postagens novamente';

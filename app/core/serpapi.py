@@ -241,6 +241,16 @@ def normalizar_perfil_instagram(dados: dict) -> tuple[dict, list[dict[str, str]]
                     ),
                     "",
                 ),
+                # Proxy da SerpApi: usado quando a CDN do Instagram recusa o download
+                "miniatura_alternativa": next(
+                    (
+                        post[chave]
+                        for chave in ("serpapi_thumbnail_src", "serpapi_display_url")
+                        if isinstance(post.get(chave), str)
+                        and post[chave].startswith("https://")
+                    ),
+                    "",
+                ),
             }
         )
     return perfil, posts
