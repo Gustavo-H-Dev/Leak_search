@@ -37,6 +37,7 @@ from app.core import (
     fluxo_busca,
     imagens,
     instagram,
+    perfis_monitorados as perfis_core,
     pontuacao,
     provedores_busca,
     serpapi,
@@ -496,7 +497,8 @@ async def cadastrar(
         )
 
     _nova_sessao(request, user_id)
-    return RedirectResponse("/", status_code=303)
+    # Conta nova cai no onboarding: e ali que ela diz o que sera monitorado.
+    return RedirectResponse("/onboarding", status_code=303)
 
 
 def _criar_conta(username, email, nome_publico, arroba, senha, confirmar_senha):
@@ -864,7 +866,7 @@ def perfil_busca(request: Request, erro: str = "", mensagem: str = ""):
         {
             "usuario": usuario,
             "fotos": db.listar_fotos_busca(usuario["id"]),
-            "sites_oficiais": db.listar_sites_oficiais_usuario(usuario["id"]),
+            "perfis": db.listar_perfis_monitorados(usuario["id"]),
             "erro": erro,
             "mensagem": mensagem,
         },
@@ -978,49 +980,261 @@ def excluir_foto_busca(request: Request, foto_id: int):
     )
 
 
-@app.post("/perfil-busca/sites-oficiais", dependencies=_csrf())
-def adicionar_site_oficial_perfil(
-    request: Request,
-    nome: str = Form("Site oficial"),
-    url: str = Form(...),
-):
-    nome = nome.strip() or "Site oficial"
-    if len(nome) > 160:
-        return RedirectResponse(
-            "/perfil-busca?erro="
-            + quote("O nome do site deve ter até 160 caracteres."),
-            status_code=303,
-        )
-    try:
-        url = sites_oficiais.normalizar_url_pagina(url)
-    except ValueError as erro:
-        return RedirectResponse(
-            "/perfil-busca?erro=" + quote(str(erro)), status_code=303
-        )
-    user_id = request.state.user["id"]
-    if not db.adicionar_site_oficial_usuario(user_id, user_id, nome, url):
-        return RedirectResponse(
-            "/perfil-busca?erro="
-            + quote("Este site já está cadastrado como oficial."),
-            status_code=303,
-        )
+# ------------------------------------------------------- perfis monitorados
+
+def _destino_do_formulario(voltar_para: str) -> str:
+    return "/configuracoes/perfis" if voltar_para == "config" else "/onboarding"
+
+
+def _redirecionar_com(destino: str, passo: int, chave: str, texto: str):
+    separador = "&" if "?" in destino else "?"
     return RedirectResponse(
-        "/perfil-busca?mensagem=" + quote("Site oficial adicionado."),
+        f"{destino}{separador}passo={passo}&{chave}={quote(texto)}", status_code=303
+    )
+
+
+def _contexto_perfis(request: Request, erro: str = "", mensagem: str = "") -> dict:
+    criadora_id = request.state.user["id"]
+    dados = perfis_core.estado(criadora_id)
+    textos = {variante["texto"] for variante in dados["variantes"]}
+    return {
+        "estado": dados,
+        "plataformas": perfis_core.PLATAFORMAS,
+        "sugestoes": [
+            texto
+            for texto in perfis_core.sugerir_variantes(criadora_id)
+            if texto not in textos
+        ],
+        "limite_perfis": db.limite_perfis_monitorados(),
+        "erro": erro,
+        "mensagem": mensagem,
+    }
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+def onboarding(request: Request, passo: int = 0, erro: str = "", mensagem: str = ""):
+    contexto = _contexto_perfis(request, erro, mensagem)
+    contexto["passo"] = passo if passo in (1, 2, 3, 4) else contexto["estado"]["atual"]
+    return templates.TemplateResponse(request, "onboarding.html", contexto)
+
+
+@app.get("/configuracoes/perfis", response_class=HTMLResponse)
+def configuracoes_perfis(request: Request, erro: str = "", mensagem: str = ""):
+    contexto = _contexto_perfis(request, erro, mensagem)
+    contexto["passo"] = 1
+    return templates.TemplateResponse(request, "perfis_monitorados.html", contexto)
+
+
+@app.post("/onboarding/perfis", dependencies=_csrf())
+def salvar_perfis_monitorados(
+    request: Request,
+    plataforma: list[str] = Form([]),
+    arroba: list[str] = Form([]),
+    voltar_para: str = Form(""),
+):
+    criadora_id = request.state.user["id"]
+    destino = _destino_do_formulario(voltar_para)
+    adicionados = 0
+    for indice, valor in enumerate(arroba):
+        if not (valor or "").strip():
+            continue
+        escolhida = plataforma[indice] if indice < len(plataforma) else "instagram"
+        try:
+            if perfis_core.salvar_perfil(criadora_id, escolhida, valor):
+                adicionados += 1
+        except ValueError as falha:
+            return _redirecionar_com(destino, 1, "erro", str(falha))
+    if not adicionados:
+        return _redirecionar_com(
+            destino, 1, "mensagem", "Nenhum perfil novo para salvar."
+        )
+    return _redirecionar_com(
+        destino, 1, "mensagem", f"{adicionados} perfil(is) salvo(s)."
+    )
+
+
+@app.post("/onboarding/perfis/{perfil_id}/status", dependencies=_csrf())
+def alternar_perfil_monitorado(
+    request: Request, perfil_id: int, voltar_para: str = Form("")
+):
+    criadora_id = request.state.user["id"]
+    destino = _destino_do_formulario(voltar_para)
+    perfil = db.obter_perfil_monitorado(perfil_id, criadora_id)
+    if perfil is None:
+        return _redirecionar_com(destino, 1, "erro", "Perfil não encontrado.")
+    novo = "pausado" if perfil["status"] == "ativo" else "ativo"
+    db.atualizar_status_perfil_monitorado(perfil_id, criadora_id, novo)
+    return _redirecionar_com(destino, 1, "mensagem", f"Perfil {novo}.")
+
+
+@app.post("/onboarding/perfis/{perfil_id}/excluir", dependencies=_csrf())
+def excluir_perfil_monitorado(
+    request: Request, perfil_id: int, voltar_para: str = Form("")
+):
+    destino = _destino_do_formulario(voltar_para)
+    if not db.excluir_perfil_monitorado(perfil_id, request.state.user["id"]):
+        return _redirecionar_com(destino, 1, "erro", "Perfil não encontrado.")
+    return _redirecionar_com(destino, 1, "mensagem", "Perfil removido.")
+
+
+@app.post("/onboarding/variantes", dependencies=_csrf())
+def salvar_variantes_do_onboarding(
+    request: Request,
+    nova_variante: list[str] = Form([]),
+    texto_novo: str = Form(""),
+    variante_ativa: list[int] = Form([]),
+    voltar_para: str = Form(""),
+):
+    criadora_id = request.state.user["id"]
+    destino = _destino_do_formulario(voltar_para)
+    existentes = {linha["id"] for linha in db.listar_variantes_nome(criadora_id)}
+    criadas = perfis_core.salvar_variantes(criadora_id, nova_variante)
+    if texto_novo.strip():
+        criadas += perfis_core.salvar_variantes(
+            criadora_id, [texto_novo], origem="manual"
+        )
+    ativas = {int(item) for item in variante_ativa}
+    for variante in db.listar_variantes_nome(criadora_id):
+        if variante["id"] in existentes:
+            db.atualizar_variante_nome(
+                variante["id"], criadora_id, variante["id"] in ativas
+            )
+    perfis_core.marcar_variantes_vistas(criadora_id)
+    mensagem = (
+        f"{criadas} variação(ões) nova(s) e lista atualizada."
+        if criadas
+        else "Lista de variações atualizada."
+    )
+    return _redirecionar_com(destino, 2, "mensagem", mensagem)
+
+
+@app.post("/onboarding/variantes/{variante_id}/excluir", dependencies=_csrf())
+def excluir_variante_do_onboarding(
+    request: Request, variante_id: int, voltar_para: str = Form("")
+):
+    destino = _destino_do_formulario(voltar_para)
+    if not db.excluir_variante_nome(variante_id, request.state.user["id"]):
+        return _redirecionar_com(destino, 2, "erro", "Variação não encontrada.")
+    return _redirecionar_com(destino, 2, "mensagem", "Variação removida.")
+
+
+@app.post("/onboarding/oficiais", dependencies=_csrf())
+def salvar_pagina_oficial_do_onboarding(
+    request: Request, url: str = Form(""), voltar_para: str = Form("")
+):
+    destino = _destino_do_formulario(voltar_para)
+    try:
+        criada = perfis_core.salvar_pagina(request.state.user["id"], url)
+    except ValueError as falha:
+        return _redirecionar_com(destino, 3, "erro", str(falha))
+    if not criada:
+        return _redirecionar_com(
+            destino, 3, "mensagem", "Essa página já estava na lista."
+        )
+    return _redirecionar_com(destino, 3, "mensagem", "Página oficial adicionada.")
+
+
+@app.post("/onboarding/oficiais/pular", dependencies=_csrf())
+def pular_paginas_oficiais(request: Request, voltar_para: str = Form("")):
+    perfis_core.pular_oficiais(request.state.user["id"])
+    destino = _destino_do_formulario(voltar_para)
+    return _redirecionar_com(
+        destino, 4, "mensagem", "Etapa de páginas oficiais marcada como pulada."
+    )
+
+
+@app.post("/onboarding/oficiais/{pagina_id}/excluir", dependencies=_csrf())
+def excluir_pagina_oficial_do_onboarding(
+    request: Request, pagina_id: int, voltar_para: str = Form("")
+):
+    destino = _destino_do_formulario(voltar_para)
+    if not db.excluir_pagina_oficial(pagina_id, request.state.user["id"]):
+        return _redirecionar_com(destino, 3, "erro", "Página não encontrada.")
+    return _redirecionar_com(destino, 3, "mensagem", "Página removida.")
+
+
+@app.post("/onboarding/concluir", dependencies=_csrf())
+def concluir_onboarding(request: Request):
+    perfis_core.concluir(request.state.user["id"])
+    return RedirectResponse(
+        "/onboarding?passo=4&mensagem="
+        + quote("Configuração salva. Você pode ajustar isso depois em Configurações > Perfis."),
         status_code=303,
     )
 
 
-@app.post("/perfil-busca/sites-oficiais/{site_id}/excluir", dependencies=_csrf())
-def excluir_site_oficial_usuario(request: Request, site_id: int):
-    user_id = request.state.user["id"]
-    if not db.excluir_site_oficial_usuario(site_id, user_id):
-        return RedirectResponse(
-            "/perfil-busca?erro=" + quote("Site oficial não encontrado."),
-            status_code=303,
+@app.post("/onboarding/busca", dependencies=_csrf())
+def primeira_busca_do_onboarding(request: Request, tarefas: BackgroundTasks):
+    """Dispara o motor atual uma vez, pelo botão. Sem agendamento."""
+    criadora_id = request.state.user["id"]
+    alvo = db.obter_usuario_por_id(criadora_id)
+    destino = "/onboarding"
+    arrobas = perfis_core.arrobas_monitoradas(criadora_id)
+    if not arrobas and not (alvo["public_handle"] or "").strip():
+        return _redirecionar_com(
+            destino, 4, "erro", "Adicione ao menos um perfil antes de buscar."
         )
-    return RedirectResponse(
-        "/perfil-busca?mensagem=" + quote("Site oficial removido."),
-        status_code=303,
+    provedor = next(
+        (
+            nome
+            for nome in ("serpapi", "tinyfish")
+            if busca_provedores.configurado(nome)
+        ),
+        "",
+    )
+    if not provedor:
+        return _redirecionar_com(
+            destino,
+            4,
+            "erro",
+            "Configure SERPAPI_API_KEY ou TINYFISH_API_KEY no servidor para rodar a busca.",
+        )
+    atual = _status_vazamento(criadora_id)
+    if atual.get("estado") == "rodando" and (
+        time.time() - atual.get("iniciado", 0) < TEMPO_MAXIMO_BUSCA_VAZAMENTO
+    ):
+        return _redirecionar_com(
+            destino, 4, "erro", "Já existe uma busca em andamento para esta conta."
+        )
+    termos, sites = _config_vazamentos()
+    limite = _limite_consultas_busca()
+    consultas = consultas_vazamento.gerar_consultas_busca(
+        arrobas or [alvo["public_handle"]],
+        termos,
+        sites,
+        limite,
+        nome=alvo["public_name"] or "",
+    )
+    if not consultas:
+        return _redirecionar_com(
+            destino, 4, "erro", "Cadastre ao menos um termo ou site para pesquisar."
+        )
+    _salvar_status_vazamento(
+        criadora_id,
+        {
+            "estado": "rodando",
+            "iniciado": time.time(),
+            "consultas": consultas,
+            "api": "google_images_light",
+            "provedor": provedor,
+        },
+    )
+    tarefas.add_task(
+        _executar_busca_provedor,
+        alvo,
+        provedor,
+        termos,
+        sites,
+        limite,
+        "google_images_light",
+        {"gl": "br", "hl": "pt", "safe": "off"},
+    )
+    perfis_core.concluir(criadora_id)
+    return _redirecionar_com(
+        destino,
+        4,
+        "mensagem",
+        "Primeira busca iniciada em segundo plano. Os candidatos aparecem na Revisão.",
     )
 
 
@@ -1797,12 +2011,14 @@ def validar_candidato(
             {},
         )
     elif status == "official":
-        db.adicionar_site_oficial_usuario(
-            alvo["id"],
-            request.state.user["id"],
-            candidato["title"][:160] or "Site oficial",
-            candidato["url"],
-        )
+        url_oficial = pontuacao.normalizar_url(candidato["url"])
+        if url_oficial:
+            db.adicionar_pagina_oficial(
+                alvo["id"],
+                url_oficial,
+                pontuacao.dominio_de(url_oficial),
+                origem="revisao",
+            )
         if candidato["phash"]:
             db.adicionar_hash_oficial(
                 alvo["id"], candidato["url"], candidato["phash"]
@@ -1952,7 +2168,10 @@ def _enviar_para_valida(alvo, resultados, engine):
     e repetições. Só o hash da miniatura é guardado; a imagem é descartada.
     """
     user_id = alvo["id"]
-    paginas_oficiais = db.listar_paginas_oficiais_com_donos()
+    paginas_oficiais = [
+        {"user_id": user_id, "url": pagina["url"]}
+        for pagina in db.listar_paginas_oficiais(user_id)
+    ]
     existentes = {c["url"]: c["status"] for c in db.listar_candidatos(user_id)}
     hashes_oficiais = {h["url"] for h in db.listar_hashes_oficiais(user_id)}
     posts_oficiais = {
@@ -2126,7 +2345,8 @@ def _contexto_busca_web(request: Request, target_user_id: int = 0, **valores):
         ),
         "fotos": fotos,
         "sites_vazados": db.listar_sites_vazados(target_user_id),
-        "sites_oficiais_usuario": db.listar_sites_oficiais_usuario(target_user_id),
+        "paginas_oficiais": db.listar_paginas_oficiais(target_user_id),
+        "perfis_monitorados": db.listar_perfis_monitorados(target_user_id),
         "vazamento_termos": _config_vazamentos()[0],
         "vazamento_sites": _config_vazamentos()[1],
         "vazamento_periodos": consultas_vazamento.PERIODOS,
@@ -2321,17 +2541,6 @@ async def buscar_serpapi(
             erro="Complete seu nome público e arroba no perfil de busca.",
             **contexto,
         )
-    if not db.listar_sites_oficiais_usuario(target_user_id):
-        return _contexto_serpapi(
-            request,
-            target_user_id,
-            erro=(
-                "Cadastre pelo menos um site oficial no seu perfil de busca antes "
-                "de pesquisar na internet. As fotos são opcionais."
-            ),
-            **contexto,
-        )
-
     try:
         if api in {"google_images", "google_images_light"}:
             dados = await run_in_threadpool(
@@ -2621,7 +2830,10 @@ def _limite_consultas_busca() -> int:
 
 
 def _arrobas_para_busca(alvo) -> list[str]:
-    arrobas = []
+    """Arrobas dos perfis configurados; contas antigas seguem como antes."""
+    arrobas = perfis_core.arrobas_monitoradas(alvo["id"])
+    if arrobas:
+        return arrobas
     propria = (dict(alvo).get("public_handle") or "").strip().lstrip("@")
     if propria:
         arrobas.append(propria)
@@ -2767,8 +2979,7 @@ async def importar_posts_oficiais_instagram(
                 u
                 for u in (
                     sites_oficiais.usuario_instagram(p["url"])
-                    for p in db.listar_paginas_oficiais_com_donos()
-                    if p["user_id"] == alvo["id"]
+                    for p in db.listar_paginas_oficiais(alvo["id"])
                 )
                 if u
             ),

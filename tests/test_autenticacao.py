@@ -45,6 +45,7 @@ class AutenticacaoTest(unittest.TestCase):
                             "senha": "senha-cliente-teste-forte",
                             "confirmar_senha": "senha-cliente-teste-forte",
                         },
+                        follow_redirects=False,
                     )
 
                     login_formulario = client.get("/login")
@@ -64,8 +65,8 @@ class AutenticacaoTest(unittest.TestCase):
                     )
 
                 usuario = db.obter_usuario_por_login("nova_criadora")
-                self.assertEqual(resposta_cadastro.status_code, 200)
-                self.assertIn("Sua conta já está ativa", resposta_cadastro.text)
+                self.assertEqual(resposta_cadastro.status_code, 303)
+                self.assertEqual(resposta_cadastro.headers["location"], "/onboarding")
                 self.assertTrue(usuario["email_verified"])
                 self.assertEqual(resposta_login.status_code, 303)
                 self.assertEqual(resposta_login.headers["location"], "/")
@@ -484,7 +485,7 @@ class AutenticacaoTest(unittest.TestCase):
                 conn.execute("UPDATE criadoras SET user_id = ? WHERE id = ?", (alvo, criadora))
             db.adicionar_conteudo(criadora, "foto", "catalogo.png", "catalogo.png", ["a" * 16])
             (Path(diretorio) / "catalogo.png").write_bytes(b"foto")
-            db.adicionar_site_oficial_usuario(outra, alvo, "Site", "https://example.com/bia")
+            db.adicionar_pagina_oficial(outra, "https://example.com/bia", "example.com")
             db.adicionar_site_vazado(outra, alvo, "https://example.com/relato", "Relato", "", "", "", "serp", {})
             db.adicionar_candidato(alvo, "https://example.com/alvo", "Alvo", "", "", "", "serp", "")
             db.salvar_snapshot_busca(admin_id, "busca", {"target_user_id": alvo})
@@ -522,7 +523,10 @@ class AutenticacaoTest(unittest.TestCase):
             self.assertFalse((Path(diretorio) / "catalogo.png").exists())
             self.assertEqual(db.listar_candidatos(alvo), [])
             self.assertIsNone(db.obter_snapshot_busca(admin_id, "busca"))
-            self.assertEqual(db.listar_sites_oficiais_usuario(outra)[0]["created_by"], outra)
+            self.assertEqual(
+                db.listar_paginas_oficiais(outra)[0]["url"],
+                "https://example.com/bia",
+            )
             self.assertEqual(db.listar_sites_vazados(outra)[0]["reported_by"], outra)
             self.assertFalse(db.salvar_status_busca_usuario(
                 alvo, f"vazamento_status_{alvo}", "{}"

@@ -47,8 +47,8 @@ class ValidaTest(unittest.TestCase):
 
     def test_envio_omite_oficiais_filhas_nao_sou_eu_e_repetidos(self):
         user_id = self.user_id
-        db.adicionar_site_oficial_usuario(
-            user_id, user_id, "Perfil", "https://example.com/perfil"
+        db.adicionar_pagina_oficial(
+            user_id, "https://example.com/perfil", "example.com"
         )
         db.adicionar_candidato(
             user_id, "https://example.com/recusado", "x", "", "", "", "serp", ""
@@ -183,7 +183,7 @@ class ValidaTest(unittest.TestCase):
         validar_candidato(criar_request(user_id), ids["https://a.com/o"], "official", 0)
 
         self.assertEqual(db.listar_sites_vazados(user_id)[0]["url"], "https://a.com/v")
-        self.assertEqual(db.listar_sites_oficiais_usuario(user_id)[0]["url"], "https://a.com/o")
+        self.assertEqual(db.listar_paginas_oficiais(user_id)[0]["url"], "https://a.com/o")
         self.assertEqual(db.listar_hashes_oficiais(user_id)[0]["phash"], "b" * 16)
         self.assertEqual(db.listar_candidatos(user_id, "pending"), [])
 

@@ -274,8 +274,8 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             patch("app.main.db.listar_sites_vazados", return_value=[]),
             patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
-                "app.main.db.listar_paginas_oficiais_com_donos",
-                return_value=[{"user_id": 1, "url": "https://example.com/perfil"}],
+                "app.main.db.listar_paginas_oficiais",
+                return_value=[{"url": "https://example.com/perfil"}],
             ),
             patch(
                 "app.main.db.listar_candidatos",
@@ -332,7 +332,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             patch.dict(os.environ, {"SERPAPI_API_KEY": "chave-de-teste"}),
             patch("app.main.db.obter_usuario_por_id", return_value=alvo),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
-            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_paginas_oficiais", return_value=[]),
             patch("app.main.db.listar_sites_vazados", return_value=[]),
             patch("app.main.db.listar_usuarios_para_busca", return_value=[]),
             patch("app.main.serpapi.pesquisar", return_value={"images_results": []}) as pesquisar,
@@ -525,7 +525,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
                 },
             ),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
-            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_paginas_oficiais", return_value=[]),
             patch("app.main.db.listar_sites_vazados", return_value=[]),
             patch("app.main.serpapi.obter_status_conta", return_value=conta) as status,
             patch("app.main.serpapi.pesquisar") as pesquisar,
@@ -604,7 +604,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             patch("app.main.db.obter_usuario_por_id", return_value={"id": 1, "username": "cliente", "role": "cliente", "public_name": "", "public_handle": ""}),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
             patch("app.main.db.listar_sites_vazados", return_value=[]),
-            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_paginas_oficiais", return_value=[]),
             patch("app.main.db.listar_conteudos", return_value=[]),
             patch("app.main.serpapi.pesquisar", return_value=resposta) as pesquisar,
         ):
@@ -626,7 +626,7 @@ class SerpApiRotaTest(unittest.IsolatedAsyncioTestCase):
             patch("app.main.db.obter_usuario_por_id", return_value={"id": 1, "username": "cliente", "role": "cliente", "public_name": "", "public_handle": ""}),
             patch("app.main.db.listar_fotos_busca", return_value=[]),
             patch("app.main.db.listar_sites_vazados", return_value=[]),
-            patch("app.main.db.listar_sites_oficiais_usuario", return_value=[]),
+            patch("app.main.db.listar_paginas_oficiais", return_value=[]),
             patch("app.main.db.listar_conteudos", return_value=[]),
             patch(
                 "app.main.serpapi.pesquisar",

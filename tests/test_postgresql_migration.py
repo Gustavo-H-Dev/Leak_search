@@ -150,12 +150,15 @@ class MigracaoPostgresTest(unittest.TestCase):
             outro, "bia", "nova@example.com", "Bia Nova", "bia", "admin"
         ))
         self.assertEqual(db.obter_usuario_por_id(outro)["email"], "nova@example.com")
-        db.adicionar_site_oficial_usuario(outro, primeiro, "Site", "https://example.com/bia")
+        db.adicionar_pagina_oficial(outro, "https://example.com/bia", "example.com")
         db.adicionar_site_vazado(outro, primeiro, "https://example.com/v", "v", "", "", "", "serp", {})
         self.assertTrue(db.salvar_status_busca_usuario(primeiro, f"vazamento_status_{primeiro}", "{}"))
         self.assertEqual(db.excluir_usuario(primeiro), ([], []))
         self.assertFalse(db.salvar_status_busca_usuario(primeiro, f"vazamento_status_{primeiro}", "{}"))
-        self.assertEqual(db.listar_sites_oficiais_usuario(outro)[0]["created_by"], outro)
+        self.assertEqual(
+            db.listar_paginas_oficiais(outro)[0]["url"],
+            "https://example.com/bia",
+        )
         self.assertEqual(db.listar_sites_vazados(outro)[0]["reported_by"], outro)
         with self.assertRaisesRegex(ValueError, "pelo menos um administrador"):
             db.excluir_usuario(outro)
@@ -188,11 +191,8 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                     criadora_id, "foto", "catalogo.png", "catalogo.png", ["a" * 16]
                 )
                 db.adicionar_foto_busca(user_id, "foto.png", "foto original.png")
-                db.adicionar_site_oficial_usuario(
-                    user_id,
-                    user_id,
-                    "Perfil oficial",
-                    "https://example.com/perfil",
+                db.adicionar_pagina_oficial(
+                    user_id, "https://example.com/perfil", "example.com"
                 )
                 db.adicionar_site_vazado(
                     user_id,
@@ -235,7 +235,7 @@ class MigracaoDadosBuscaPessoalTest(unittest.TestCase):
                     "foto original.png",
                 )
                 self.assertEqual(
-                    db.listar_sites_oficiais_usuario(user_id)[0]["url"],
+                    db.listar_paginas_oficiais(user_id)[0]["url"],
                     "https://example.com/perfil",
                 )
                 self.assertEqual(

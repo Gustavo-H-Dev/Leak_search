@@ -1,0 +1,90 @@
+{% from "componentes/_badge.html" import badge %}
+{% from "componentes/_estado_vazio.html" import estado_vazio %}
+{# Lista e formulário de perfis monitorados.
+   Espera `estado.perfis`, `plataformas`, `limite_perfis` e `voltar` no contexto. #}
+<section class="ds-card" aria-labelledby="perfis-titulo">
+  <header class="ds-card__cabecalho">
+    <div>
+      <h2 class="ds-card__titulo" id="perfis-titulo">Perfis monitorados</h2>
+      <p class="ds-card__texto">
+        {{ estado.perfis|length }} de {{ limite_perfis }} perfis. Arrobas pausados não entram na busca.
+      </p>
+    </div>
+    {% if estado.perfis %}{{ badge(estado.perfis|length ~ " cadastrado(s)", "info") }}{% endif %}
+  </header>
+
+  {% if estado.perfis %}
+  <ul class="ds-lista">
+    {% for perfil in estado.perfis %}
+    <li class="ds-lista__item">
+      <div>
+        <p class="ds-lista__titulo">@{{ perfil.arroba }}</p>
+        <p class="ds-lista__texto">
+          {{ plataformas.get(perfil.plataforma, perfil.plataforma) }} ·
+          {% if perfil.status == "ativo" %}ativo{% else %}pausado{% endif %}
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <form method="post" action="/onboarding/perfis/{{ perfil.id }}/status">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="voltar_para" value="{{ voltar }}">
+          <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">
+            {% if perfil.status == "ativo" %}Pausar{% else %}Reativar{% endif %}
+          </button>
+        </form>
+        <form method="post" action="/onboarding/perfis/{{ perfil.id }}/excluir">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="voltar_para" value="{{ voltar }}">
+          <button type="submit" class="ds-btn ds-btn--fantasma ds-btn--pequeno">Remover</button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% elif passo == 1 %}
+  {{ estado_vazio("Nenhum perfil ainda", "Sem pelo menos um arroba não há o que monitorar. Comece pelo Instagram.") }}
+  {% endif %}
+
+  <form method="post" action="/onboarding/perfis" class="ds-form mt-4" data-perfis-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="voltar_para" value="{{ voltar }}">
+    <div class="grid gap-3" data-perfis-linhas>
+      <div class="grid items-end gap-2 sm:grid-cols-[10rem_1fr]" data-perfil-linha>
+        <div class="ds-campo">
+          <label class="ds-rotulo" for="perfil-plataforma-1">Plataforma</label>
+          <select class="ds-input" id="perfil-plataforma-1" name="plataforma">
+            {% for chave, nome in plataformas.items() %}
+            <option value="{{ chave }}"{% if chave == "instagram" %} selected{% endif %}>{{ nome }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ds-campo">
+          <label class="ds-rotulo" for="perfil-arroba-1">Arroba</label>
+          <input class="ds-input" id="perfil-arroba-1" name="arroba" maxlength="31" placeholder="@seuuser" autocomplete="off">
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="ds-btn ds-btn--secundario ds-btn--pequeno" data-adicionar-perfil>Adicionar outro perfil</button>
+      <button type="submit" class="ds-btn ds-btn--primario">Salvar perfis</button>
+    </div>
+  </form>
+
+  <template id="modelo-linha-perfil">
+    <div class="grid items-end gap-2 sm:grid-cols-[10rem_1fr_auto]" data-perfil-linha>
+      <div class="ds-campo">
+        <label class="ds-rotulo">Plataforma</label>
+        <select class="ds-input" name="plataforma">
+          {% for chave, nome in plataformas.items() %}
+          <option value="{{ chave }}">{{ nome }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo">Arroba</label>
+        <input class="ds-input" name="arroba" maxlength="31" placeholder="@seuuser" autocomplete="off">
+      </div>
+      <button type="button" class="ds-btn ds-btn--fantasma ds-btn--pequeno" data-remover-linha>Remover</button>
+    </div>
+  </template>
+</section>

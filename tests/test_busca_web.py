@@ -101,7 +101,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
             "listar_usuarios_para_busca": [],
             "listar_fotos_busca": [],
             "listar_sites_vazados": [],
-            "listar_sites_oficiais_usuario": [],
+            "listar_paginas_oficiais": [],
             "obter_snapshot_busca": None,
             "salvar_snapshot_busca": None,
         }.items():
@@ -179,7 +179,7 @@ class BuscarNaWebRotaTest(unittest.IsolatedAsyncioTestCase):
                 patch(
                     "app.main.busca_web.buscar_na_web", return_value=([pagina], [])
                 ) as buscar,
-                patch("app.main.db.listar_paginas_oficiais_com_donos", return_value=[]),
+                patch("app.main.db.listar_paginas_oficiais", return_value=[]),
                 patch("app.main.db.listar_candidatos", return_value=[]),
                 patch("app.main.db.listar_hashes_oficiais", return_value=[]),
                 patch(

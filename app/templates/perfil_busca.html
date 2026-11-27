@@ -61,32 +61,24 @@
   </section>
 
   <section class="profile-section">
-    <h2>Sites oficiais (opcional)</h2>
-    <p>Não é obrigatório: a busca já reconhece como oficiais os perfis com o seu @ e os links da sua bio do Instagram. Use esta lista apenas para reforçar algum site próprio.</p>
-    <form class="search-form" method="post" action="/perfil-busca/sites-oficiais">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label class="field-label" for="site-nome">Nome do site (opcional)</label>
-      <input id="site-nome" name="nome" maxlength="160" placeholder="Site oficial">
-      <label class="field-label" for="site-url">URL do site oficial</label>
-      <input id="site-url" name="url" required placeholder="https://www.tiktok.com/@seuusuario">
-      <button type="submit">Adicionar site oficial</button>
-    </form>
-    {% if sites_oficiais %}
+    <h2>Perfis monitorados</h2>
+    <p>O que a busca procura (arrobas, variações do nome) e o que ela ignora (páginas oficiais) fica em Configurações &gt; Perfis.</p>
+    {% if perfis %}
     <ul class="profile-site-list">
-      {% for site in sites_oficiais %}
+      {% for perfil in perfis %}
       <li>
-        <a href="{{ site.url }}" target="_blank" rel="noopener noreferrer">{{ site.nome }}</a>
-        <span>{{ site.url }}</span>
-        <form method="post" action="/perfil-busca/sites-oficiais/{{ site.id }}/excluir" onsubmit="return confirm('Remover este site oficial do seu perfil?');">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="button-danger" type="submit">Remover</button>
-        </form>
+        <span>@{{ perfil.arroba }} · {{ perfil.plataforma }}</span>
+        <span>{% if perfil.status == "ativo" %}ativo{% else %}pausado{% endif %}</span>
       </li>
       {% endfor %}
     </ul>
     {% else %}
-    <p>Nenhum site extra cadastrado — a busca já identifica automaticamente seus perfis e os links da bio.</p>
+    <p>Nenhum perfil configurado ainda. Comece pelo passo a passo.</p>
     {% endif %}
+    <p>
+      <a class="button button-secondary" href="/configuracoes/perfis">Editar perfis monitorados</a>
+      <a class="button" href="/onboarding">Abrir o passo a passo</a>
+    </p>
   </section>
 </section>
 {% endblock %}

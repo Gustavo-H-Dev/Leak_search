@@ -54,10 +54,16 @@ def test_fluxo_acha_album_com_modelos_e_registra_log(monkeypatch):
             ]
         return []
 
-    monkeypatch.setattr(fluxo_busca, "_passo_instagram", lambda alvo: ("", [
-        "Morph1ne2.0",
-        "Morph1neee_",
-    ], False))
+    monkeypatch.setattr(fluxo_busca, "_passo_instagram", lambda alvo: ("", False))
+    monkeypatch.setattr(
+        fluxo_busca,
+        "dados_do_perfil",
+        lambda alvo: (
+            ["Morph1ne2.0", "Morph1neee_"],
+            ["morph1ne2.0", "morph1ne", "morph1neee"],
+            [],
+        ),
+    )
     monkeypatch.setattr(busca_provedores, "buscar", fake_buscar)
 
     resumo = fluxo_busca.executar(

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block titulo %}Perfis monitorados{% endblock %}
+{% block conteudo %}
+{% set voltar = "config" %}
+<div class="mx-auto grid w-full max-w-3xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Configurações</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Perfis monitorados
+    </h1>
+    <p class="ds-card__texto">
+      O que entra na busca e na pontuação. Limite de {{ limite_perfis }} perfis por conta.
+    </p>
+  </header>
+
+  {% if erro %}<p class="ds-alerta ds-alerta--erro" role="alert">{{ erro }}</p>{% endif %}
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>{% endif %}
+
+  {% if not estado.concluido %}
+  <p class="ds-alerta">
+    A configuração inicial ainda não foi concluída.
+    <a class="text-primaria-clara" href="/onboarding">Retomar o passo a passo</a>.
+  </p>
+  {% endif %}
+
+  {% include "partials/perfis.html" %}
+  {% include "partials/variantes.html" %}
+  {% include "partials/oficiais.html" %}
+
+  <div class="flex flex-wrap gap-2">
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/onboarding">Abrir o passo a passo</a>
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/perfil-busca">Voltar para o perfil</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% from "componentes/_badge.html" import badge %}
+{% from "componentes/_estado_vazio.html" import estado_vazio %}
+{# Variações do nome usadas na pontuação.
+   Espera `estado.variantes`, `sugestoes`, `voltar` e `passo` no contexto.
+
+   Enquanto não existir nenhuma variação salva, o formulário mostra as geradas
+   por gerar_variantes_nome como sugestões ligadas; desmarcar tira da busca. #}
+<section class="ds-card" aria-labelledby="variantes-titulo">
+  <header class="ds-card__cabecalho">
+    <div>
+      <h2 class="ds-card__titulo" id="variantes-titulo">Variações do nome</h2>
+      <p class="ds-card__texto">
+        É assim que seu nome costuma aparecer nos títulos: sem o <code>@</code>, sem
+        números no fim, sem letras repetidas. Só as ligadas contam na pontuação.
+      </p>
+    </div>
+    {% if estado.variantes %}{{ badge((estado.variantes|selectattr("ativo")|list|length) ~ " ligadas", "info") }}{% endif %}
+  </header>
+
+  <form method="post" action="/onboarding/variantes" class="ds-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="voltar_para" value="{{ voltar }}">
+
+    {% if estado.variantes %}
+    <fieldset class="grid gap-2">
+      <legend class="ds-rotulo">Variações cadastradas</legend>
+      {% for variante in estado.variantes %}
+      <label class="flex items-center justify-between gap-3 rounded-xl border border-borda bg-fundo px-3 py-2.5">
+        <span class="text-sm text-texto">{{ variante.texto }}</span>
+        <span class="flex items-center gap-2 text-xs text-texto-suave">
+          {{ "gerada" if variante.origem == "gerada" else "manual" }}
+          <input type="checkbox" name="variante_ativa" value="{{ variante.id }}" class="h-5 w-5 accent-[#f078ad]"{% if variante.ativo %} checked{% endif %}>
+        </span>
+      </label>
+      {% endfor %}
+    </fieldset>
+    {% elif sugestoes %}
+    <fieldset class="grid gap-2">
+      <legend class="ds-rotulo">Sugestões geradas a partir dos seus @s</legend>
+      <p class="ds-dica">Desmarque o que não deve ser procurado. Você pode adicionar outras abaixo.</p>
+      {% for sugestao in sugestoes %}
+      <label class="flex items-center justify-between gap-3 rounded-xl border border-borda bg-fundo px-3 py-2.5">
+        <span class="text-sm text-texto">{{ sugestao }}</span>
+        <input type="checkbox" name="nova_variante" value="{{ sugestao }}" checked class="h-5 w-5 accent-[#f078ad]">
+      </label>
+      {% endfor %}
+    </fieldset>
+    {% else %}
+    {{ estado_vazio("Nenhuma variação automática", "Seu @ é curto demais para gerar variações (o mínimo é 5 caracteres). Você pode adicionar as formas que usa abaixo.") }}
+    {% endif %}
+
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="nova-variante">Adicionar outra variação</label>
+      <input class="ds-input" id="nova-variante" name="texto_novo" maxlength="80" placeholder="ex.: morphine">
+      <p class="ds-dica">Uma variação por vez; para várias, salve e repita.</p>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      <button type="submit" class="ds-btn ds-btn--primario">Salvar variações</button>
+    </div>
+  </form>
+</section>

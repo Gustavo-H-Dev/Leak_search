@@ -9,6 +9,7 @@ from app.core import (
     consultas_vazamento,
     dominios_suspeitos,
     instagram,
+    perfis_monitorados,
     pontuacao,
     serpapi,
     tinyfish,
@@ -43,6 +44,12 @@ def registrar_perfil_instagram(criadora_id: int, handle: str, perfil: dict) -> l
             item.get("origem", ""),
         )
     links = instagram.extrair_links(bio)
+    # Os links da bio entram em pagina_oficial: a pontuacao le uma fonte so.
+    for link in links:
+        try:
+            perfis_monitorados.salvar_pagina(criadora_id, link, origem="bio")
+        except ValueError:
+            continue
     db.salvar_snapshot_busca(
         criadora_id,
         CHAVE_PERFIL_INSTAGRAM,
@@ -57,14 +64,6 @@ def registrar_perfil_instagram(criadora_id: int, handle: str, perfil: dict) -> l
     return links
 
 
-def links_oficiais(criadora_id: int) -> list[str]:
-    snapshot = db.obter_snapshot_busca(criadora_id, CHAVE_PERFIL_INSTAGRAM)
-    if not snapshot:
-        return []
-    dados = snapshot.get("dados") or {}
-    return [str(link) for link in dados.get("links") or [] if link]
-
-
 def _arrobas_da_criadora(criadora: dict) -> list[str]:
     propria = (criadora.get("public_handle") or "").strip().lstrip("@")
     arrobas = [propria] if propria else []
@@ -75,11 +74,12 @@ def _arrobas_da_criadora(criadora: dict) -> list[str]:
     return arrobas
 
 
-def _passo_instagram(criadora: dict) -> tuple[str, list[str], bool]:
+def _passo_instagram(criadora: dict) -> tuple[str, bool]:
     """Roda o Instagram (respeitando o cache de 24 h).
 
-    Devolve (erro, arrobas, arroba_invalida). `arroba_invalida` interrompe a
-    busca: com o @ errado as consultas nao encontrariam nada util.
+    Devolve (erro, arroba_invalida). `arroba_invalida` interrompe a busca: com
+    o @ errado as consultas nao encontrariam nada util. Os arrobas usados na
+    busca vem dos perfis monitorados, nao daqui.
     """
     handle = (criadora.get("public_handle") or "").strip().lstrip("@")
     erro_instagram = ""
@@ -110,7 +110,22 @@ def _passo_instagram(criadora: dict) -> tuple[str, list[str], bool]:
             else:
                 db.salvar_postagens_instagram(criadora["id"], posts)
                 db.registrar_busca_instagram(criadora["id"])
-    return erro_instagram, _arrobas_da_criadora(criadora), arroba_invalida
+    return erro_instagram, arroba_invalida
+
+
+def dados_do_perfil(criadora: dict) -> tuple[list[str], list[str], list[str]]:
+    """Arrobas, variantes e paginas oficiais configurados pela criadora.
+
+    Contas que ainda nao passaram pelo onboarding continuam usando o @ do
+    cadastro e os arrobas descobertos, para a busca delas nao quebrar.
+    """
+    criadora_id = criadora["id"]
+    arrobas = perfis_monitorados.arrobas_monitoradas(criadora_id)
+    if not arrobas:
+        arrobas = _arrobas_da_criadora(criadora)
+    variantes = perfis_monitorados.variantes_para_pontuar(criadora_id)
+    paginas = perfis_monitorados.paginas_para_ignorar(criadora_id)
+    return arrobas, variantes, paginas
 
 
 def executar(
@@ -132,8 +147,8 @@ def executar(
     execucao_id = db.criar_busca_execucao(criadora_id, provedor, termos)
 
     nome = (criadora.get("public_name") or "").strip()
-    erro_instagram, arrobas, arroba_invalida = _passo_instagram(criadora)
-    variantes = variantes_nome.variantes_dos_arrobas(arrobas)
+    erro_instagram, arroba_invalida = _passo_instagram(criadora)
+    arrobas, variantes, paginas_oficiais = dados_do_perfil(criadora)
     nome_base = variantes_nome.nome_base(arrobas)
     if consultas is None:
         planos = consultas_vazamento.gerar_consultas_priorizadas(
@@ -248,14 +263,6 @@ def executar(
             continue
         unicos[candidato.url] = candidato
     resumo["unicos"] = len(unicos)
-
-    paginas_oficiais = [
-        pagina["url"]
-        for pagina in db.listar_paginas_oficiais_com_donos()
-        if pagina["user_id"] == criadora_id
-    ]
-    # Links do perfil/bio do Instagram entram como paginas oficiais automaticas.
-    paginas_oficiais.extend(links_oficiais(criadora_id))
 
     # Lista aprovada na revisao humana: usada na pontuacao e nas consultas.
     contexto_dominios = dominios_suspeitos.contexto_aprovado()

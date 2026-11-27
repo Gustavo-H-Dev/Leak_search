@@ -99,6 +99,79 @@ O comportamento (modal com foco preso e Esc, toast) fica em
 Esta fase não cria nem altera tabela. Nada de `ALTER TABLE`, nenhum dado
 existente é tocado.
 
+## Fase 1 — Onboarding e perfis monitorados
+
+### D10 — Perfis, variações e páginas oficiais são a fonte única
+
+Três tabelas novas, sempre lidas por `criadora_id` (que referencia
+`users(id)`, o mesmo dono usado por `busca_execucao`/`arroba_descoberto`):
+
+- `perfil_monitorado (criadora_id, plataforma, arroba, status)` — `status` é
+  `ativo` ou `pausado`. O par (plataforma, arroba) é único por criadora.
+- `nome_variante (criadora_id, texto, ativo, origem)` — `origem` guarda
+  `gerada` (sugestão de `gerar_variantes_nome`) ou `manual`.
+- `pagina_oficial (criadora_id, url, dominio, origem)` — `origem` `manual`,
+  `bio` (links da bio do Instagram, materializados ao registrar o perfil) ou
+  `valida` (quando a criadora marca um resultado como oficial).
+
+`user_official_sites` foi descartada (`DROP TABLE IF EXISTS` no DDL): manter
+duas listas do mesmo dado já tinha gerado divergência. Como o usuário autorizou
+descartar os dados antigos, os links da bio e as marcações da Valida se
+reconstroem sozinhos pelos fluxos existentes.
+
+### D11 — Wizard em `/onboarding`, retomável por `?passo=`
+
+O cadastro (quando a conta já fica ativa) redireciona para `/onboarding`. O
+passo atual é derivado dos dados salvos, não de um estado no servidor:
+
+1. concluído quando existe ao menos um `perfil_monitorado`;
+2. concluído quando existe `nome_variante` ou quando a criadora já passou pela
+   etapa (`onboarding_variantes_vistas`, em `app_settings`) — variações são
+   opcionais, então passar por ela basta;
+3. concluído com `pagina_oficial` ou com "Pular esta etapa"
+   (`onboarding_oficiais_puladas`);
+4. concluído no botão "Só concluir"/"Fazer primeira busca"
+   (`onboarding_concluido`).
+
+O wizard não é obrigatório: "/" continua acessível e a configuração pode ser
+retomada em `/configuracoes/perfis`.
+
+### D12 — Pontuação usa só variantes ativas
+
+`fluxo_busca.dados_do_perfil` lê `perfil_monitorado` (só ativos) e
+`nome_variante` (só ativas). Contas que ainda não têm nenhuma linha de variante
+caem no comportamento antigo (`gerar_variantes_nome` a partir dos arrobas), para
+que a busca delas não quebre durante a transição. Arroba pausado não entra na
+busca, mas continua listado em Configurações.
+
+### D13 — Limites em configuração
+
+`PERFIS_MONITORADOS_LIMITE` (ambiente) → `app_settings.perfis_monitorados_limite`
+→ padrão 5. Páginas oficiais: 20 por conta (`LIMITE_PAGINAS`, constante). Ao
+atingir o limite, o POST volta ao passo 1 com a mensagem, sem 500. As páginas
+oficiais são comparadas por URL normalizada (prefixo de caminho), então só a
+própria página e o que está dentro dela é ignorado.
+
+### D14 — Normalização da página oficial
+
+`normalizar_pagina` usa `pontuacao.normalizar_url` (https, host minúsculo, sem
+`www.`, sem parâmetros de rastreio) e ainda remove consulta e fragmento, porque
+a mesma página oficial não deixa de ser oficial por causa de `?hl=pt`. O
+domínio é guardado à parte para exibição e para a checagem de "mesmo site".
+
+### D15 — Script de migração acompanha as tabelas
+
+`scripts/migrar_sqlite_para_postgres.py` passou a copiar `perfil_monitorado`,
+`nome_variante` e `pagina_oficial` e deixou de copiar `user_official_sites`.
+O `excluir_usuario` também deixou de atualizar essa tabela removida.
+
+### D16 — Primeira busca é manual e sem agendamento
+
+O botão "Fazer primeira busca" chama `fluxo_busca.executar` uma vez, com o
+provedor configurado, e leva de volta ao passo 4 com o resumo/mensagem. Sem
+`SERPAPI_API_KEY`/`TINYFISH_API_KEY` ele explica o que falta em vez de quebrar.
+Nada é agendado e nenhuma mídia é baixada: só metadados.
+
 ### Pendências conhecidas
 
 - Telas ainda no CSS antigo: home, busca na web, Valida, análise, domínios,

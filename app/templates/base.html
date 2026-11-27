@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/css/legado.css">
   <link rel="stylesheet" href="/static/css/app.css">
   <script src="/static/js/ui.js" defer></script>
+  <script src="/static/js/wizard.js" defer></script>
 </head>
 {% from "componentes/_toast.html" import area_toast %}
 <body>
@@ -20,7 +21,7 @@
   {"nome": "Revisão", "href": "/valida", "icone": "revisao", "ativo": caminho.startswith("/valida") and not em_remocoes},
   {"nome": "Remoções", "href": "/valida?status=leaked", "icone": "remocoes", "ativo": em_remocoes},
   {"nome": "Histórico", "href": "/execucoes", "icone": "historico", "ativo": caminho.startswith("/execucoes"), "admin": true},
-  {"nome": "Configurações", "href": "/perfil-busca", "icone": "config", "ativo": caminho.startswith("/perfil-busca")}
+  {"nome": "Configurações", "href": "/perfil-busca", "icone": "config", "ativo": caminho.startswith("/perfil-busca") or caminho.startswith("/configuracoes")}
 ] %}
 {% set itens_operacao = [
   {"nome": "Busca na web", "href": "/busca-web", "icone": "busca", "ativo": caminho.startswith("/busca-web")},

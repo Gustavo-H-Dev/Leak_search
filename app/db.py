@@ -157,15 +157,40 @@ def iniciar_banco():
                 nome_original TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE TABLE IF NOT EXISTS user_official_sites (
+            CREATE TABLE IF NOT EXISTS perfil_monitorado (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_by INTEGER NOT NULL REFERENCES users(id),
-                nome TEXT NOT NULL,
-                url TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (user_id, url)
+                criadora_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                plataforma TEXT NOT NULL,
+                arroba TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'ativo',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (criadora_id, plataforma, arroba)
             );
+            CREATE TABLE IF NOT EXISTS nome_variante (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                criadora_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                texto TEXT NOT NULL,
+                ativo INTEGER NOT NULL DEFAULT 1,
+                origem TEXT NOT NULL DEFAULT 'manual',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (criadora_id, texto)
+            );
+            CREATE TABLE IF NOT EXISTS pagina_oficial (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                criadora_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                url TEXT NOT NULL,
+                dominio TEXT NOT NULL DEFAULT '',
+                origem TEXT NOT NULL DEFAULT 'manual',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (criadora_id, url)
+            );
+            CREATE INDEX IF NOT EXISTS perfil_monitorado_criadora
+            ON perfil_monitorado (criadora_id, status);
+            CREATE INDEX IF NOT EXISTS nome_variante_criadora
+            ON nome_variante (criadora_id, ativo);
+            -- Lista antiga de sites oficiais por conta: substituida por
+            -- pagina_oficial, que agora e a unica fonte desse dado.
+            DROP TABLE IF EXISTS user_official_sites;
             CREATE TABLE IF NOT EXISTS leak_reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -355,15 +380,48 @@ def _iniciar_banco_postgresql():
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS user_official_sites (
+        CREATE TABLE IF NOT EXISTS perfil_monitorado (
             id BIGSERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            created_by BIGINT NOT NULL REFERENCES users(id),
-            nome TEXT NOT NULL,
-            url TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (user_id, url)
+            criadora_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            plataforma TEXT NOT NULL,
+            arroba TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ativo',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (criadora_id, plataforma, arroba)
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS nome_variante (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            texto TEXT NOT NULL,
+            ativo INTEGER NOT NULL DEFAULT 1,
+            origem TEXT NOT NULL DEFAULT 'manual',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (criadora_id, texto)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS pagina_oficial (
+            id BIGSERIAL PRIMARY KEY,
+            criadora_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            url TEXT NOT NULL,
+            dominio TEXT NOT NULL DEFAULT '',
+            origem TEXT NOT NULL DEFAULT 'manual',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (criadora_id, url)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS perfil_monitorado_criadora
+        ON perfil_monitorado (criadora_id, status)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS nome_variante_criadora
+        ON nome_variante (criadora_id, ativo)
+        """,
+        """
+        DROP TABLE IF EXISTS user_official_sites
         """,
         """
         CREATE TABLE IF NOT EXISTS leak_reports (
@@ -1300,7 +1358,6 @@ def excluir_usuario(user_id):
         conn.execute("DELETE FROM conteudos WHERE criadora_id IN (SELECT id FROM criadoras WHERE user_id = ?)", (user_id,))
         conn.execute("DELETE FROM sites_oficiais WHERE criadora_id IN (SELECT id FROM criadoras WHERE user_id = ?)", (user_id,))
         conn.execute("DELETE FROM criadoras WHERE user_id = ?", (user_id,))
-        conn.execute("UPDATE user_official_sites SET created_by = user_id WHERE created_by = ? AND user_id != ?", (user_id, user_id))
         conn.execute("UPDATE leak_reports SET reported_by = user_id WHERE reported_by = ? AND user_id != ?", (user_id, user_id))
         for snapshot in conn.execute(
             "SELECT user_id, payload_json FROM search_snapshots WHERE kind = 'busca' AND user_id != ?",
@@ -1407,45 +1464,181 @@ def excluir_foto_busca(foto_id, user_id):
         return cur.rowcount > 0
 
 
-def adicionar_site_oficial_usuario(user_id, created_by, nome, url):
+LIMITE_PERFIS_PADRAO = 5
+STATUS_PERFIL_MONITORADO = {"ativo", "pausado"}
+
+
+def limite_perfis_monitorados() -> int:
+    """Quantos perfis uma conta pode monitorar.
+
+    Precedencia: variavel de ambiente, depois app_settings (editavel sem
+    deploy), depois o padrao do codigo.
+    """
+    do_ambiente = os.getenv("PERFIS_MONITORADOS_LIMITE", "").strip()
+    if do_ambiente:
+        try:
+            return max(1, int(do_ambiente))
+        except ValueError:
+            pass
+    try:
+        return max(
+            1,
+            int(
+                obter_configuracao(
+                    "perfis_monitorados_limite", str(LIMITE_PERFIS_PADRAO)
+                )
+            ),
+        )
+    except (TypeError, ValueError):
+        return LIMITE_PERFIS_PADRAO
+
+
+def listar_perfis_monitorados(criadora_id, status=None):
+    sql = (
+        "SELECT id, criadora_id, plataforma, arroba, status, criado_em"
+        " FROM perfil_monitorado WHERE criadora_id = ?"
+    )
+    parametros = [criadora_id]
+    if status:
+        sql += " AND status = ?"
+        parametros.append(status)
+    sql += " ORDER BY plataforma, arroba"
+    with conexao() as conn:
+        return conn.execute(sql, parametros).fetchall()
+
+
+def obter_perfil_monitorado(perfil_id, criadora_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, criadora_id, plataforma, arroba, status
+            FROM perfil_monitorado
+            WHERE id = ? AND criadora_id = ?
+            """,
+            (perfil_id, criadora_id),
+        ).fetchone()
+
+
+def adicionar_perfil_monitorado(criadora_id, plataforma, arroba, status="ativo"):
     with conexao() as conn:
         cur = conn.execute(
             """
-            INSERT INTO user_official_sites (user_id, created_by, nome, url)
+            INSERT INTO perfil_monitorado (criadora_id, plataforma, arroba, status)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT (user_id, url) DO NOTHING
+            ON CONFLICT (criadora_id, plataforma, arroba) DO NOTHING
             RETURNING id
             """,
-            (user_id, created_by, nome, url),
+            (criadora_id, plataforma, arroba, status),
         )
         registro = cur.fetchone()
         return registro["id"] if registro else None
 
 
-def listar_sites_oficiais_usuario(user_id):
+def atualizar_status_perfil_monitorado(perfil_id, criadora_id, status):
     with conexao() as conn:
-        return conn.execute(
+        cur = conn.execute(
             """
-            SELECT id, user_id, created_by, nome, url, created_at
-            FROM user_official_sites
-            WHERE user_id = ?
-            ORDER BY nome, url
+            UPDATE perfil_monitorado SET status = ?
+            WHERE id = ? AND criadora_id = ?
             """,
-            (user_id,),
-        ).fetchall()
+            (status, perfil_id, criadora_id),
+        )
+        return cur.rowcount > 0
 
 
-def listar_paginas_oficiais_com_donos():
+def excluir_perfil_monitorado(perfil_id, criadora_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM perfil_monitorado WHERE id = ? AND criadora_id = ?",
+            (perfil_id, criadora_id),
+        )
+        return cur.rowcount > 0
+
+
+def listar_variantes_nome(criadora_id):
     with conexao() as conn:
         return conn.execute(
             """
-            SELECT s.url, c.user_id AS user_id
-            FROM sites_oficiais s
-            LEFT JOIN criadoras c ON c.id = s.criadora_id
-            UNION ALL
-            SELECT url, user_id FROM user_official_sites
-            """
+            SELECT id, criadora_id, texto, ativo, origem, criado_em
+            FROM nome_variante
+            WHERE criadora_id = ?
+            ORDER BY ativo DESC, texto
+            """,
+            (criadora_id,),
         ).fetchall()
+
+
+def adicionar_variante_nome(criadora_id, texto, origem="manual", ativo=True):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO nome_variante (criadora_id, texto, ativo, origem)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (criadora_id, texto) DO NOTHING
+            RETURNING id
+            """,
+            (criadora_id, texto, 1 if ativo else 0, origem),
+        )
+        registro = cur.fetchone()
+        return registro["id"] if registro else None
+
+
+def atualizar_variante_nome(variante_id, criadora_id, ativo):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE nome_variante SET ativo = ?
+            WHERE id = ? AND criadora_id = ?
+            """,
+            (1 if ativo else 0, variante_id, criadora_id),
+        )
+        return cur.rowcount > 0
+
+
+def excluir_variante_nome(variante_id, criadora_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM nome_variante WHERE id = ? AND criadora_id = ?",
+            (variante_id, criadora_id),
+        )
+        return cur.rowcount > 0
+
+
+def listar_paginas_oficiais(criadora_id):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, criadora_id, url, dominio, origem, criado_em
+            FROM pagina_oficial
+            WHERE criadora_id = ?
+            ORDER BY dominio, url
+            """,
+            (criadora_id,),
+        ).fetchall()
+
+
+def adicionar_pagina_oficial(criadora_id, url, dominio, origem="manual"):
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO pagina_oficial (criadora_id, url, dominio, origem)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (criadora_id, url) DO NOTHING
+            RETURNING id
+            """,
+            (criadora_id, url, dominio, origem),
+        )
+        registro = cur.fetchone()
+        return registro["id"] if registro else None
+
+
+def excluir_pagina_oficial(pagina_id, criadora_id):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM pagina_oficial WHERE id = ? AND criadora_id = ?",
+            (pagina_id, criadora_id),
+        )
+        return cur.rowcount > 0
 
 
 STATUS_CANDIDATO = {"pending", "leaked", "not_me", "official"}
@@ -2032,15 +2225,6 @@ def obter_ultima_busca_instagram(user_id: int):
             (user_id,),
         ).fetchone()
     return linha["ultima_busca_em"] if linha else None
-
-
-def excluir_site_oficial_usuario(site_id, user_id):
-    with conexao() as conn:
-        cur = conn.execute(
-            "DELETE FROM user_official_sites WHERE id = ? AND user_id = ?",
-            (site_id, user_id),
-        )
-        return cur.rowcount > 0
 
 
 def adicionar_site_vazado(
