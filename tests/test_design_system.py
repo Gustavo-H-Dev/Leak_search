@@ -116,7 +116,7 @@ def test_admin_tem_cinco_itens_na_barra_inferior(ambiente):
     assert pagina.status_code == 200
     assert len(_itens_da_barra_inferior(pagina.text)) == 5
     assert 'data-nav="inferior"' in pagina.text
-    for destino in ('href="/valida"', 'href="/execucoes"', 'href="/perfil-busca"'):
+    for destino in ('href="/revisao"', 'href="/execucoes"', 'href="/perfil-busca"'):
         assert destino in pagina.text, destino
     assert 'aria-current="page"' in pagina.text
 

@@ -97,6 +97,7 @@ def iniciar_banco():
         _migrar_usuarios()
         _migrar_criadoras()
         _migrar_busca_provedores()
+        _migrar_leak_reports()
         try:
             with conexao() as conn:
                 conn.execute(
@@ -202,6 +203,8 @@ def iniciar_banco():
                 thumbnail TEXT NOT NULL DEFAULT '',
                 engine TEXT NOT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}',
+                situacao TEXT NOT NULL DEFAULT 'no_ar',
+                situacao_em TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (user_id, url)
             );
@@ -331,6 +334,7 @@ def iniciar_banco():
     _migrar_criadoras()
     _migrar_busca_provedores()
     _migrar_busca_execucao()
+    _migrar_leak_reports()
     _semear_dominios_iniciais()
 
 
@@ -451,6 +455,8 @@ def _iniciar_banco_postgresql():
             thumbnail TEXT NOT NULL DEFAULT '',
             engine TEXT NOT NULL,
             metadata_json TEXT NOT NULL DEFAULT '{}',
+            situacao TEXT NOT NULL DEFAULT 'no_ar',
+            situacao_em TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (user_id, url)
         )
@@ -697,6 +703,32 @@ _COLUNAS_BUSCA_EXECUCAO_SQLITE = {
     "duracao_ms": "INTEGER",
     "motivo_falha": "TEXT NOT NULL DEFAULT ''",
 }
+
+
+def _migrar_leak_reports():
+    """Situacao do pedido de remocao, sem apagar nenhum relato existente."""
+    with conexao() as conn:
+        if usando_postgresql():
+            for coluna, tipo in (
+                ("situacao", "TEXT NOT NULL DEFAULT 'no_ar'"),
+                ("situacao_em", "TEXT"),
+            ):
+                conn.execute(
+                    f"ALTER TABLE leak_reports ADD COLUMN IF NOT EXISTS {coluna} {tipo}"
+                )
+        else:
+            existentes = {
+                coluna["name"]
+                for coluna in conn.execute("PRAGMA table_info(leak_reports)")
+            }
+            for coluna, tipo in (
+                ("situacao", "TEXT NOT NULL DEFAULT 'no_ar'"),
+                ("situacao_em", "TEXT"),
+            ):
+                if coluna not in existentes:
+                    conn.execute(
+                        f"ALTER TABLE leak_reports ADD COLUMN {coluna} {tipo}"
+                    )
 
 
 def _migrar_busca_execucao():
@@ -1101,6 +1133,25 @@ def registrar_feedback_dominio(dominio, confirmado, limite=10):
                 (dominio,),
             )
         return True
+
+
+def ajustar_feedback_dominio(dominio, confirmados=0, falsos=0):
+    """Soma (ou subtrai) o feedback do dominio, sem deixar contador negativo."""
+    dominio = (dominio or "").strip().lower()
+    if not dominio or (not confirmados and not falsos):
+        return False
+    maior = "GREATEST" if usando_postgresql() else "MAX"
+    with conexao() as conn:
+        cur = conn.execute(
+            f"""
+            UPDATE dominio_suspeito
+               SET n_confirmados = {maior}(0, n_confirmados + ?),
+                   n_falsos = {maior}(0, n_falsos + ?)
+             WHERE dominio = ?
+            """,
+            (int(confirmados), int(falsos), dominio),
+        )
+        return cur.rowcount > 0
 
 
 def listar_candidatos_da_execucao(execucao_id):
@@ -1716,7 +1767,8 @@ def excluir_pagina_oficial(pagina_id, criadora_id):
         return cur.rowcount > 0
 
 
-STATUS_CANDIDATO = {"pending", "leaked", "not_me", "official"}
+STATUS_CANDIDATO = {"pending", "leaked", "not_me", "official", "unsure"}
+SITUACOES_REMOCAO = {"no_ar", "em_remocao", "removido"}
 
 
 def adicionar_candidato(
@@ -2365,6 +2417,257 @@ def contar_candidatos_abaixo_do_limiar(user_id, limiar):
     return int((linha["total"] if linha else 0) or 0)
 
 
+def _filtros_revisao(
+    user_id,
+    *,
+    status="",
+    nota_minima=None,
+    nota_maxima=None,
+    engine="",
+    dominio="",
+    desde_iso="",
+):
+    condicoes = ["user_id = ?"]
+    parametros = [user_id]
+    if status:
+        condicoes.append("status = ?")
+        parametros.append(status)
+    if nota_minima is not None:
+        condicoes.append("COALESCE(nota, 0) >= ?")
+        parametros.append(int(nota_minima))
+    if nota_maxima is not None:
+        condicoes.append("COALESCE(nota, 0) <= ?")
+        parametros.append(int(nota_maxima))
+    if engine:
+        condicoes.append("engine = ?")
+        parametros.append(engine)
+    if dominio:
+        condicoes.append("dominio = ?")
+        parametros.append(dominio)
+    if desde_iso:
+        condicoes.append("COALESCE(ultima_vez_em, created_at) >= ?")
+        parametros.append(desde_iso)
+    return " AND ".join(condicoes), parametros
+
+
+def listar_candidatos_revisao_filtrada(
+    user_id,
+    *,
+    status="pending",
+    nota_minima=None,
+    nota_maxima=None,
+    engine="",
+    dominio="",
+    desde_iso="",
+    ordem="nota",
+    limite=2000,
+):
+    """Fila de revisao com os filtros da tela (sempre por criadora).
+
+    A paginacao acontece depois do agrupamento por `chave_grupo`, entao aqui
+    vem a lista inteira (limitada) em vez de uma pagina de linhas.
+    """
+    where, parametros = _filtros_revisao(
+        user_id,
+        status=status,
+        nota_minima=nota_minima,
+        nota_maxima=nota_maxima,
+        engine=engine,
+        dominio=dominio,
+        desde_iso=desde_iso,
+    )
+    if ordem == "recentes":
+        ordenacao = (
+            " ORDER BY COALESCE(ultima_vez_em, created_at) DESC, nota DESC, id DESC"
+        )
+    else:
+        ordenacao = (
+            " ORDER BY nota DESC, novo_para_criadora DESC,"
+            " COALESCE(ultima_vez_em, created_at) DESC, id DESC"
+        )
+    consulta = f"""
+        SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
+               phash, status, created_at, execucao_id, url_normalizada, dominio,
+               nota, motivos_json, classificacao, primeira_vez_em, ultima_vez_em,
+               novo_para_criadora, chave_grupo, consulta_log_id, posicao_busca,
+               (SELECT modelo FROM consulta_log
+                 WHERE id = search_candidates.consulta_log_id) AS consulta_modelo,
+               (SELECT consulta_exata FROM consulta_log
+                 WHERE id = search_candidates.consulta_log_id) AS consulta_texto
+        FROM search_candidates
+        WHERE {where}
+        {ordenacao}
+        LIMIT ?
+    """
+    with conexao() as conn:
+        return conn.execute(
+            consulta, tuple(parametros) + (int(limite),)
+        ).fetchall()
+
+
+def contar_candidatos_revisao_filtrada(
+    user_id,
+    *,
+    status="pending",
+    nota_minima=None,
+    nota_maxima=None,
+    engine="",
+    dominio="",
+    desde_iso="",
+):
+    where, parametros = _filtros_revisao(
+        user_id,
+        status=status,
+        nota_minima=nota_minima,
+        nota_maxima=nota_maxima,
+        engine=engine,
+        dominio=dominio,
+        desde_iso=desde_iso,
+    )
+    with conexao() as conn:
+        linha = conn.execute(
+            f"SELECT COUNT(*) AS total FROM search_candidates WHERE {where}",
+            tuple(parametros),
+        ).fetchone()
+    return int((linha["total"] if linha else 0) or 0)
+
+
+def dominios_com_candidatos(user_id, status="pending"):
+    """Dominios da fila para o filtro da tela, do maior para o menor."""
+    with conexao() as conn:
+        return [
+            dict(linha)
+            for linha in conn.execute(
+                """
+                SELECT dominio, COUNT(*) AS total
+                FROM search_candidates
+                WHERE user_id = ? AND status = ? AND dominio <> ''
+                GROUP BY dominio
+                ORDER BY total DESC, dominio
+                LIMIT 60
+                """,
+                (user_id, status),
+            ).fetchall()
+        ]
+
+
+def contar_painel_revisao(user_id, limiar):
+    """Contadores do painel: fila, nao sei, e a situacao dos vazados."""
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN status = 'pending' AND COALESCE(nota, 0) >= ?
+                       THEN 1 ELSE 0 END) AS novos,
+              SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pendentes,
+              SUM(CASE WHEN status = 'unsure' THEN 1 ELSE 0 END) AS nao_sei,
+              SUM(CASE WHEN status = 'not_me' THEN 1 ELSE 0 END) AS nao_e,
+              SUM(CASE WHEN status = 'official' THEN 1 ELSE 0 END) AS oficiais
+            FROM search_candidates WHERE user_id = ?
+            """,
+            (int(limiar), user_id),
+        ).fetchone()
+        situacoes = {
+            item["situacao"] or "no_ar": int(item["total"] or 0)
+            for item in conn.execute(
+                """
+                SELECT situacao, COUNT(*) AS total FROM leak_reports
+                WHERE user_id = ? GROUP BY situacao
+                """,
+                (user_id,),
+            ).fetchall()
+        }
+    return {
+        "novos": int((linha["novos"] if linha else 0) or 0),
+        "pendentes": int((linha["pendentes"] if linha else 0) or 0),
+        "nao_sei": int((linha["nao_sei"] if linha else 0) or 0),
+        "nao_e": int((linha["nao_e"] if linha else 0) or 0),
+        "oficiais": int((linha["oficiais"] if linha else 0) or 0),
+        "no_ar": situacoes.get("no_ar", 0),
+        "em_remocao": situacoes.get("em_remocao", 0),
+        "removidos": situacoes.get("removido", 0),
+    }
+
+
+def situacoes_leaks(user_id):
+    """Situacao de remocao por URL, para a fila de "No ar"."""
+    with conexao() as conn:
+        return {
+            linha["url"]: (linha["situacao"] or "no_ar")
+            for linha in conn.execute(
+                "SELECT url, situacao FROM leak_reports WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        }
+
+
+def atualizar_situacao_leak(user_id, url, situacao):
+    if situacao not in SITUACOES_REMOCAO:
+        raise ValueError("Situacao de remocao invalida.")
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            UPDATE leak_reports SET situacao = ?, situacao_em = ?
+            WHERE user_id = ? AND url = ?
+            """,
+            (situacao, _agora_utc(), user_id, url),
+        )
+        return cur.rowcount > 0
+
+
+def site_vazado_existe(user_id, url):
+    with conexao() as conn:
+        return (
+            conn.execute(
+                "SELECT 1 FROM leak_reports WHERE user_id = ? AND url = ?",
+                (user_id, url),
+            ).fetchone()
+            is not None
+        )
+
+
+def remover_site_vazado(user_id, url):
+    with conexao() as conn:
+        cur = conn.execute(
+            "DELETE FROM leak_reports WHERE user_id = ? AND url = ?",
+            (user_id, url),
+        )
+        return cur.rowcount > 0
+
+
+def ignorar_dominio(dominio):
+    dominio = (dominio or "").strip().lower()
+    if not dominio:
+        return False
+    with conexao() as conn:
+        conn.execute(
+            "INSERT INTO dominio_ignorado (dominio) VALUES (?)"
+            " ON CONFLICT (dominio) DO NOTHING",
+            (dominio,),
+        )
+    return True
+
+
+_COLUNAS_CANDIDATO = """
+    id, user_id, url, title, source, snippet, thumbnail, engine, phash, status,
+    created_at, execucao_id, url_normalizada, dominio, nota, motivos_json,
+    classificacao, primeira_vez_em, ultima_vez_em, novo_para_criadora,
+    chave_grupo, consulta_log_id, posicao_busca
+"""
+
+
+def contar_candidatos_dominio_status(user_id, dominio, status):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT COUNT(*) AS total FROM search_candidates
+            WHERE user_id = ? AND dominio = ? AND status = ?
+            """,
+            (user_id, dominio, status),
+        ).fetchone()
+    return int((linha["total"] if linha else 0) or 0)
+
+
 def _lista_json(valor):
     """Lista vinda de JSONB (PostgreSQL) ou de texto JSON (SQLite de teste)."""
     if isinstance(valor, list):
@@ -2437,7 +2740,8 @@ def obter_candidato(candidate_id, user_id):
         return conn.execute(
             """
             SELECT id, user_id, url, title, source, snippet, thumbnail, engine,
-                   phash, status, created_at
+                   phash, status, created_at, dominio, nota, motivos_json,
+                   chave_grupo, novo_para_criadora
             FROM search_candidates WHERE id = ? AND user_id = ?
             """,
             (candidate_id, user_id),

@@ -190,7 +190,7 @@ Não há limite mensal de consultas por usuário. A autenticação impede acesso
 anônimo, mas qualquer usuário cadastrado pode consumir as APIs; proteja também
 a chave e monitore os custos.
 
-## Fluxo de busca e validação (Valida)
+## Fluxo de busca e revisão
 
 1. Em `/busca-web`, o administrador escolhe a criadora, o provedor (SerpAPI ou
    TinyFish), os termos, os sites e o limite de consultas por execução
@@ -211,10 +211,13 @@ a chave e monitore os custos.
    a classificação (`provavel_vazamento`, `oficial`, `falso_positivo`,
    `indefinido`) ficam em `search_candidates`. Só entram na fila candidatos com
    nota a partir de `PONTUACAO_LIMIAR_REVISAO` (padrão 30).
-5. `/valida` deixou de consultar o Instagram: ela lista os candidatos por nota,
-   com os motivos, e mantém a revisão manual de sempre (**vazado**, **não sou
-   eu**, **oficial**). Rodar a busca de novo atualiza `ultima_vez_em` e não
-   apaga o status de revisão já dado.
+5. `/revisao` (a antiga Valida, que agora redireciona para cá) lista os
+   candidatos por nota, com os motivos em texto simples, um card por
+   `chave_grupo` e filtros de provedor, site, nota, data e ordem. As ações são
+   **É meu** (`leaked`), **Não é** (`not_me`) e **Não sei** (`unsure`), com
+   desfazer por 8 segundos. O painel `/` mostra os contadores da criadora e o
+   botão "Revisar N novos". Rodar a busca de novo atualiza `ultima_vez_em` e
+   não apaga o status de revisão já dado.
 6. A comparação de imagens por pHash continua no código, mas desligada por
    `COMPARACAO_IMAGEM_ATIVA=false`: nesse modo nenhuma miniatura é baixada,
    processada ou comparada e a SerpAPI também usa a pontuação por regras.
@@ -239,8 +242,9 @@ metadados que o buscador devolveu.
 O administrador revisa em `/dominios`, com motivos, contagens e `exemplo_url`,
 e escolhe o tipo ao aprovar. O seed inicial fica em
 `app/core/dominios_seed.yaml` (não no código) e as plataformas que nunca devem
-ser sugeridas em `dominio_ignorado`. Quando um candidato marcado na Valida é
-`leaked`, o domínio soma `n_confirmados`; `not_me`/`official` somam `n_falsos`;
+ser sugeridas em `dominio_ignorado`. Quando um candidato marcado na revisão é
+`leaked`, o domínio soma `n_confirmados`; `not_me`/`official` somam `n_falsos`
+(desfazer subtrai de volta);
 um domínio aprovado com mais falsos que confirmados após 10 revisões recebe
 `observacao = "revisar"` (nada é removido).
 
@@ -257,7 +261,7 @@ cota mensal. O botão só aparece quando `SERPAPI_API_KEY` está configurada; se
 uma conta e chave SerpApi, não há saldo que o site possa consultar.
 
 Fotos e sites oficiais podem ser adicionados em `/perfil-busca`. Referências
-antigas já vinculadas a contas continuam disponíveis para comparação na Valida.
+antigas já vinculadas a contas continuam disponíveis para comparação na análise.
 
 ## Testes com APIs do Instagram
 
@@ -281,7 +285,7 @@ Consulte a documentação da
 podem consumir créditos da mesma conta SerpApi configurada para a página anterior.
 ### Busca de vazamentos
 
-Em `/busca-web` (SerpApi), o card "Busca de vazamentos" combina nome e arroba da criadora com termos (ex.: vazado, leaked, naked) e sites (ex.: erome.com) editáveis, agrupados com `OR` em 1 a 3 consultas (1 crédito cada, só a primeira página). O custo é exibido antes de rodar. O período (dia, semana, mês, ano) é opcional; o padrão é "Qualquer data". Os resultados seguem para a Valida.
+Em `/busca-web` (SerpApi), o card "Busca de vazamentos" combina nome e arroba da criadora com termos (ex.: vazado, leaked, naked) e sites (ex.: erome.com) editáveis, agrupados com `OR` em 1 a 3 consultas (1 crédito cada, só a primeira página). O custo é exibido antes de rodar. O período (dia, semana, mês, ano) é opcional; o padrão é "Qualquer data". Os resultados seguem para a fila de revisão.
 
 ### Posts oficiais do Instagram
 

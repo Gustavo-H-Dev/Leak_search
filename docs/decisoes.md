@@ -271,3 +271,80 @@ coluna de verificação e nada foi inventado para simular uma.
 status, provedor, nº de buscas, novos, duração e erro). A contagem de novos da
 última execução aparece no card de perfis e no perfil de busca. A tela admin
 `/execucoes` continua sendo o histórico por consulta, sem mudança.
+
+## Fase 4 — Painel e fila de revisão (27/11/2026)
+
+### D26 — Mapeamento das ações para os status existentes
+
+As três ações da fila usam (quase) os status que já existiam em
+`search_candidates`:
+
+| Ação na tela | Status | Efeito |
+| --- | --- | --- |
+| **É meu** | `leaked` | entra em `leak_reports` como "no ar"; soma `n_confirmados` do domínio |
+| **Não é** | `not_me` | sai da fila; soma `n_falsos` do domínio |
+| **Não sei** | `unsure` (novo) | sai da fila de novos sem confirmar; não mexe nos contadores |
+
+`pending` continua sendo "novos", e `official` continua válido no banco (revisão
+antiga, conta como falso positivo); ele não aparece mais como botão na fila.
+
+O desfazer volta cada id ao status anterior, subtrai o feedback somado
+(`ajustar_feedback_dominio`, sem deixar contador negativo) e apaga o relato de
+vazamento que a própria ação criou — relatos que já existiam ficam.
+
+### D27 — Um card por `chave_grupo`, paginação por grupo
+
+A fila agrupa em Python (o mesmo álbum em sites diferentes vira um card com os
+outros links dentro) e pagina **grupos**, não linhas: 10 cards por página. Por
+isso a consulta traz até 2000 linhas filtradas e o corte acontece depois do
+agrupamento; é o suficiente para o volume atual e evita página com card
+quebrado no meio. A ordenação padrão é por nota; "mais recentes" usa
+`ultima_vez_em`.
+
+### D28 — Filtros e "abaixo do corte"
+
+Filtros: provedor (`engine`), site (`dominio`), nota mínima, data (7/30/90 dias)
+e ordem. A aba "Novos" aplica o limiar de revisão; `?abaixo=1` mostra só o que
+ficou abaixo dele, preservando o comportamento antigo da Valida. O link
+"abaixo do corte" aparece sempre que existir item escondido.
+
+### D29 — Ações sem recarregar, com desfazer de 8 segundos
+
+O formulário funciona sem JavaScript (POST + redirect). Com JavaScript, o POST
+vai por `fetch` e o card sai da lista sem recarregar; uma barra de "Desfazer"
+aparece por 8 segundos e, se usada, reverte status, contadores e relato. O botão
+que submeteu vai no `FormData` explicitamente — `new FormData(form)` sozinho não
+inclui o `status` do botão.
+
+### D30 — Ignorar domínio depois de três "Não é"
+
+Ao marcar "Não é", o servidor conta os `not_me` daquele domínio para a criadora.
+A partir de 3, a resposta sugere ignorar o domínio; a tela mostra o aviso com
+"Ignorar domínio" (grava em `dominio_ignorado`) e "Agora não". A decisão é
+sempre da criadora; nada é ignorado sozinho.
+
+### D31 — Link externo e conteúdo adulto
+
+Nenhum título é link direto. Abrir o site exige abrir o `<details>` "Abrir site
+(pode conter conteúdo adulto)", que explica que o destino é externo e não
+verificado, e só então mostra o link com `target="_blank"` e
+`rel="noopener noreferrer nofollow"`. Os links do mesmo álbum seguem a mesma
+regra.
+
+### D32 — Painel, remoções e privacidade
+
+`/` para cliente virou painel (contadores, última/próxima varredura e botão
+"Revisar N novos"); admin continua na home operacional. "No ar", "em remoção" e
+"removidos" vêm de uma coluna nova `leak_reports.situacao` (padrão `no_ar`); o
+card de "No ar" permite avançar a situação, sem página própria de remoções
+ainda. Toda consulta da fila usa o id da sessão (admin pode escolher a
+criadora); POST com id de outra conta responde 404, e há teste para os dois
+caminhos.
+
+### D33 — O que saiu da Valida
+
+`/valida` virou redirect 307 para `/revisao` e o template antigo foi removido.
+A ordenação por semelhança de imagem que existia só nessa tela não foi levada
+para a fila nova: a comparação por pHash continua no cálculo de pontuação e na
+tela de análise; a fila prioriza nota, data e agrupamento. O histórico por
+consulta em `/execucoes` não mudou.

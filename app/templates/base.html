@@ -10,16 +10,17 @@
   <link rel="stylesheet" href="/static/css/app.css">
   <script src="/static/js/ui.js" defer></script>
   <script src="/static/js/wizard.js" defer></script>
+  <script src="/static/js/revisao.js" defer></script>
 </head>
 {% from "componentes/_toast.html" import area_toast %}
 <body>
 {% set caminho = request.url.path %}
 {% set status_fila = request.query_params.get("status") %}
-{% set em_remocoes = caminho.startswith("/valida") and status_fila in ("leaked", "not_me") %}
+{% set em_remocoes = caminho.startswith("/revisao") and status_fila == "leaked" %}
 {% set itens_principais = [
   {"nome": "Painel", "href": "/", "icone": "painel", "ativo": caminho == "/"},
-  {"nome": "Revisão", "href": "/valida", "icone": "revisao", "ativo": caminho.startswith("/valida") and not em_remocoes},
-  {"nome": "Remoções", "href": "/valida?status=leaked", "icone": "remocoes", "ativo": em_remocoes},
+  {"nome": "Revisão", "href": "/revisao", "icone": "revisao", "ativo": caminho.startswith("/revisao") and not em_remocoes},
+  {"nome": "Remoções", "href": "/revisao?status=leaked", "icone": "remocoes", "ativo": em_remocoes},
   {"nome": "Histórico", "href": "/execucoes", "icone": "historico", "ativo": caminho.startswith("/execucoes"), "admin": true},
   {"nome": "Configurações", "href": "/perfil-busca", "icone": "config", "ativo": caminho.startswith("/perfil-busca") or caminho.startswith("/configuracoes")}
 ] %}

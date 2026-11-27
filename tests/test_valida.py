@@ -10,9 +10,9 @@ from app import db
 from app.core import candidatos, imagens
 from app.main import (
     _enviar_para_valida,
+    acao_de_revisao,
     app,
-    valida,
-    validar_candidato,
+    revisao,
 )
 
 
@@ -153,25 +153,33 @@ class ValidaTest(unittest.TestCase):
         )
         self.assertIn("2 publicações", resposta["mensagem"])
 
-    def test_pagina_ordena_atencao_possiveis_e_diferentes(self):
+    def test_fila_ordena_por_nota_e_mostra_as_tres_acoes(self):
         user_id = self.user_id
-        referencia = imagens.calcular_phash(_png("#cc5599"))
-        db.adicionar_hash_oficial(user_id, "https://example.com/perfil", referencia)
-        longe = format(int(referencia, 16) ^ ((1 << 40) - 1), "016x")
-        medio = format(int(referencia, 16) ^ ((1 << 14) - 1), "016x")
-        for url, phash in (
-            ("https://a.com/longe", longe),
-            ("https://a.com/medio", medio),
-            ("https://a.com/igual", referencia),
+        for url, nota in (
+            ("https://a.com/baixa", 40),
+            ("https://a.com/alta", 90),
+            ("https://a.com/media", 60),
         ):
-            db.adicionar_candidato(user_id, url, url, "", "", "", "serp", phash)
+            db.adicionar_candidato(user_id, url, url, "", "", "", "serp", "")
+        with db.conexao() as conn:
+            for url, nota in (
+                ("https://a.com/baixa", 40),
+                ("https://a.com/alta", 90),
+                ("https://a.com/media", 60),
+            ):
+                conn.execute(
+                    "UPDATE search_candidates SET nota = ?"
+                    " WHERE user_id = ? AND url = ?",
+                    (nota, user_id, url),
+                )
 
-        with patch.dict(os.environ, {"COMPARACAO_IMAGEM_ATIVA": "true"}):
-            corpo = valida(criar_request(user_id)).body.decode()
+        corpo = revisao(criar_request(user_id)).body.decode()
 
-        self.assertLess(corpo.index("a.com/igual"), corpo.index("a.com/medio"))
-        self.assertLess(corpo.index("a.com/medio"), corpo.index("a.com/longe"))
-        self.assertIn("Atenção", corpo)
+        self.assertLess(corpo.index("a.com/alta"), corpo.index("a.com/media"))
+        self.assertLess(corpo.index("a.com/media"), corpo.index("a.com/baixa"))
+        for rotulo in ("É meu", "Não é", "Não sei"):
+            self.assertIn(rotulo, corpo)
+        self.assertIn("pode conter conteúdo adulto", corpo)
 
     def test_validacao_vazado_e_oficial_atualizam_registros_do_perfil(self):
         user_id = self.user_id
@@ -179,8 +187,18 @@ class ValidaTest(unittest.TestCase):
         db.adicionar_candidato(user_id, "https://a.com/o", "Oficial", "", "", "", "serp", "b" * 16)
         ids = {c["url"]: c["id"] for c in db.listar_candidatos(user_id)}
 
-        validar_candidato(criar_request(user_id), ids["https://a.com/v"], "leaked", 0)
-        validar_candidato(criar_request(user_id), ids["https://a.com/o"], "official", 0)
+        acao_de_revisao(
+            criar_request(user_id),
+            ids=[ids["https://a.com/v"]],
+            status="leaked",
+            target_user_id=0,
+        )
+        acao_de_revisao(
+            criar_request(user_id),
+            ids=[ids["https://a.com/o"]],
+            status="official",
+            target_user_id=0,
+        )
 
         self.assertEqual(db.listar_sites_vazados(user_id)[0]["url"], "https://a.com/v")
         self.assertEqual(db.listar_paginas_oficiais(user_id)[0]["url"], "https://a.com/o")

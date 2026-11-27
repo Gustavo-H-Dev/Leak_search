@@ -41,6 +41,7 @@ from app.core import (
     perfis_monitorados as perfis_core,
     pontuacao,
     provedores_busca,
+    revisao as revisao_core,
     serpapi,
     sites_oficiais,
     tinyfish,
@@ -764,8 +765,21 @@ def _voltar_ao_formulario_edicao(criadora_id: int, mensagem: str):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    usuario = request.state.user
+    if usuario and usuario["role"] != "admin":
+        limiar = pontuacao.limiar_revisao()
+        return templates.TemplateResponse(
+            request,
+            "painel.html",
+            {
+                "titulo": "Painel",
+                "contadores": db.contar_painel_revisao(usuario["id"], limiar),
+                "agendamento": agendamento.estado(usuario["id"]),
+                "limiar": limiar,
+            },
+        )
     contexto = {"titulo": "Monitoramento de Vazamentos"}
-    if request.state.user and request.state.user["role"] == "admin":
+    if usuario and usuario["role"] == "admin":
         contexto["pendencias"] = _pendencias_de_operacao()
     return templates.TemplateResponse(request, "home.html", contexto)
 
@@ -1760,101 +1774,88 @@ def _buscar_postagens_instagram(alvo: dict) -> list[dict]:
     return posts
 
 
-@app.get("/valida", response_class=HTMLResponse)
-def valida(
+@app.get("/valida")
+def valida_legado(request: Request):
+    """A Valida virou a fila de revisao; links antigos continuam funcionando."""
+    destino = "/revisao"
+    if request.url.query:
+        destino = f"{destino}?{request.url.query}"
+    return RedirectResponse(destino, status_code=307)
+
+
+STATUS_FILA = ("pending", "unsure", "leaked", "not_me")
+
+
+def _inteiro(valor, padrao: int) -> int:
+    try:
+        return int(str(valor).strip())
+    except (TypeError, ValueError):
+        return padrao
+
+
+@app.get("/revisao", response_class=HTMLResponse)
+def revisao(
     request: Request,
     target_user_id: int = 0,
     status: str = "pending",
+    engine: str = "",
+    dominio: str = "",
+    nota: str = "",
+    abaixo: str = "",
+    dias: str = "0",
+    ordem: str = "nota",
+    pagina: str = "1",
     mensagem: str = "",
 ):
-    """Revisao dos candidatos ja coletados; nao consulta o Instagram."""
+    """Fila de revisao: um card por grupo, filtros, ordenacao e paginacao."""
     alvo = _usuario_alvo_busca(request, target_user_id)
-    if status not in STATUS_VALIDA:
+    if status not in STATUS_FILA:
         status = "pending"
-
-    comparacao = comparacao_imagem_ativa()
-    nota_minima = pontuacao.limiar_revisao()
-    referencias = _referencias_do_usuario(alvo) if comparacao else []
-    if comparacao:
-        for post in db.listar_postagens_instagram(alvo["id"]):
-            if post["phash"]:
-                referencias.append(
-                    {"phash": post["phash"], "origem": f"Instagram — {post['shortcode']}"}
-                )
-
-    # "Abaixo do corte" nao e um status no banco: e a mesma fila de pendentes
-    # que a nota minima esconde. Mostrar essa lista evita a impressao de fila
-    # vazia quando existe trabalho abaixo do limiar.
-    if status == "abaixo":
-        fila = (
-            []
-            if comparacao
-            else [
-                item
-                for item in db.listar_candidatos_revisao(alvo["id"], "pending", None)
-                if int(item["nota"] or 0) < nota_minima
-            ]
-        )
+    if ordem not in revisao_core.ORDENS:
+        ordem = "nota"
+    limiar = pontuacao.limiar_revisao()
+    filtro_abaixo = status == "pending" and bool((abaixo or "").strip())
+    nota_maxima = None
+    if filtro_abaixo:
+        nota_minima = None
+        nota_maxima = max(0, limiar - 1)
+    elif (nota or "").strip():
+        nota_minima = max(0, _inteiro(nota, limiar))
     else:
-        fila = db.listar_candidatos_revisao(
-            alvo["id"], status, None if comparacao else nota_minima
-        )
+        nota_minima = limiar if status == "pending" else None
+    dias_filtro = max(0, _inteiro(dias, 0))
+    desde_iso = (
+        (datetime.now(timezone.utc) - timedelta(days=dias_filtro)).isoformat()
+        if dias_filtro
+        else ""
+    )
 
-    candidatos = []
-    for candidato in fila:
-        item = dict(candidato)
-        motivos = item.get("motivos_json")
-        if isinstance(motivos, (list, dict)):
-            item["motivos"] = motivos if isinstance(motivos, list) else [motivos]
-        else:
-            try:
-                item["motivos"] = json.loads(motivos or "[]")
-            except (TypeError, ValueError):
-                item["motivos"] = []
-        item["novo"] = bool(item.get("novo_para_criadora"))
-        if comparacao:
-            melhor = candidatos_core.melhor_referencia(candidato["phash"], referencias)
-            distancia = melhor["distancia"] if melhor else None
-            listagem = sites_oficiais.pagina_de_listagem(candidato["url"])
-            item.update(
-                {
-                    "distancia": distancia,
-                    "pontuacao": (
-                        imagens.pontuacao(distancia)
-                        if distancia is not None
-                        else None
-                    ),
-                    "referencia": melhor["origem"] if melhor else "",
-                    "listagem": listagem,
-                    "nivel": (
-                        "diferente"
-                        if listagem
-                        else imagens.nivel_de_similaridade(distancia)
-                    ),
-                }
-            )
-        candidatos.append(item)
+    linhas = db.listar_candidatos_revisao_filtrada(
+        alvo["id"],
+        status=status,
+        nota_minima=nota_minima,
+        nota_maxima=nota_maxima,
+        engine=engine,
+        dominio=dominio,
+        desde_iso=desde_iso,
+        ordem=ordem,
+    )
+    grupos = revisao_core.agrupar(linhas)
+    total_paginas = max(1, -(-len(grupos) // revisao_core.POR_PAGINA))
+    pagina_atual = min(max(1, _inteiro(pagina, 1)), total_paginas)
+    inicio = (pagina_atual - 1) * revisao_core.POR_PAGINA
+    grupos_pagina = grupos[inicio : inicio + revisao_core.POR_PAGINA]
 
-    # O mesmo album em sites diferentes (bunkr.cr/a/<id> e
-    # bunkrsearch.com/albums/<id>) vira um item principal com duplicados.
-    principais = []
-    por_chave: dict[str, dict] = {}
-    for item in candidatos:
-        chave = item.get("chave_grupo") or ""
-        item["duplicados"] = []
-        if chave and chave in por_chave:
-            por_chave[chave]["duplicados"].append(item)
-            continue
-        if chave:
-            por_chave[chave] = item
-        principais.append(item)
-    candidatos = principais
-    if comparacao:
-        candidatos = candidatos_core.ordenar_por_atencao(candidatos)
-
+    contadores = db.contar_painel_revisao(alvo["id"], limiar)
+    contagens_fila = {
+        "pending": contadores["novos"],
+        "unsure": contadores["nao_sei"],
+        "leaked": contadores["no_ar"],
+        "not_me": contadores["nao_e"],
+    }
     return templates.TemplateResponse(
         request,
-        "valida.html",
+        "revisao.html",
         {
             "target_user": alvo,
             "target_user_id": alvo["id"],
@@ -1863,27 +1864,136 @@ def valida(
                 if request.state.user["role"] == "admin"
                 else []
             ),
-            "candidatos": candidatos,
-            "grupos": len(por_chave),
-            "pontuacao_atencao": imagens.pontuacao(imagens.LIMITE_PROVAVEL),
-            "pontuacao_possivel": imagens.pontuacao(imagens.LIMITE_POSSIVEL),
+            "grupos": grupos_pagina,
+            "total_grupos": len(grupos),
+            "total_candidatos": sum(len(grupo["ids"]) for grupo in grupos),
+            "pagina": pagina_atual,
+            "total_paginas": total_paginas,
             "status_atual": status,
-            "status_nomes": STATUS_VALIDA,
-            "classificacao_nomes": CLASSIFICACAO_NOMES,
-            "contagens": {
-                **db.contar_candidatos_por_status(alvo["id"]),
-                "abaixo": (
-                    0 if comparacao
-                    else db.contar_candidatos_abaixo_do_limiar(
-                        alvo["id"], nota_minima
-                    )
-                ),
+            "status_nomes": revisao_core.STATUS,
+            "contagens": contagens_fila,
+            "dominios": db.dominios_com_candidatos(alvo["id"], status),
+            "filtros": {
+                "engine": engine,
+                "dominio": dominio,
+                "nota": nota,
+                "dias": dias_filtro,
+                "ordem": ordem,
             },
-            "tem_referencias": bool(referencias),
+            "provedores": busca_provedores.PROVEDORES_NOMES,
+            "ordens": revisao_core.ORDENS,
+            "dias_filtro": revisao_core.DIAS_FILTRO,
+            "nota_minima": limiar,
             "mensagem": mensagem,
-            "comparacao_imagem_ativa": comparacao,
-            "nota_minima": nota_minima,
+            "acoes": revisao_core.ACOES,
+            "situacoes": db.situacoes_leaks(alvo["id"]),
+            "abaixo": db.contar_candidatos_abaixo_do_limiar(alvo["id"], limiar),
+            "filtro_abaixo": filtro_abaixo,
         },
+    )
+
+
+def _resposta_revisao(request: Request, dados: dict, destino: str):
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"ok": True, **dados})
+    return RedirectResponse(destino, status_code=303)
+
+
+@app.post("/revisao/acao", dependencies=_csrf())
+def acao_de_revisao(
+    request: Request,
+    ids: list[int] = Form([]),
+    status: str = Form(...),
+    target_user_id: int = Form(0),
+):
+    """Aplica "É meu", "Não é" ou "Não sei" em todos os itens do card."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    try:
+        resultado = revisao_core.aplicar(
+            alvo["id"], ids, status, request.state.user["id"]
+        )
+    except ValueError as falha:
+        if "application/json" in request.headers.get("accept", ""):
+            return JSONResponse({"ok": False, "erro": str(falha)}, status_code=400)
+        return RedirectResponse(
+            f"/revisao?target_user_id={alvo['id']}&mensagem={quote(str(falha))}",
+            status_code=303,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Candidato não encontrado.")
+    return _resposta_revisao(
+        request,
+        {
+            "mensagem": "Revisão salva.",
+            "grupo": {str(item): status for item in ids},
+            **resultado,
+        },
+        f"/revisao?target_user_id={alvo['id']}&mensagem={quote('Revisão salva.')}",
+    )
+
+
+@app.post("/revisao/desfazer", dependencies=_csrf())
+def desfazer_revisao(
+    request: Request,
+    anteriores: str = Form("{}"),
+    leaks_criados: str = Form("[]"),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    try:
+        mapa = json.loads(anteriores or "{}")
+        leaks = json.loads(leaks_criados or "[]")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Desfazer inválido.")
+    if not isinstance(mapa, dict):
+        raise HTTPException(status_code=400, detail="Desfazer inválido.")
+    revertidos = revisao_core.desfazer(alvo["id"], mapa, leaks or ())
+    return _resposta_revisao(
+        request,
+        {"mensagem": f"{revertidos} item(ns) restaurado(s).", "revertidos": revertidos},
+        f"/revisao?target_user_id={alvo['id']}&mensagem={quote('Revisão desfeita.')}",
+    )
+
+
+@app.post("/revisao/{candidato_id}/remocao", dependencies=_csrf())
+def atualizar_remocao(
+    request: Request,
+    candidato_id: int,
+    situacao: str = Form(...),
+    status: str = Form("leaked"),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    candidato = db.obter_candidato(candidato_id, alvo["id"])
+    if candidato is None:
+        raise HTTPException(status_code=404, detail="Candidato não encontrado.")
+    if candidato["status"] != "leaked":
+        raise HTTPException(
+            status_code=400, detail="Só um vazamento confirmado tem remoção."
+        )
+    if situacao not in db.SITUACOES_REMOCAO:
+        raise HTTPException(status_code=400, detail="Situação inválida.")
+    db.atualizar_situacao_leak(alvo["id"], candidato["url"], situacao)
+    return RedirectResponse(
+        f"/revisao?status=leaked&target_user_id={alvo['id']}"
+        f"&mensagem={quote('Situação da remoção atualizada.')}",
+        status_code=303,
+    )
+
+
+@app.post("/revisao/ignorar-dominio", dependencies=_csrf())
+def ignorar_dominio_da_revisao(
+    request: Request,
+    dominio: str = Form(...),
+    target_user_id: int = Form(0),
+):
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    if not db.ignorar_dominio(dominio):
+        raise HTTPException(status_code=400, detail="Domínio inválido.")
+    return RedirectResponse(
+        f"/revisao?target_user_id={alvo['id']}"
+        f"&mensagem={quote('Domínio ignorado nas próximas buscas.')}",
+        status_code=303,
     )
 
 
@@ -2035,58 +2145,6 @@ def atualizar_dominio_suspeito(
 @app.get("/candidatos-imagem")
 def candidatos_imagem_legado():
     return RedirectResponse("/valida", status_code=307)
-
-
-@app.post("/valida/{candidate_id}/status", dependencies=_csrf())
-def validar_candidato(
-    request: Request,
-    candidate_id: int,
-    status: str = Form(...),
-    target_user_id: int = Form(0),
-):
-    alvo = _usuario_alvo_busca(request, target_user_id)
-    if status not in {"leaked", "not_me", "official"}:
-        raise HTTPException(status_code=400, detail="Status de candidato inválido.")
-    candidato = db.obter_candidato(candidate_id, alvo["id"])
-    if candidato is None:
-        raise HTTPException(status_code=404, detail="Candidato não encontrado.")
-    db.atualizar_status_candidato(candidate_id, alvo["id"], status)
-    try:
-        dominios_core.registrar_feedback(candidato["url"], status)
-    except Exception:
-        logger.exception("Falha ao atualizar o feedback do domínio")
-    if status == "leaked":
-        db.adicionar_site_vazado(
-            alvo["id"],
-            request.state.user["id"],
-            candidato["url"],
-            candidato["title"],
-            candidato["source"],
-            candidato["snippet"],
-            candidato["thumbnail"],
-            candidato["engine"],
-            {},
-        )
-    elif status == "official":
-        url_oficial = pontuacao.normalizar_url(candidato["url"])
-        if url_oficial:
-            db.adicionar_pagina_oficial(
-                alvo["id"],
-                url_oficial,
-                pontuacao.dominio_de(url_oficial),
-                origem="revisao",
-            )
-        if candidato["phash"]:
-            db.adicionar_hash_oficial(
-                alvo["id"], candidato["url"], candidato["phash"]
-            )
-    if "application/json" in request.headers.get("accept", ""):
-        return JSONResponse({"mensagem": "Candidato atualizado."})
-    return RedirectResponse(
-        f"/valida?target_user_id={alvo['id']}"
-        f"&mensagem={quote('Candidato atualizado.')}",
-        status_code=303,
-    )
 
 
 @app.get(

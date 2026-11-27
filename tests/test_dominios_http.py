@@ -238,13 +238,14 @@ def test_feedback_pela_revisao_conta_e_marca_revisar(ambiente):
     ]
     assert len(candidatos) == 3
 
-    token = _csrf(cliente.get("/valida").text)
+    token = _csrf(cliente.get("/revisao").text)
     with patch.dict(os.environ, {"DOMINIOS_LIMITE_REVISOES": "2"}):
         for candidate_id, status in zip(candidatos, ("leaked", "not_me", "not_me")):
             resposta = cliente.post(
-                f"/valida/{candidate_id}/status",
+                "/revisao/acao",
                 data={
                     "csrf_token": token,
+                    "ids": [candidate_id],
                     "status": status,
                     "target_user_id": 0,
                 },

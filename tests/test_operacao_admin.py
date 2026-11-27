@@ -115,12 +115,12 @@ def test_valida_explica_fila_vazia_e_mostra_abaixo_do_corte(ambiente):
     _entrar(admin, "admin_operacao")
     limiar = pontuacao.limiar_revisao()
 
-    fila = admin.get(f"/valida?target_user_id={alvo}")
+    fila = admin.get(f"/revisao?target_user_id={alvo}")
     assert fila.status_code == 200
     assert "https://bunkr.cr/a/7W7gu1yU" in fila.text
-    assert "Abaixo do corte (1)" in fila.text
+    assert "abaixo da nota mínima" in fila.text
 
-    abaixo = admin.get(f"/valida?target_user_id={alvo}&status=abaixo")
+    abaixo = admin.get(f"/revisao?target_user_id={alvo}&abaixo=1")
     assert abaixo.status_code == 200
     assert "https://exemplo.example/ana-antigo" in abaixo.text
     assert "https://bunkr.cr/a/7W7gu1yU" not in abaixo.text

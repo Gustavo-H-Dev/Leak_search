@@ -431,6 +431,16 @@ def avaliar_dominios(
     return sugestoes
 
 
+def ajustar_feedback(url: str, confirmados: int, falsos: int) -> bool:
+    """Desfaz (ou refaz) o feedback do dominio quando a revisao e revertida."""
+    from app import db
+
+    dominio = normalizar_dominio(pontuacao.dominio_de(url))
+    if not dominio:
+        return False
+    return db.ajustar_feedback_dominio(dominio, confirmados, falsos)
+
+
 def registrar_feedback(url: str, status: str) -> bool:
     """Conta confirmados/falsos do domínio quando a revisão decide um candidato.
 

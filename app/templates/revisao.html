@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block titulo %}Revisão{% endblock %}
+{% block conteudo %}
+{% set consulta_base = "target_user_id=" ~ target_user_id ~ "&status=" ~ status_atual
+  ~ "&engine=" ~ filtros.engine ~ "&dominio=" ~ filtros.dominio
+  ~ "&nota=" ~ filtros.nota ~ "&dias=" ~ filtros.dias ~ "&ordem=" ~ filtros.ordem %}
+<div class="mx-auto grid w-full max-w-3xl gap-4 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Revisão</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      O que apareceu
+    </h1>
+    <p class="ds-card__texto">
+      Um card por site ou álbum. A nota é uma pista, não uma prova: quem decide
+      o que é seu é você. Abrir o site é sempre uma escolha sua.
+    </p>
+  </header>
+
+  {% if mensagem %}<p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>{% endif %}
+
+  {% if target_users %}
+  <form class="ds-card ds-form" method="get" action="/revisao">
+    <input type="hidden" name="status" value="{{ status_atual }}">
+    <div class="ds-campo">
+      <label class="ds-rotulo" for="revisao-target">Usuário</label>
+      <select class="ds-input" id="revisao-target" name="target_user_id">
+        {% for usuario in target_users %}
+        <option value="{{ usuario.id }}"{% if target_user_id == usuario.id %} selected{% endif %}>
+          {% if usuario.public_name and usuario.public_handle %}{{ usuario.public_name }} (@{{ usuario.public_handle }}) — {{ usuario.username }}{% else %}{{ usuario.username }} — perfil incompleto{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Selecionar</button>
+  </form>
+  {% endif %}
+
+  <nav class="flex flex-wrap gap-2" aria-label="Estado dos candidatos">
+    {% for chave, nome in status_nomes.items() %}
+    {% if chave != "official" %}
+    <a class="ds-btn ds-btn--pequeno {% if chave == status_atual %}ds-btn--primario{% else %}ds-btn--fantasma{% endif %}"
+       href="/revisao?target_user_id={{ target_user_id }}&status={{ chave }}"
+       {% if chave == status_atual %}aria-current="page"{% endif %}>
+      {{ nome }} ({{ contagens.get(chave, 0) }})
+    </a>
+    {% endif %}
+    {% endfor %}
+  </nav>
+
+  <form class="ds-card ds-form" method="get" action="/revisao" aria-label="Filtros da revisão">
+    <input type="hidden" name="status" value="{{ status_atual }}">
+    <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="filtro-provedor">Provedor</label>
+        <select class="ds-input" id="filtro-provedor" name="engine">
+          <option value="">Todos</option>
+          {% for chave, nome in provedores.items() %}
+          <option value="{{ chave }}"{% if filtros.engine == chave %} selected{% endif %}>{{ nome }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="filtro-dominio">Site</label>
+        <select class="ds-input" id="filtro-dominio" name="dominio">
+          <option value="">Todos</option>
+          {% for item in dominios %}
+          <option value="{{ item.dominio }}"{% if filtros.dominio == item.dominio %} selected{% endif %}>{{ item.dominio }} ({{ item.total }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="filtro-nota">Nota mínima</label>
+        <input class="ds-input" id="filtro-nota" name="nota" type="number" min="0" max="100" inputmode="numeric"
+               value="{{ filtros.nota }}" placeholder="{{ nota_minima }}">
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="filtro-dias">Data</label>
+        <select class="ds-input" id="filtro-dias" name="dias">
+          {% for valor, texto in dias_filtro %}
+          <option value="{{ valor }}"{% if filtros.dias == valor %} selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="filtro-ordem">Ordenar por</label>
+        <select class="ds-input" id="filtro-ordem" name="ordem">
+          {% for valor, texto in ordens.items() %}
+          <option value="{{ valor }}"{% if filtros.ordem == valor %} selected{% endif %}>{{ texto }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Filtrar</button>
+      <a class="ds-btn ds-btn--fantasma ds-btn--pequeno"
+         href="/revisao?target_user_id={{ target_user_id }}&status={{ status_atual }}">Limpar</a>
+    </div>
+  </form>
+
+  <div id="revisao-ignorar" class="ds-card" role="status" hidden>
+    <p class="ds-card__texto" id="revisao-ignorar-texto"></p>
+    <form class="flex flex-wrap gap-2" method="post" action="/revisao/ignorar-dominio">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <input type="hidden" name="dominio" id="revisao-ignorar-dominio" value="">
+      <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Ignorar domínio</button>
+      <button type="button" class="ds-btn ds-btn--fantasma ds-btn--pequeno" id="revisao-ignorar-nao">Agora não</button>
+    </form>
+  </div>
+
+  <div id="revisao-desfazer" class="ds-card" role="status" hidden>
+    <p class="ds-card__texto m-0" id="revisao-desfazer-texto">Revisão salva.</p>
+    <form class="mt-3 flex flex-wrap gap-2" method="post" action="/revisao/desfazer" id="revisao-desfazer-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <input type="hidden" name="anteriores" id="revisao-anteriores" value="{}">
+      <input type="hidden" name="leaks_criados" id="revisao-leaks" value="[]">
+      <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Desfazer</button>
+      <button type="button" class="ds-btn ds-btn--fantasma ds-btn--pequeno" id="revisao-desfazer-fechar">Fechar</button>
+    </form>
+  </div>
+
+  {% for grupo in grupos %}
+  {% set candidato = grupo.principal %}
+  <article class="ds-card min-w-0" data-card-revisao aria-labelledby="candidato-{{ candidato.id }}">
+    <header class="ds-card__cabecalho">
+      <div class="min-w-0">
+        <p class="ds-lista__texto m-0 break-words">
+          {{ candidato.dominio or "site" }} · {{ candidato.engine_nome }}
+          · {{ (candidato.created_at|string)[:10] }}
+          {% if candidato.novo %}· <strong>novo</strong>{% endif %}
+        </p>
+        <h2 class="ds-card__titulo mt-1 break-words" id="candidato-{{ candidato.id }}">
+          {{ candidato.title|truncate(140) }}
+        </h2>
+      </div>
+      <span class="shrink-0 rounded-lg border border-borda px-2 py-1 text-sm font-bold" title="Nota por regras">
+        {{ candidato.nota }}/100
+      </span>
+    </header>
+
+    {% if candidato.snippet %}
+    <p class="ds-card__texto break-words">{{ candidato.snippet|truncate(320) }}</p>
+    {% endif %}
+
+    {% if candidato.motivos %}
+    <ul class="m-0 grid gap-1 pl-5 text-sm text-texto-suave">
+      {% for motivo in candidato.motivos %}<li>{{ motivo }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <details class="mt-3">
+      <summary class="cursor-pointer text-sm font-semibold text-primaria-clara">
+        Abrir site (pode conter conteúdo adulto)
+      </summary>
+      <p class="ds-dica mt-2">
+        Você está saindo do Monitoramento. O site é externo, não é verificado
+        por nós e pode mostrar conteúdo adulto.
+      </p>
+      <a class="ds-btn ds-btn--secundario ds-btn--pequeno" href="{{ candidato.url }}"
+         target="_blank" rel="noopener noreferrer nofollow">
+        Abrir {{ candidato.dominio or "site" }} em nova aba
+      </a>
+    </details>
+
+    {% if grupo.outros %}
+    <details class="mt-2">
+      <summary class="cursor-pointer text-sm text-texto-suave">
+        Mesmo álbum em outros {{ grupo.outros|length }} site(s)
+      </summary>
+      <ul class="mt-2 grid gap-2 pl-5 text-sm">
+        {% for outro in grupo.outros %}
+        <li class="break-words">
+          {{ outro.dominio }} — {{ outro.nota }}/100 ·
+          <a href="{{ outro.url }}" target="_blank" rel="noopener noreferrer nofollow">abrir (conteúdo adulto)</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+
+    {% if status_atual == "leaked" %}
+    <form class="mt-4 flex flex-wrap items-end gap-2" method="post"
+          action="/revisao/{{ candidato.id }}/remocao">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      <input type="hidden" name="status" value="{{ status_atual }}">
+      <div class="ds-campo">
+        <label class="ds-rotulo" for="situacao-{{ candidato.id }}">Remoção</label>
+        <select class="ds-input" id="situacao-{{ candidato.id }}" name="situacao">
+          <option value="no_ar"{% if situacoes.get(candidato.url, "no_ar") == "no_ar" %} selected{% endif %}>No ar</option>
+          <option value="em_remocao"{% if situacoes.get(candidato.url) == "em_remocao" %} selected{% endif %}>Em remoção</option>
+          <option value="removido"{% if situacoes.get(candidato.url) == "removido" %} selected{% endif %}>Removido</option>
+        </select>
+      </div>
+      <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Atualizar</button>
+    </form>
+    {% else %}
+    <form class="mt-4 flex flex-wrap gap-2" method="post" action="/revisao/acao" data-revisao>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+      {% for id in grupo.ids %}
+      <input type="hidden" name="ids" value="{{ id }}">
+      {% endfor %}
+      {% for valor, rotulo, variante in acoes %}
+      <button type="submit" name="status" value="{{ valor }}"
+              class="ds-btn ds-btn--{{ variante }} ds-btn--pequeno">{{ rotulo }}</button>
+      {% endfor %}
+    </form>
+    <p class="ds-dica mt-2" data-erro role="status" aria-live="polite"></p>
+    {% endif %}
+  </article>
+  {% else %}
+  <section class="ds-card" aria-live="polite">
+    <h2 class="ds-card__titulo">Nada novo por aqui</h2>
+    {% if status_atual == "pending" %}
+    <p class="ds-card__texto">
+      Nenhum candidato novo com nota a partir de {{ nota_minima }}. Quando a
+      próxima varredura encontrar algo, ele aparece nesta fila.
+    </p>
+
+    {% elif status_atual == "leaked" %}
+    <p class="ds-card__texto">
+      Nenhum vazamento confirmado ainda. Marque "É meu" na fila de revisão e
+      ele entra aqui para acompanhar a remoção.
+    </p>
+    {% else %}
+    <p class="ds-card__texto">Nada nesta lista com os filtros atuais.</p>
+    {% endif %}
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/revisao?target_user_id={{ target_user_id }}&status=pending">Ver novos</a>
+  </section>
+  {% endfor %}
+
+  {% if status_atual == "pending" %}
+  <p class="ds-card__texto">
+    {% if filtro_abaixo %}
+    Mostrando os candidatos abaixo da nota mínima de {{ nota_minima }}.
+    <a href="/revisao?target_user_id={{ target_user_id }}&status=pending">Voltar para os novos</a>.
+    {% elif abaixo %}
+    Há {{ abaixo }} candidato(s) abaixo da nota mínima de {{ nota_minima }}.
+    <a href="/revisao?target_user_id={{ target_user_id }}&status=pending&abaixo=1">Ver abaixo do corte</a>.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if total_paginas > 1 %}
+  <nav class="flex flex-wrap items-center justify-between gap-2" aria-label="Paginação">
+    {% if pagina > 1 %}
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/revisao?{{ consulta_base }}&pagina={{ pagina - 1 }}">Anterior</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+    <span class="text-sm text-texto-suave">Página {{ pagina }} de {{ total_paginas }}</span>
+    {% if pagina < total_paginas %}
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/revisao?{{ consulta_base }}&pagina={{ pagina + 1 }}">Próxima</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+  </nav>
+  {% endif %}
+</div>
+{% endblock %}
