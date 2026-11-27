@@ -677,6 +677,8 @@
     }
     button { border-color: transparent; color: #21131a; background: var(--pink); font-weight: 650; cursor: pointer; }
     button:hover { background: var(--pink-light); }
+    button:disabled, .button:disabled { cursor: not-allowed; opacity: .55; }
+    button:disabled:hover { background: var(--pink); }
     button.button-danger { border-color: #754052; color: #ffd9e8; background: #422331; }
     button.button-danger:hover { border-color: #a74b70; background: #5a2c40; }
     :focus-visible { outline: 2px solid var(--pink-light); outline-offset: 3px; }

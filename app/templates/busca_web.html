@@ -214,6 +214,7 @@
           <span>Autorizo o envio da consulta ou da minha foto à SerpApi.</span>
         </label>
         <button id="endpoint-submit" type="submit" {% if not perfil_busca_completo or not vazamento_consultas %}disabled{% endif %}>Buscar vazamentos</button>
+        <p id="endpoint-aviso" class="api-status api-status-missing" role="alert" hidden></p>
       </form>
   </div>
 
@@ -240,6 +241,8 @@
   const endpoint = document.getElementById("vaz-api");
   const provedor = document.getElementById("vaz-provedor");
   const formEndpoint = document.getElementById("endpoint-form");
+  const botaoBusca = document.getElementById("endpoint-submit");
+  const avisoBusca = document.getElementById("endpoint-aviso");
   function atualizarEndpoint() {
     const tinyfish = provedor.value === "tinyfish";
     const texto = endpoint.value === "google_images" || endpoint.value === "google_images_light";
@@ -249,12 +252,30 @@
     document.getElementById("endpoint-related").hidden = tinyfish || texto || lens;
     endpoint.disabled = tinyfish;
     formEndpoint.action = "/buscar-vazamentos";
-    document.getElementById("endpoint-submit").disabled = tinyfish
-      ? {{ (not perfil_busca_completo or not vazamento_consultas or not sites_oficiais_usuario or not tinyfish_configurada)|tojson }}
+    botaoBusca.disabled = tinyfish
+      ? {{ (not perfil_busca_completo or not vazamento_consultas or not tinyfish_configurada)|tojson }}
       : texto
-      ? {{ (not perfil_busca_completo or not vazamento_consultas or not sites_oficiais_usuario)|tojson }}
-      : lens ? {{ (not perfil_busca_completo or target_user_id != current_user.id or not sites_oficiais_usuario)|tojson }}
-      : {{ (not perfil_busca_completo or not related_options or not sites_oficiais_usuario)|tojson }};
+      ? {{ (not perfil_busca_completo or not vazamento_consultas)|tojson }}
+      : lens ? {{ (not perfil_busca_completo or target_user_id != current_user.id)|tojson }}
+      : {{ (not perfil_busca_completo or not related_options)|tojson }};
+    // Nunca deixar um botao desabilitado sem dizer o motivo: era o que fazia o
+    // clique em "Buscar vazamentos" parecer nao fazer nada.
+    let motivo = "";
+    if (botaoBusca.disabled) {
+      if ({{ (not perfil_busca_completo)|tojson }}) {
+        motivo = "Complete o nome público e a arroba no perfil de busca para liberar a busca.";
+      } else if (tinyfish && {{ (not tinyfish_configurada)|tojson }}) {
+        motivo = "TinyFish indisponível: configure TINYFISH_API_KEY no servidor.";
+      } else if (lens && {{ (target_user_id != current_user.id)|tojson }}) {
+        motivo = "A busca com foto fica disponível apenas para o próprio usuário.";
+      } else if (!lens && {{ (not vazamento_consultas and not related_options)|tojson }}) {
+        motivo = "Cadastre ao menos um termo ou site para pesquisar.";
+      } else {
+        motivo = "Faltam informações para este endpoint. Revise as opções acima.";
+      }
+    }
+    avisoBusca.textContent = motivo;
+    avisoBusca.hidden = !motivo;
   }
   endpoint.addEventListener("change", atualizarEndpoint);
   provedor.addEventListener("change", atualizarEndpoint);
