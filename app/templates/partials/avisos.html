@@ -1,0 +1,70 @@
+{# Preferências de aviso + últimos e-mails.
+   Espera `preferencias_aviso`, `avisos_recentes`, `avisos_tipos`,
+   `smtp_configurado` e `csrf_token`. #}
+<section class="ds-card" aria-labelledby="avisos-titulo">
+  <header class="ds-card__cabecalho">
+    <div>
+      <h2 class="ds-card__titulo" id="avisos-titulo">Avisos por e-mail</h2>
+      <p class="ds-card__texto">
+        O e-mail é o primeiro canal. Ele leva só a contagem de novos, o site e o
+        título dos 3 de maior nota, e o link da fila (que pede login). Nada de
+        trecho, imagem ou endereço do site.
+      </p>
+    </div>
+  </header>
+
+  {% if not smtp_configurado %}
+  <p class="ds-alerta" role="status">
+    O envio ainda não está configurado no servidor
+    (<code>SMTP_HOST</code> e <code>SMTP_FROM</code>). As preferências ficam
+    salvas e os avisos esperam na fila.
+  </p>
+  {% endif %}
+
+  <form method="post" action="/configuracoes/avisos" class="ds-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <fieldset class="grid gap-2 border-0 p-0">
+      <legend class="ds-rotulo">Quando avisar</legend>
+      <label class="flex items-start gap-3 text-sm">
+        <input class="mt-1" type="checkbox" name="email_scan" value="1"
+               {% if preferencias_aviso.email_scan %}checked{% endif %}>
+        <span>A cada varredura que encontrar algo novo</span>
+      </label>
+      <label class="flex items-start gap-3 text-sm">
+        <input class="mt-1" type="checkbox" name="resumo_diario" value="1"
+               {% if preferencias_aviso.resumo_diario %}checked{% endif %}>
+        <span>Resumo diário (só quando houver algo novo)</span>
+      </label>
+      <label class="flex items-start gap-3 text-sm">
+        <input class="mt-1" type="checkbox" name="resumo_semanal" value="1"
+               {% if preferencias_aviso.resumo_semanal %}checked{% endif %}>
+        <span>Resumo semanal (só quando houver algo novo)</span>
+      </label>
+    </fieldset>
+    <p class="ds-dica">
+      Os avisos vão para o e-mail da conta ({{ current_user.email }}).
+      Outros canais podem entrar depois; por enquanto é só e-mail.
+    </p>
+    <button type="submit" class="ds-btn ds-btn--primario ds-btn--pequeno mt-2">
+      Salvar preferências
+    </button>
+  </form>
+
+  {% if avisos_recentes %}
+  <h3 class="ds-lista__titulo mt-4">Últimos avisos</h3>
+  <ul class="ds-lista">
+    {% for aviso in avisos_recentes %}
+    <li class="ds-lista__item">
+      <div class="min-w-0">
+        <p class="ds-lista__titulo break-words">{{ aviso.assunto }}</p>
+        <p class="ds-lista__texto">
+          {{ avisos_tipos.get(aviso.tipo, aviso.tipo) }} ·
+          {{ (aviso.criado_em|string)[:16]|replace("T", " ") }} UTC ·
+          {% if aviso.enviado_em %}enviado{% elif aviso.erro %}falhou: {{ aviso.erro }}{% else %}na fila{% endif %}
+        </p>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

@@ -11,7 +11,7 @@ import os
 import time
 
 from app import db
-from app.core import agendamento, consultas_vazamento, fluxo_busca
+from app.core import agendamento, avisos, consultas_vazamento, fluxo_busca
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,10 @@ def executar_busca_agendada(criadora_id: int, execucao_id: int, provedor: str = 
         erro_instagram=resumo.get("erro_instagram", ""),
     )
     db.registrar_duracao_execucao(execucao_id, (time.monotonic() - inicio) * 1000)
+    try:
+        avisos.notificar_novos(criadora_id, execucao_id)
+    except Exception:
+        logger.exception("Falha ao avisar sobre a execucao %s", execucao_id)
     return {
         "execucao_id": execucao_id,
         "status": status,

@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block titulo %}Linha do tempo{% endblock %}
+{% block conteudo %}
+<div class="mx-auto grid w-full max-w-4xl gap-5 py-2">
+
+  <header>
+    <span class="ds-eyebrow">Histórico</span>
+    <h1 class="mt-2 mb-1 text-[clamp(1.6rem,5vw,2.25rem)] font-bold leading-tight tracking-tight text-texto">
+      Linha do tempo
+    </h1>
+    <p class="ds-card__texto">
+      Cada link, do momento em que apareceu até a remoção. Só metadados: sem
+      trecho, imagem ou endereço do site.
+    </p>
+  </header>
+
+  {% if mensagem %}
+  <p class="ds-alerta ds-alerta--sucesso" role="status">{{ mensagem }}</p>
+  {% endif %}
+
+  {% if current_user.role == "admin" and target_users %}
+  <form class="ds-card flex flex-wrap items-end gap-3" method="get" action="/linha-do-tempo">
+    <div class="ds-campo min-w-0 flex-1">
+      <label class="ds-rotulo" for="target_user_id">Criadora</label>
+      <select class="ds-input" id="target_user_id" name="target_user_id">
+        {% for usuario in target_users %}
+        <option value="{{ usuario.id }}"{% if usuario.id == target_user_id %} selected{% endif %}>
+          {{ usuario.public_name or usuario.username }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="ds-btn ds-btn--secundario ds-btn--pequeno">Ver</button>
+  </form>
+  {% endif %}
+
+  <section aria-label="Indicadores" class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">{{ indicadores.removidos }}/{{ indicadores.confirmados }}</p>
+      <p class="ds-card__texto mb-0 mt-2">Links removidos</p>
+    </div>
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">{{ "%.0f"|format(indicadores.taxa_remocao * 100) }}%</p>
+      <p class="ds-card__texto mb-0 mt-2">Taxa de remoção</p>
+    </div>
+    <div class="ds-card min-w-0">
+      <p class="m-0 text-[1.6rem] font-bold leading-none text-texto">
+        {% if indicadores.tempo_medio_dias is not none %}{{ "%.1f"|format(indicadores.tempo_medio_dias) }} d{% else %}—{% endif %}
+      </p>
+      <p class="ds-card__texto mb-0 mt-2">Tempo médio até remover</p>
+    </div>
+  </section>
+
+  <section class="ds-card" aria-labelledby="reincidentes">
+    <h2 class="ds-card__titulo" id="reincidentes">Sites reincidentes</h2>
+    {% if indicadores.reincidentes %}
+    <ul class="ds-lista">
+      {% for site in indicadores.reincidentes %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ site.dominio }}</p>
+          <p class="ds-lista__texto">{{ site.links }} links confirmados</p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">Nenhum site com mais de um link confirmado.</p>
+    {% endif %}
+  </section>
+
+  <section class="ds-card" aria-labelledby="por-perfil">
+    <h2 class="ds-card__titulo" id="por-perfil">Por perfil</h2>
+    <p class="ds-card__texto">
+      Os totais de links são da conta inteira: a busca usa todos os perfis
+      ativos juntos, sem separar qual perfil achou cada link.
+    </p>
+    {% if perfis %}
+    <ul class="ds-lista">
+      {% for perfil in perfis %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ perfil.arroba }}</p>
+          <p class="ds-lista__texto">
+            {{ perfil.plataforma|capitalize }} · monitorado desde {{ (perfil.criado_em|string)[:10] }}
+            · {{ "ativo" if perfil.status == "ativo" else "pausado" }}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">Nenhum perfil monitorado ainda.</p>
+    {% endif %}
+  </section>
+
+  <section class="ds-card" aria-labelledby="por-link">
+    <header class="ds-card__cabecalho">
+      <div>
+        <h2 class="ds-card__titulo" id="por-link">Por link</h2>
+        <p class="ds-card__texto">
+          {{ total_linhas }} link(s) no histórico{% if total_linhas > linhas|length %}
+          · mostrando os {{ linhas|length }} mais recentes{% endif %}.
+        </p>
+      </div>
+    </header>
+
+    {% if linhas %}
+    <ul class="grid gap-3">
+      {% for item in linhas %}
+      <li class="rounded-xl border border-borda p-3">
+        <p class="ds-lista__texto m-0 break-words">
+          {{ item.dominio }} · <span class="text-xs">{{ item.url }}</span>
+        </p>
+        <p class="m-0 mt-1 break-words text-sm font-semibold text-texto">{{ item.titulo|truncate(120) }}</p>
+        <ol class="mt-2 grid gap-1 pl-5 text-sm text-texto-suave">
+          <li>Detectado: {{ (item.detectado_em|string)[:10] or "—" }}</li>
+          <li>
+            Revisado:
+            {% if item.revisado_em %}
+            {{ status_revisao.get(item.status_revisao, item.status_revisao) }} em {{ (item.revisado_em|string)[:10] }}
+            {% else %}—{% endif %}
+          </li>
+          <li>
+            Enviado:
+            {% if item.enviado_em %}
+            {{ (item.enviado_em|string)[:10] }}
+            {% if item.pedido_id %}· <a class="text-primaria-clara" href="/remocao/{{ item.pedido_id }}?target_user_id={{ target_user_id }}">pedido #{{ item.pedido_id }}</a>{% endif %}
+            {% else %}—{% endif %}
+          </li>
+          <li>
+            Removido:
+            {% if item.removido_em %}{{ (item.removido_em|string)[:10] }}
+            {% elif item.situacao == "removido" %}sim
+            {% else %}—{% endif %}
+          </li>
+        </ol>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">
+      Nada detectado ainda. Quando a busca encontrar algo, ele aparece aqui com
+      as quatro etapas.
+    </p>
+    {% endif %}
+  </section>
+
+  <div class="flex flex-wrap gap-2">
+    <a class="ds-btn ds-btn--secundario ds-btn--pequeno"
+       href="/linha-do-tempo.csv?target_user_id={{ target_user_id }}">Exportar CSV</a>
+    <a class="ds-btn ds-btn--secundario ds-btn--pequeno"
+       href="/linha-do-tempo.pdf?target_user_id={{ target_user_id }}">Exportar PDF</a>
+    <a class="ds-btn ds-btn--fantasma ds-btn--pequeno" href="/remocao?target_user_id={{ target_user_id }}">Remoções</a>
+  </div>
+
+  <section class="ds-card" aria-labelledby="avisos-hist">
+    <h2 class="ds-card__titulo" id="avisos-hist">Avisos enviados</h2>
+    {% if avisos %}
+    <ul class="ds-lista">
+      {% for aviso in avisos %}
+      <li class="ds-lista__item">
+        <div class="min-w-0">
+          <p class="ds-lista__titulo break-words">{{ aviso.assunto }}</p>
+          <p class="ds-lista__texto">
+            {{ avisos_tipos.get(aviso.tipo, aviso.tipo) }} ·
+            {% if aviso.enviado_em %}enviado em {{ (aviso.enviado_em|string)[:10] }}
+            {% elif aviso.erro %}falhou{% else %}na fila{% endif %}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="ds-card__texto">Nenhum aviso ainda.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

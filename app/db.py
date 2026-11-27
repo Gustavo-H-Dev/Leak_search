@@ -98,6 +98,7 @@ def iniciar_banco():
         _migrar_criadoras()
         _migrar_busca_provedores()
         _migrar_leak_reports()
+        _migrar_candidatos_revisao()
         try:
             with conexao() as conn:
                 conn.execute(
@@ -253,6 +254,29 @@ def iniciar_banco():
                 nota TEXT NOT NULL DEFAULT '',
                 criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS preferencia_aviso (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                email_scan INTEGER NOT NULL DEFAULT 1,
+                resumo_diario INTEGER NOT NULL DEFAULT 0,
+                resumo_semanal INTEGER NOT NULL DEFAULT 0,
+                ultimo_resumo_diario TEXT,
+                ultimo_resumo_semanal TEXT,
+                atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS aviso_email (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                tipo TEXT NOT NULL,
+                chave TEXT NOT NULL UNIQUE,
+                assunto TEXT NOT NULL,
+                corpo_texto TEXT NOT NULL DEFAULT '',
+                corpo_html TEXT NOT NULL DEFAULT '',
+                criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                enviado_em TEXT,
+                erro TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS aviso_email_pendente
+            ON aviso_email (user_id, enviado_em);
             CREATE TABLE IF NOT EXISTS image_candidates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -380,6 +404,7 @@ def iniciar_banco():
     _migrar_busca_provedores()
     _migrar_busca_execucao()
     _migrar_leak_reports()
+    _migrar_candidatos_revisao()
     _semear_dominios_iniciais()
 
 
@@ -558,6 +583,32 @@ def _iniciar_banco_postgresql():
             criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS preferencia_aviso (
+            user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            email_scan INTEGER NOT NULL DEFAULT 1,
+            resumo_diario INTEGER NOT NULL DEFAULT 0,
+            resumo_semanal INTEGER NOT NULL DEFAULT 0,
+            ultimo_resumo_diario TEXT,
+            ultimo_resumo_semanal TEXT,
+            atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS aviso_email (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            tipo TEXT NOT NULL,
+            chave TEXT NOT NULL UNIQUE,
+            assunto TEXT NOT NULL,
+            corpo_texto TEXT NOT NULL DEFAULT '',
+            corpo_html TEXT NOT NULL DEFAULT '',
+            criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            enviado_em TEXT,
+            erro TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS aviso_email_pendente ON aviso_email (user_id, enviado_em)",
         """
         CREATE TABLE IF NOT EXISTS image_candidates (
             id BIGSERIAL PRIMARY KEY,
@@ -826,6 +877,22 @@ def _migrar_leak_reports():
                     conn.execute(
                         f"ALTER TABLE leak_reports ADD COLUMN {coluna} {tipo}"
                     )
+
+
+def _migrar_candidatos_revisao():
+    """Data da revisao do candidato, para a linha do tempo."""
+    with conexao() as conn:
+        if usando_postgresql():
+            conn.execute(
+                "ALTER TABLE search_candidates ADD COLUMN IF NOT EXISTS reviewed_at TEXT"
+            )
+        else:
+            existentes = {
+                coluna["name"]
+                for coluna in conn.execute("PRAGMA table_info(search_candidates)")
+            }
+            if "reviewed_at" not in existentes:
+                conn.execute("ALTER TABLE search_candidates ADD COLUMN reviewed_at TEXT")
 
 
 def _migrar_busca_execucao():
@@ -2850,8 +2917,9 @@ def atualizar_status_candidato(candidate_id, user_id, status):
         raise ValueError("Status de candidato inválido.")
     with conexao() as conn:
         cur = conn.execute(
-            "UPDATE search_candidates SET status = ? WHERE id = ? AND user_id = ?",
-            (status, candidate_id, user_id),
+            "UPDATE search_candidates SET status = ?, reviewed_at = ?"
+            " WHERE id = ? AND user_id = ?",
+            (status, _agora_utc(), candidate_id, user_id),
         )
         return cur.rowcount > 0
 
@@ -3898,3 +3966,301 @@ def registrar_checagem_pedido(
                 (pedido_id, resumo),
             )
         return cur.rowcount > 0
+
+
+# --- Avisos, linha do tempo e indicadores -----------------------------------
+
+
+def obter_preferencia_aviso(user_id):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT user_id, email_scan, resumo_diario, resumo_semanal,
+                   ultimo_resumo_diario, ultimo_resumo_semanal, atualizado_em
+            FROM preferencia_aviso WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    if linha is None:
+        return {
+            "user_id": user_id,
+            "email_scan": 1,
+            "resumo_diario": 0,
+            "resumo_semanal": 0,
+            "ultimo_resumo_diario": None,
+            "ultimo_resumo_semanal": None,
+        }
+    return dict(linha)
+
+
+def salvar_preferencia_aviso(user_id, email_scan, resumo_diario, resumo_semanal):
+    with conexao() as conn:
+        conn.execute(
+            """
+            INSERT INTO preferencia_aviso
+                (user_id, email_scan, resumo_diario, resumo_semanal, atualizado_em)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (user_id) DO UPDATE SET
+                email_scan = excluded.email_scan,
+                resumo_diario = excluded.resumo_diario,
+                resumo_semanal = excluded.resumo_semanal,
+                atualizado_em = excluded.atualizado_em
+            """,
+            (
+                user_id,
+                1 if email_scan else 0,
+                1 if resumo_diario else 0,
+                1 if resumo_semanal else 0,
+                _agora_utc(),
+            ),
+        )
+
+
+def registrar_resumo_enviado(user_id, tipo, quando):
+    coluna = "ultimo_resumo_diario" if tipo == "resumo_diario" else "ultimo_resumo_semanal"
+    with conexao() as conn:
+        cur = conn.execute(
+            f"UPDATE preferencia_aviso SET {coluna} = ? WHERE user_id = ?",
+            (quando, user_id),
+        )
+        if cur.rowcount == 0:
+            conn.execute(
+                "INSERT INTO preferencia_aviso (user_id) VALUES (?)", (user_id,)
+            )
+            conn.execute(
+                f"UPDATE preferencia_aviso SET {coluna} = ? WHERE user_id = ?",
+                (quando, user_id),
+            )
+        return True
+
+
+def criar_aviso(user_id, tipo, chave, assunto, corpo_texto, corpo_html):
+    """Grava o aviso na caixa de saida; `chave` evita envio duplicado."""
+    with conexao() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO aviso_email
+                (user_id, tipo, chave, assunto, corpo_texto, corpo_html)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (chave) DO NOTHING
+            RETURNING id
+            """,
+            (user_id, tipo, chave, assunto, corpo_texto, corpo_html),
+        )
+        linha = cur.fetchone()
+    return linha["id"] if linha else None
+
+
+def listar_avisos_pendentes(limite=20):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT a.id, a.user_id, a.tipo, a.chave, a.assunto, a.corpo_texto,
+                   a.corpo_html, a.criado_em, u.email, u.email_verified
+            FROM aviso_email a JOIN users u ON u.id = a.user_id
+            WHERE a.enviado_em IS NULL AND a.erro = ''
+            ORDER BY a.id
+            LIMIT ?
+            """,
+            (int(limite),),
+        ).fetchall()
+
+
+def marcar_aviso_enviado(aviso_id):
+    with conexao() as conn:
+        conn.execute(
+            "UPDATE aviso_email SET enviado_em = ?, erro = '' WHERE id = ?",
+            (_agora_utc(), aviso_id),
+        )
+
+
+def marcar_aviso_erro(aviso_id, erro):
+    with conexao() as conn:
+        conn.execute(
+            "UPDATE aviso_email SET erro = ? WHERE id = ?",
+            ((erro or "")[:1000], aviso_id),
+        )
+
+
+def listar_avisos_usuario(user_id, limite=12):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT id, tipo, assunto, criado_em, enviado_em, erro
+            FROM aviso_email WHERE user_id = ?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (user_id, int(limite)),
+        ).fetchall()
+
+
+def candidatos_novos_da_execucao(execucao_id, limiar):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT url, dominio, title, nota, created_at
+            FROM search_candidates
+            WHERE execucao_id = ? AND COALESCE(nota, 0) >= ?
+            ORDER BY nota DESC, id
+            """,
+            (execucao_id, int(limiar)),
+        ).fetchall()
+
+
+def contar_novos_desde(user_id, desde_iso, limiar):
+    with conexao() as conn:
+        linha = conn.execute(
+            """
+            SELECT COUNT(*) AS total FROM search_candidates
+            WHERE user_id = ? AND COALESCE(nota, 0) >= ?
+              AND created_at >= ?
+            """,
+            (user_id, int(limiar), desde_iso),
+        ).fetchone()
+    return int((linha["total"] if linha else 0) or 0)
+
+
+def top_candidatos_desde(user_id, desde_iso, limiar, limite=3):
+    with conexao() as conn:
+        return conn.execute(
+            """
+            SELECT dominio, title, nota FROM search_candidates
+            WHERE user_id = ? AND COALESCE(nota, 0) >= ?
+              AND created_at >= ?
+            ORDER BY nota DESC, id
+            LIMIT ?
+            """,
+            (user_id, int(limiar), desde_iso, int(limite)),
+        ).fetchall()
+
+
+def _pedido_por_url(user_id):
+    with conexao() as conn:
+        linhas = conn.execute(
+            """
+            SELECT pi.url, p.id, p.status, p.criado_em, p.enviado_em,
+                   p.removido_em
+            FROM pedido_remocao_item pi
+            JOIN pedido_remocao p ON p.id = pi.pedido_id
+            WHERE p.user_id = ?
+            ORDER BY p.id
+            """,
+            (user_id,),
+        ).fetchall()
+    por_url = {}
+    for linha in linhas:
+        por_url[linha["url"]] = dict(linha)
+    return por_url
+
+
+def dados_linha_do_tempo(user_id):
+    """Um registro por link, juntando deteccao, revisao e pedido de remocao."""
+    with conexao() as conn:
+        candidatos = conn.execute(
+            """
+            SELECT url, dominio, title, status, created_at, primeira_vez_em,
+                   reviewed_at
+            FROM search_candidates WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchall()
+    linhas = {}
+    for candidato in candidatos:
+        linhas[candidato["url"]] = {
+            "url": candidato["url"],
+            "dominio": candidato["dominio"],
+            "titulo": candidato["title"],
+            "status_revisao": candidato["status"],
+            "detectado_em": candidato["primeira_vez_em"] or candidato["created_at"],
+            "revisado_em": candidato["reviewed_at"],
+            "confirmado_em": None,
+            "situacao": "",
+            "pedido_id": None,
+            "pedido_status": "",
+            "enviado_em": None,
+            "removido_em": None,
+            "pedido_criado_em": None,
+        }
+    for leak in _leaks_da_criadora(user_id):
+        registro = linhas.setdefault(
+            leak["url"],
+            {
+                "url": leak["url"],
+                "dominio": leak["dominio"],
+                "titulo": leak["title"],
+                "status_revisao": "leaked",
+                "detectado_em": leak["created_at"],
+                "revisado_em": leak["created_at"],
+                "confirmado_em": None,
+                "situacao": "",
+                "pedido_id": None,
+                "pedido_status": "",
+                "enviado_em": None,
+                "removido_em": None,
+                "pedido_criado_em": None,
+            },
+        )
+        registro["confirmado_em"] = leak["created_at"]
+        registro["situacao"] = leak["situacao"]
+    for url, pedido in _pedido_por_url(user_id).items():
+        registro = linhas.get(url)
+        if registro is None:
+            continue
+        registro["pedido_id"] = pedido["id"]
+        registro["pedido_status"] = pedido["status"]
+        registro["pedido_criado_em"] = pedido["criado_em"]
+        registro["enviado_em"] = pedido["enviado_em"]
+        registro["removido_em"] = pedido["removido_em"]
+    return sorted(
+        linhas.values(),
+        key=lambda item: item["revisado_em"]
+        or item["enviado_em"]
+        or item["detectado_em"]
+        or "",
+        reverse=True,
+    )
+
+
+def _dias_entre(inicio, fim):
+    try:
+        a = datetime.fromisoformat(str(inicio))
+        b = datetime.fromisoformat(str(fim))
+    except (TypeError, ValueError):
+        return None
+    if a.tzinfo is None:
+        a = a.replace(tzinfo=timezone.utc)
+    if b.tzinfo is None:
+        b = b.replace(tzinfo=timezone.utc)
+    return max(0.0, (b - a).total_seconds() / 86400)
+
+
+def indicadores_remocao(user_id):
+    linhas = dados_linha_do_tempo(user_id)
+    confirmados = [item for item in linhas if item["confirmado_em"]]
+    removidos = [
+        item
+        for item in confirmados
+        if item["situacao"] == "removido" or item["pedido_status"] == "removido"
+    ]
+    contagem = {}
+    for item in confirmados:
+        contagem[item["dominio"]] = contagem.get(item["dominio"], 0) + 1
+    reincidentes = sorted(
+        ({"dominio": dominio, "links": total} for dominio, total in contagem.items() if total >= 2),
+        key=lambda item: (-item["links"], item["dominio"]),
+    )
+    tempos = [
+        _dias_entre(item["pedido_criado_em"], item["removido_em"])
+        for item in removidos
+        if item["pedido_criado_em"] and item["removido_em"]
+    ]
+    tempos = [tempo for tempo in tempos if tempo is not None]
+    return {
+        "total_links": len(linhas),
+        "confirmados": len(confirmados),
+        "removidos": len(removidos),
+        "taxa_remocao": (len(removidos) / len(confirmados)) if confirmados else 0.0,
+        "reincidentes": reincidentes,
+        "tempo_medio_dias": (sum(tempos) / len(tempos)) if tempos else None,
+        "pedidos": len(listar_pedidos_remocao(user_id)),
+    }

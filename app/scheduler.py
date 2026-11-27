@@ -10,7 +10,7 @@ import os
 import time
 
 from app import db
-from app.core import agendamento
+from app.core import agendamento, avisos
 
 logger = logging.getLogger(__name__)
 INTERVALO = int(os.getenv("AGENDAMENTO_INTERVALO_SEGUNDOS", "30"))
@@ -22,7 +22,13 @@ def executar_ciclo() -> list[dict]:
     fechadas = db.marcar_execucoes_abandonadas(minutos=ABANDONADA_MINUTOS)
     if fechadas:
         logger.warning("Fechadas %s execucao(oes) interrompida(s)", fechadas)
-    return agendamento.processar_vencidos()
+    resultados = agendamento.processar_vencidos()
+    try:
+        avisos.processar_resumos()
+        avisos.enviar_pendentes()
+    except Exception:
+        logger.exception("Falha no ciclo de avisos")
+    return resultados
 
 
 def main() -> None:

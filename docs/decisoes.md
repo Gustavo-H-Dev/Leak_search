@@ -405,3 +405,83 @@ o formulário oficial de remoção de conteúdo pessoal da Pesquisa Google
 (confirmado na Central de Ajuda do Google em 27/11/2026). Ele é apresentado
 como caminho separado do pedido ao site e não substitui um ao outro; o link só
 abre dentro do aviso de site externo.
+
+## Fase 6 — Avisos e histórico (27/11/2026)
+
+### D40 — E-mail primeiro, com três interruptores
+
+As preferências ficam em **Configurações > Perfis** (bloco "Avisos por
+e-mail"): avisar a cada varredura com novidade, resumo diário e resumo
+semanal, cada um ligado ou desligado de forma independente. O canal é só
+e-mail nesta fase; outros canais entram depois, e a tela diz isso. O destino é
+sempre o e-mail da conta, e só e-mails confirmados recebem.
+
+### D41 — O e-mail não leva conteúdo sensível
+
+O corpo tem a contagem de novos, o **domínio e o título** dos três de maior
+nota e o link da fila. Não vai trecho, miniatura, URL do site nem imagem. O
+link é `.../revisao`, sem parâmetro nenhum: exige login e não expõe dados na
+URL. Há teste que falha se o trecho aparecer no texto ou no HTML e que exige
+que o link não tenha `?`.
+
+### D42 — SMTP como transporte neutro
+
+O envio usa `smtplib` com `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+`SMTP_PASSWORD`, `SMTP_FROM` e `SMTP_TLS`. Serve para Resend, Postmark,
+Mailgun, SendGrid, Amazon SES ou servidor próprio — muda só a credencial. Os
+avisos entram numa caixa de saída (`aviso_email`) com chave única por varredura
+ou período, então reentrega não duplica. Sem SMTP configurado, o aviso fica na
+fila (nada é perdido) e a tela avisa; falha de envio fica registrada no
+histórico do aviso. O worker chama o aviso logo depois de fechar a execução;
+falha de e-mail não derruba a busca.
+
+**Configuração de Brevo (serviço escolhido em 27/11/2026):**
+
+| Variável | Valor |
+| --- | --- |
+| `SMTP_HOST` | `smtp-relay.brevo.com` |
+| `SMTP_PORT` | `587` (STARTTLS) ou `465` (SSL; o app detecta e usa SSL) |
+| `SMTP_USER` | o login SMTP do painel Brevo (e-mail da conta ou `[ID]@smtp-brevo.com`) |
+| `SMTP_PASSWORD` | a **chave SMTP** (não a API key) |
+| `SMTP_FROM` | um remetente verificado em Senders & IPs |
+| `SMTP_TLS` | `1` (padrão; ignorado quando a porta é 465) |
+
+O compose já expõe essas variáveis (inclusive `SMTP_USE_SSL`, aceito como
+sinônimo de `SMTP_SSL`) e `SMTP_FROM`.
+
+O plano gratuito do Brevo permite 300 e-mails por dia, o que cobre avisos
+deste volume. Nenhuma credencial fica no repositório: tudo por variável de
+ambiente.
+
+### D43 — Resumos sem repetição
+
+O scheduler, a cada ciclo, monta resumos devidos: diário uma vez por dia e
+semanal a cada 7 dias, sempre a partir do último resumo registrado. Só cria
+aviso quando há candidato novo acima do limiar no período. `python -m
+app.core.avisos` também processa resumos e envia a fila, para rodar à mão.
+
+### D44 — Linha do tempo por link e por perfil
+
+Por link: detectado (primeira vez), revisado (data em que o status mudou —
+coluna nova `search_candidates.reviewed_at`), enviado e removido (eventos do
+pedido). Por perfil: plataforma, arroba, desde quando é monitorado e situação.
+A busca usa todos os perfis ativos juntos e não guarda qual perfil achou cada
+link, então os totais de links são da conta e a tela diz isso; nada é
+atribuído a um perfil por chute. Revisões antigas, sem `reviewed_at`, aparecem
+com "—".
+
+### D45 — Como os indicadores são calculados
+
+Sites reincidentes: domínios com 2 ou mais links confirmados. Tempo médio até
+a remoção: média de (removido_em − pedido criado_em) dos pedidos removidos,
+em dias. Taxa de remoção: links removidos ÷ links confirmados (não usa a fila
+inteira, que inclui candidato não revisado). Sem confirmados, a taxa é 0% e o
+tempo médio aparece como "—".
+
+### D46 — CSV e PDF só com metadados
+
+As duas exportações saem da mesma lista da linha do tempo e levam domínio,
+URL, título, status de revisão, situação, datas e pedido — nunca trecho,
+miniatura ou imagem. O CSV usa `;` e BOM para abrir no Excel em português. O
+PDF é gerado em Python puro (`app/core/pdf_simples.py`), sem dependência nova,
+com Helvetica e quebra de página; `file` reconhece o resultado como PDF 1.4.

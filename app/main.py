@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import logging
 import mimetypes
@@ -19,6 +21,7 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
+    Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,6 +32,7 @@ from app import db
 from app.core import (
     agendamento,
     autenticacao,
+    avisos as avisos_core,
     busca_provedores,
     busca_web,
     analise,
@@ -38,6 +42,7 @@ from app.core import (
     fluxo_busca,
     imagens,
     instagram,
+    pdf_simples,
     perfis_monitorados as perfis_core,
     pontuacao,
     provedores_busca,
@@ -1023,6 +1028,10 @@ def _contexto_perfis(request: Request, erro: str = "", mensagem: str = "") -> di
             if texto not in textos
         ],
         "limite_perfis": db.limite_perfis_monitorados(),
+        "preferencias_aviso": db.obter_preferencia_aviso(criadora_id),
+        "avisos_recentes": db.listar_avisos_usuario(criadora_id),
+        "avisos_tipos": avisos_core.TIPOS,
+        "smtp_configurado": avisos_core.configurado(),
         "agendamento": agendamento.estado(criadora_id),
         "status_textos": agendamento.STATUS_TEXTOS,
         "motivos": agendamento.MOTIVOS_FALHA,
@@ -1049,6 +1058,23 @@ def _voltar_para_perfis(chave: str, texto: str):
     return RedirectResponse(
         f"/configuracoes/perfis?{chave}={quote(texto)}", status_code=303
     )
+
+
+@app.post("/configuracoes/avisos", dependencies=_csrf())
+def salvar_preferencias_de_aviso(
+    request: Request,
+    email_scan: str = Form(""),
+    resumo_diario: str = Form(""),
+    resumo_semanal: str = Form(""),
+):
+    """Liga/desliga cada aviso por e-mail (o canal é sempre o e-mail)."""
+    db.salvar_preferencia_aviso(
+        request.state.user["id"],
+        bool(email_scan.strip()),
+        bool(resumo_diario.strip()),
+        bool(resumo_semanal.strip()),
+    )
+    return _voltar_para_perfis("mensagem", "Preferências de aviso salvas.")
 
 
 @app.post("/configuracoes/agendamento", dependencies=_csrf())
@@ -3626,4 +3652,153 @@ def excluir_contato_de_abuso(contato_id: int):
     db.excluir_contato_abuso(contato_id)
     return RedirectResponse(
         f"/contatos-abuso?mensagem={quote('Contato removido.')}", status_code=303
+    )
+
+
+# --- Linha do tempo, indicadores e exportacao -------------------------------
+
+
+def _data_curta(valor) -> str:
+    return str(valor)[:10] if valor else ""
+
+
+@app.get("/linha-do-tempo", response_class=HTMLResponse)
+def linha_do_tempo(
+    request: Request,
+    target_user_id: int = 0,
+    mensagem: str = "",
+):
+    """Historico por link (detectado, revisado, enviado, removido) e por perfil."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    linhas = db.dados_linha_do_tempo(alvo["id"])
+    return templates.TemplateResponse(
+        request,
+        "linha_do_tempo.html",
+        {
+            "titulo": "Linha do tempo",
+            "target_user": alvo,
+            "target_user_id": alvo["id"],
+            "target_users": (
+                db.listar_usuarios_para_busca()
+                if request.state.user["role"] == "admin"
+                else []
+            ),
+            "linhas": linhas[:200],
+            "total_linhas": len(linhas),
+            "indicadores": db.indicadores_remocao(alvo["id"]),
+            "perfis": db.listar_perfis_monitorados(alvo["id"]),
+            "avisos": db.listar_avisos_usuario(alvo["id"]),
+            "avisos_tipos": avisos_core.TIPOS,
+            "status_revisao": revisao_core.STATUS,
+            "status_pedido": remocao_core.STATUS,
+            "mensagem": mensagem,
+        },
+    )
+
+
+def _exportacao_linhas(user_id):
+    return db.dados_linha_do_tempo(user_id)
+
+
+@app.get("/linha-do-tempo.csv")
+def exportar_linha_do_tempo_csv(request: Request, target_user_id: int = 0):
+    """CSV com metadados apenas: sem trecho, imagem ou link do site."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    saida = io.StringIO()
+    escritor = csv.writer(saida, delimiter=";")
+    escritor.writerow(
+        [
+            "dominio",
+            "url",
+            "titulo",
+            "status_revisao",
+            "situacao_remocao",
+            "detectado_em",
+            "revisado_em",
+            "confirmado_em",
+            "pedido_id",
+            "status_pedido",
+            "enviado_em",
+            "removido_em",
+        ]
+    )
+    for item in _exportacao_linhas(alvo["id"]):
+        escritor.writerow(
+            [
+                item["dominio"],
+                item["url"],
+                item["titulo"],
+                revisao_core.STATUS.get(item["status_revisao"], item["status_revisao"]),
+                item["situacao"],
+                _data_curta(item["detectado_em"]),
+                _data_curta(item["revisado_em"]),
+                _data_curta(item["confirmado_em"]),
+                item["pedido_id"] or "",
+                remocao_core.STATUS.get(item["pedido_status"], item["pedido_status"]),
+                _data_curta(item["enviado_em"]),
+                _data_curta(item["removido_em"]),
+            ]
+        )
+    return Response(
+        content="\ufeff" + saida.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="monitoramento-metadados-{alvo["id"]}.csv"'
+            )
+        },
+    )
+
+
+@app.get("/linha-do-tempo.pdf")
+def exportar_linha_do_tempo_pdf(request: Request, target_user_id: int = 0):
+    """PDF com os mesmos metadados do CSV, para levar ao advogado."""
+    alvo = _usuario_alvo_busca(request, target_user_id)
+    indicadores = db.indicadores_remocao(alvo["id"])
+    blocos = [
+        "Conta: {} (@{})".format(
+            alvo["public_name"] or alvo["username"], alvo["public_handle"] or ""
+        ),
+        "Links: {} | confirmados: {} | removidos: {} | taxa: {:.0%}".format(
+            indicadores["total_links"],
+            indicadores["confirmados"],
+            indicadores["removidos"],
+            indicadores["taxa_remocao"],
+        ),
+        "",
+    ]
+    for item in _exportacao_linhas(alvo["id"]):
+        blocos.append(f"{item['dominio']} - {item['url']}")
+        blocos.append(f"Titulo: {item['titulo']}")
+        blocos.append(
+            "Deteccao: {} | revisao: {} em {} | confirmacao: {}".format(
+                _data_curta(item["detectado_em"]) or "-",
+                revisao_core.STATUS.get(item["status_revisao"], item["status_revisao"]),
+                _data_curta(item["revisado_em"]) or "-",
+                _data_curta(item["confirmado_em"]) or "-",
+            )
+        )
+        blocos.append(
+            "Pedido: {} | enviado: {} | removido: {}".format(
+                f"#{item['pedido_id']} ({remocao_core.STATUS.get(item['pedido_status'], item['pedido_status'])})"
+                if item["pedido_id"]
+                else "-",
+                _data_curta(item["enviado_em"]) or "-",
+                _data_curta(item["removido_em"]) or "-",
+            )
+        )
+        blocos.append("")
+    pdf = pdf_simples.gerar_pdf(
+        "Linha do tempo e pedidos de remocao",
+        pdf_simples.subtitulo_padrao(),
+        blocos,
+    )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="monitoramento-metadados-{alvo["id"]}.pdf"'
+            )
+        },
     )

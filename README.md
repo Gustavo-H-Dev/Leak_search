@@ -222,6 +222,23 @@ a chave e monitore os custos.
    `COMPARACAO_IMAGEM_ATIVA=false`: nesse modo nenhuma miniatura é baixada,
    processada ou comparada e a SerpAPI também usa a pontuação por regras.
 
+### Avisos e histórico
+
+Em **Configurações > Perfis** a criadora liga e desliga, separadamente, o
+aviso a cada varredura com novidade e os resumos diário e semanal. O e-mail
+leva só a contagem, o domínio e o título dos três de maior nota e o link da
+fila de revisão — sem trecho, imagem ou URL do site, e o link exige login e
+não carrega dados. O envio é por SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+`SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TLS`, `SMTP_SSL`), então serve para Brevo,
+Resend, Postmark, SES, Mailgun ou servidor próprio; sem SMTP os avisos ficam
+na fila. Para o Brevo: `smtp-relay.brevo.com`, porta 587 (ou 465 com SSL),
+usuário = login SMTP e senha = chave SMTP (não a API key).
+
+`/linha-do-tempo` mostra cada link em quatro etapas (detectado, revisado,
+enviado, removido), os perfis monitorados e os indicadores: sites
+reincidentes, tempo médio até a remoção e taxa de remoção. As exportações
+**CSV** e **PDF** levam só metadados, para a criadora levar ao advogado.
+
 ### Remoção e acompanhamento
 
 Cada link confirmado na fila tem o botão **Remover**, que abre
